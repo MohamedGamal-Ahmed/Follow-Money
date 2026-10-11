@@ -7,6 +7,7 @@
 - Route users to a separate public support repository while keeping application source private.
 - Add Arabic issue forms, a pull request template, ownership rules and monthly dependency update proposals.
 - Add build/lint/JVM CI, repository privacy checks and portable local validation commands.
+- Restrict automatic build-tool proposals to patch updates; larger AGP/Gradle upgrades require a coordinated compatibility review.
 - Replace historical project notes in the main README with current setup, usage and calculation boundaries. Private financial audits remain local.
 
 ## 0.2.0 — development

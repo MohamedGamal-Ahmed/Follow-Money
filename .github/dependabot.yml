@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 2
+    # AGP and the wrapper must be upgraded together after a compatibility review.
+    ignore:
+      - dependency-name: com.android.application
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: gradle-wrapper
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

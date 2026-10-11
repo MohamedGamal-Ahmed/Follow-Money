@@ -9,7 +9,7 @@ Source: `MohamedGamal-Ahmed/Follow-Money` — private. Support: `MohamedGamal-Ah
 - Read-only CI permissions; pinned checkout, Java and artifact actions.
 - Java/JVM checks, debug build, instrumentation APK compilation and Android lint on pushes/PRs to `main`.
 - Seven-day debug-build/lint/check-log artifacts. No device exports or database files are included.
-- Monthly Dependabot proposals for Gradle and GitHub Actions; no automatic merging.
+- Monthly Dependabot proposals for Gradle and GitHub Actions; no automatic merging. AGP and Gradle wrapper proposals are patch-only; coordinate larger toolchain upgrades manually.
 - Ignore rules for SDK paths, keys, builds, local financial audits and backups.
 
 ## First publication
