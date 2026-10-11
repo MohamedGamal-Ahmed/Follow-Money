@@ -2,6 +2,7 @@ name: "اقتراح تحسين / Feature request"
 description: "فكرة تحل مشكلة استخدام محددة"
 title: "[Feature] "
 labels: [enhancement]
+assignees: [MohamedGamal-Ahmed]
 body:
   - type: markdown
     attributes:

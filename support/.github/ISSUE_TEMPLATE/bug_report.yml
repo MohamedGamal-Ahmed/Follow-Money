@@ -2,6 +2,7 @@ name: "الإبلاغ عن مشكلة / Bug report"
 description: "مشكلة في العمليات أو الحسابات أو الواجهة"
 title: "[Bug] "
 labels: [bug]
+assignees: [MohamedGamal-Ahmed]
 body:
   - type: markdown
     attributes:
