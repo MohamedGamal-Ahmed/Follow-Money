@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "الإبلاغ عن مشكلة في Follow Money"
+    url: "https://github.com/MohamedGamal-Ahmed/Follow-Money-Support/issues/new?template=bug_report.yml"
+    about: "مركز الدعم العام للعملاء والمستخدمين. استخدم بيانات تجريبية."
+  - name: "اقتراح تحسين"
+    url: "https://github.com/MohamedGamal-Ahmed/Follow-Money-Support/issues/new?template=feature_request.yml"
+    about: "اشرح المشكلة اللي محتاج تحلها والنتيجة المطلوبة."

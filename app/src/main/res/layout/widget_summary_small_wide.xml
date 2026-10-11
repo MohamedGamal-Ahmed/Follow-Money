@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The small widget uses the extra horizontal space when the user widens it. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center_vertical"
+    android:layoutDirection="rtl" android:background="@drawable/widget_background" android:padding="8dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="wrap_content" android:orientation="vertical" android:paddingEnd="10dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="18dp" android:orientation="horizontal" android:gravity="center_vertical">
+                <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_logo_mark" android:importantForAccessibility="no" />
+                <TextView android:id="@+id/widget_updated" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="5dp"
+                    android:text="@string/widget_today_currency" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" />
+            </LinearLayout>
+            <TextView android:id="@+id/widget_remaining" android:layout_width="match_parent" android:layout_height="27dp" android:gravity="center_vertical"
+                android:text="@string/widget_preview_remaining_short" android:textSize="18sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="12sp" android:autoSizeMaxTextSize="18sp" android:autoSizeStepGranularity="1sp"
+                android:textColor="#FFFFFF" android:fontFamily="sans-serif-medium" android:singleLine="true" android:ellipsize="end" />
+            <TextView android:id="@+id/widget_amount" android:layout_width="match_parent" android:layout_height="18dp" android:gravity="center_vertical"
+                android:text="@string/widget_preview_spent_short" android:textSize="10sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="8sp" android:autoSizeMaxTextSize="10sp" android:autoSizeStepGranularity="1sp"
+                android:textColor="#B9D3C8" android:singleLine="true" android:ellipsize="end" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:paddingStart="10dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_rolling_week_label" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" />
+            <TextView android:id="@+id/widget_week" android:layout_width="match_parent" android:layout_height="19dp"
+                android:text="@string/widget_preview_week_amount" android:textSize="13sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="9sp" android:autoSizeMaxTextSize="13sp" android:autoSizeStepGranularity="1sp"
+                android:textColor="#FFFFFF" android:singleLine="true" android:ellipsize="end" />
+            <TextView android:id="@+id/widget_month_label" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_month_label" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" />
+            <TextView android:id="@+id/widget_month" android:layout_width="match_parent" android:layout_height="19dp"
+                android:text="@string/widget_preview_month_amount" android:textSize="13sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="9sp" android:autoSizeMaxTextSize="13sp" android:autoSizeStepGranularity="1sp"
+                android:textColor="#FFFFFF" android:singleLine="true" android:ellipsize="end" />
+        </LinearLayout>
+    </LinearLayout>
+    <ProgressBar android:id="@+id/widget_progress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="4dp"
+        android:layout_marginTop="4dp" android:max="100" android:progressDrawable="@drawable/widget_progress" />
+    <ProgressBar android:id="@+id/widget_progress_over" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="4dp"
+        android:layout_marginTop="4dp" android:max="100" android:progress="100" android:progressDrawable="@drawable/widget_progress_over" android:visibility="gone" />
+</LinearLayout>

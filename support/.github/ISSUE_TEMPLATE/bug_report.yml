@@ -1,0 +1,99 @@
+name: "الإبلاغ عن مشكلة / Bug report"
+description: "مشكلة في العمليات أو الحسابات أو الواجهة"
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        اكتب خطوات واضحة تساعدنا نكرر المشكلة. البلاغات هنا عامة؛ يلزم حساب GitHub للإرسال، ولا تحتاج دعوة.
+        لا ترفع قاعدة البيانات أو رسائل البنك الأصلية أو OTP أو أرقام الحسابات والبطاقات أو اسم/هاتف شخص آخر.
+        استخدم أمثلة مصطنعة، واخفِ البيانات الشخصية من صور الشاشة.
+  - type: dropdown
+    id: area
+    attributes:
+      label: "المشكلة فين؟"
+      options:
+        - "التقاط SMS أو إشعارات الدفع"
+        - "التكرار أو التحويلات أو الاسترداد"
+        - "الأرصدة والحسابات"
+        - "الالتزامات والأقساط"
+        - "الميزانية أو التحليلات"
+        - "الويدجت"
+        - "الإعدادات أو الواجهة"
+        - "توقف التطبيق أو مشكلة أخرى"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: "إيه اللي حصل؟"
+      description: "النتيجة الفعلية ورسالة الخطأ، باستخدام بيانات تجريبية."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: "كنت متوقع إيه؟"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "خطوات تكرار المشكلة"
+      placeholder: |
+        1. افتح ...
+        2. اضغط ...
+        3. النتيجة ...
+    validations:
+      required: true
+  - type: input
+    id: app_version
+    attributes:
+      label: "نسخة Follow Money"
+      description: "تظهر في الإعدادات ← المساعدة وعن التطبيق."
+      placeholder: "0.2.0 (2)"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: "نوع الموبايل"
+      placeholder: "Samsung Galaxy S24 / Pixel 8"
+    validations:
+      required: true
+  - type: input
+    id: android_version
+    attributes:
+      label: "نسخة Android"
+      placeholder: "Android 16 (API 36)"
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: "المشكلة بتتكرر قد إيه؟"
+      options:
+        - "كل مرة"
+        - "أحيانًا"
+        - "حصلت مرة واحدة"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "صورة أو مثال تجريبي (اختياري)"
+      description: "اسحب صورة بعد إخفاء الأسماء والأرصدة وأرقام الحسابات والخلفيات الشخصية. لمشاكل التحويل اذكر نوع الحركة والعملة ومبلغًا تجريبيًا."
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: "بيانات النسخة والجهاز (اختياري)"
+      description: "زر الإبلاغ في التطبيق يملأها؛ لا تضف logcat كاملًا أو بيانات مالية."
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: "مراجعة الخصوصية"
+      options:
+        - label: "راجعت البلاغ والصور وأزلت الرسائل الأصلية والبيانات الشخصية."
+          required: true

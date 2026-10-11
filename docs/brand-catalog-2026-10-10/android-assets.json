@@ -1,0 +1,317 @@
+[
+  {
+    "entity_id": "bank_misr",
+    "resource": "brand_bank_misr",
+    "original_sha256": "08fe2335d5b4017975254e0306191c73c268d4f00bd32cbe717d63aac74a7818",
+    "output_sha256": "4f379e70171b3ca16d7ee4f4873e076767f49bee47ade3106964221e1bb025c8",
+    "preserved_existing": false,
+    "source_page": "https://www.banquemisr.com/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "qnb",
+    "resource": "brand_qnb",
+    "original_sha256": "7011f881057545a97ce90e79ee139cb0c52239e6801370e196045aed0c884530",
+    "output_sha256": "6415028812d6b0a1009bc61c7475338dd1f6af2d53518846ecba888d01f09b35",
+    "preserved_existing": false,
+    "source_page": "https://www.qnb.com.eg/sites/qnb/qnbegypt/en/enbrandunification.html",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "fabmisr",
+    "resource": "brand_fabmisr",
+    "original_sha256": "567d3e7117d396daaffb5a4091f84fa1f22a56d323ff7381d47de577ef734b3d",
+    "output_sha256": "714630fe5b87cb9450cc6dade53f3a3e2b61c85364d6b7ef5cedee0eb17e4a79",
+    "preserved_existing": false,
+    "source_page": "https://www.fabmisr.com.eg/en/personal-banking",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "hsbc",
+    "resource": "brand_hsbc",
+    "original_sha256": "c54ff461737c5f44be46d9d1f9e4b3a64db412af82d795736f78b9bc3298ca2c",
+    "output_sha256": "c0f4de59487fe2d8af7df033443d7b2288e46be9d11a4355036792379f16f69f",
+    "preserved_existing": false,
+    "source_page": "https://www.hsbc.com/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "alexbank",
+    "resource": "brand_alexbank",
+    "original_sha256": "ff3a5bfa697284ef39d74d84af9f70e63fbe94110924dc59e6e0d080f294fe25",
+    "output_sha256": "7b8df3fce45cc2df71d602eba54282b27dcf65f155cbce3468e134bd1a542c07",
+    "preserved_existing": false,
+    "source_page": "https://www.alexbank.com/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "adib",
+    "resource": "brand_adib",
+    "original_sha256": "ab679b1dec656025e8c2d550a434a1113eb5db95027501e224926e139377d829",
+    "output_sha256": "fed2382a11667db8701ef5ae469962d4b427c00a8ed2500c825d767c969f6d54",
+    "preserved_existing": false,
+    "source_page": "https://www.adib.eg/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "saib",
+    "resource": "brand_saib",
+    "original_sha256": "2a4f46b9effc45af443255133ea87402c09f2bb8813f4449dfc30b096ad2e672",
+    "output_sha256": "6f2ff5e9a540ed23268b97a206f134b0fab995f1f7354680071b680607046643",
+    "preserved_existing": false,
+    "source_page": "https://www.saib.com.eg/en/personal/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "abc",
+    "resource": "brand_abc",
+    "original_sha256": "586f03f01e5cd40accf6194950d24601ed480e3f68d778106d0633a732b4e6b5",
+    "output_sha256": "adbf1a92f96fffbf41368175f360338ce53761a4c0d26cc7c742f87d2bf302fa",
+    "preserved_existing": false,
+    "source_page": "https://www.bank-abc.com/en/CountrySites/Egypt",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "banknxt",
+    "resource": "brand_banknxt",
+    "original_sha256": "37828d1d6a43e60c60df6c7ad047614b500dae8eebab9a4e4d386a0f43ea6fec",
+    "output_sha256": "d3befaad102340e79b461e3a77949b220213a56c389d9351ea390c8bddc750a5",
+    "preserved_existing": false,
+    "source_page": "https://www.banknxteg.com/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "kfh",
+    "resource": "brand_kfh",
+    "original_sha256": "8afee3e04713078b26849462ef61b25620c1d8ebad5a1b6eca8c4d505b7cc1dd",
+    "output_sha256": "b7f52b5cbce46e5d141c4b864e7b8f8aed4b93079d3e990d50efe5c493e15a80",
+    "preserved_existing": false,
+    "source_page": "https://www.eg.kfh.com/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "ca",
+    "resource": "brand_ca",
+    "original_sha256": "c0c98ec43db1ab158394781babf5cc8365a0f400037303bb5c857562a6938453",
+    "output_sha256": "a43c20cb8ddac38aef044e148f555f356a1d88c9995dd7820e1b9db47ce8a605",
+    "preserved_existing": false,
+    "source_page": "https://www.ca-egypt.com/en/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "starbucks",
+    "resource": "brand_starbucks",
+    "original_sha256": "b12ac9042b77a04d88f28e5be655719dd1e321b0b700ea5a280df4e1ca8c23c8",
+    "output_sha256": "6e406efcd60e66791a273e95cde191eed45210504e557328791ceb7e35d57caa",
+    "preserved_existing": true,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/starbucks.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "carrefour",
+    "resource": "brand_carrefour",
+    "original_sha256": "e45ceec22b7f77b85907eca62eae5e06b680d13f280953a77f723a2f7a599313",
+    "output_sha256": "6a646abb8c7dd25a44e46f002c5131d78d19e9d928b16a7adda05c0d1720ba7b",
+    "preserved_existing": true,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/carrefour.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "mcdonalds",
+    "resource": "brand_mcdonalds",
+    "original_sha256": "35c203615d2d5d61184ea1f4ded91ebbf329a59e7e2d52e0a640f3b8fd8b740a",
+    "output_sha256": "c49482a602c9f208584a89a222aa54ba915761ee86592427bf7ecbe0e62f4bf5",
+    "preserved_existing": true,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/mcdonalds.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "kfc",
+    "resource": "brand_kfc",
+    "original_sha256": "40633083f981957fcb5ee91642785474c188e4c6468143c5e5d240448e3f4b9e",
+    "output_sha256": "c193c0a5981f7039ca283b8bf89a3f682cb2ec2f693ba73ba62aac2c8ccb34a1",
+    "preserved_existing": true,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/kfc.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "uber",
+    "resource": "brand_uber",
+    "original_sha256": "8e580232236d43c715637618ce31621f2afc802a22af9b12706dc153c6a52002",
+    "output_sha256": "161c47c1f87e029188efed76b0ba5121a6ceab62e3398cf80ca528135848f547",
+    "preserved_existing": true,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/uber.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "netflix",
+    "resource": "brand_netflix",
+    "original_sha256": "67dbc495988bd5667a09ed4f56e14db4070a44c7a74e297b146c229f70fd6f6e",
+    "output_sha256": "1663e9c594c8a1fc453d6fa87c47214c6a4fadeb282a12eb4022b60c544fa101",
+    "preserved_existing": true,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/netflix.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "spotify",
+    "resource": "brand_spotify",
+    "original_sha256": "b9ec9bec7769c35643981586d6ea0d675aaf3871b32f8a291bcac7a87fff0bc1",
+    "output_sha256": "eaee65b4b209775dfec980e276d50bdf1cd21ffadb9a7e9aae250ab71f590735",
+    "preserved_existing": true,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/spotify.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "ikea",
+    "resource": "brand_ikea",
+    "original_sha256": "556365e562c933b6296c3480902ca6e1921ba4265030c49c27869fca5044f7d8",
+    "output_sha256": "178bd901c89e4357c785c2c277cc8f1f3640f9de6c25bf09f39e358deae8f964",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/ikea.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "shell",
+    "resource": "brand_shell",
+    "original_sha256": "d3a4b69b3437e4e94ac7a974c2d3b9780a57cdbf82ff57e2f2558fb38d03d7cf",
+    "output_sha256": "a3e11cf77a05bac841d1f2530d159d40d974c9b633184897228dc38403cd1b9a",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/shell.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "airbnb",
+    "resource": "brand_airbnb",
+    "original_sha256": "04afb2a1db3f619be9030b38fd43440034a58db16adc8fed49de87b90b9e2778",
+    "output_sha256": "b9b19e0f94b3741f35de11cbcb15fa7164e9a5c090b728200239f38bdd8a8d4d",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/airbnb.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "bookingdotcom",
+    "resource": "brand_bookingdotcom",
+    "original_sha256": "53e9239bd4be2035ae34215e2946f1e7ffca3fb64bc551075237b762aa164ad3",
+    "output_sha256": "f09b6f1f4932c26061d2b43bb40e2e9e782a1faf6c8f13bdee8d3dd7b2b768b7",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/bookingdotcom.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "apple",
+    "resource": "brand_apple",
+    "original_sha256": "2a1509dccd25e6d2bc7a11a8e52941077e1a48555e192ce638699b9f083c2a7c",
+    "output_sha256": "bcba1b39d1caeda7eb1092fcf6492e4d849554a5e3e1f06d426fbefb4930793c",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/apple.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "samsung",
+    "resource": "brand_samsung",
+    "original_sha256": "4a241ca8ebab6e71883b172acb9fb454efa69f308e4f2c31ec80668aeb6627d9",
+    "output_sha256": "59549c63fcb96d14570b42eb6ea5083258b66ce57bdf079a788013feb751d56a",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/samsung.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "youtube",
+    "resource": "brand_youtube",
+    "original_sha256": "5038808acbbc4e6edda16cbeb1cc6dec80e4e4ee4e227e039c41229fa222aa8c",
+    "output_sha256": "19753d305365a641dd8635e13496912f7b19bc6648c338be9bdbab39cee0319f",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/youtube.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "vodafone",
+    "resource": "brand_vodafone",
+    "original_sha256": "34f76381fbc56f72a21eec2f838650b206a1e8a8e669859e932b103f126ae2da",
+    "output_sha256": "30b74141cb570648a63242dc3632707a37ff93b5d7da007344f6f1c4c178ea10",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/vodafone.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "orange",
+    "resource": "brand_orange",
+    "original_sha256": "dad997a480567b26e7e9ce3f67492445a42632ba7c335ec05bdae33dfb0fa87c",
+    "output_sha256": "221f130bf94a80fd33a930c7f45332f18e62d44ed212082bf878d4d80178ddf4",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/orange.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "paypal",
+    "resource": "brand_paypal",
+    "original_sha256": "e8ea6928d3386f81dc6d4c1f58b48e7a29d29bb578b2e3dd808638bd97c63d33",
+    "output_sha256": "fb3e70a6a22aad524ff86d8d1792d9766beeafb8d39bd2d36a6941477f241af1",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/paypal.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "visa",
+    "resource": "brand_visa",
+    "original_sha256": "7cce4eea7b16b6eddf60d7d78b7b814d13ab3001bfa5e184480a7ff4a895e4ad",
+    "output_sha256": "6b841e771e62557959393c153d88152a57f94f9f161afb2b4041a8d3f818b831",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/visa.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "mastercard",
+    "resource": "brand_mastercard",
+    "original_sha256": "b6e25beff2c54363d6c79d58a7c924cd484908c8f6203388b6c1fe34accfffaa",
+    "output_sha256": "15b8b83fab87967005b2a3256632903f83e2af884291ac9976fe8c1a2860900f",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/mastercard.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "talabat",
+    "resource": "brand_talabat",
+    "original_sha256": "ed9bbbbb78970bcde2c43c20baa057bd14909075525667e61c2acce0e90f34f6",
+    "output_sha256": "db767115b156bb76375916f70b142021430a7c14a61f2757d06afad247765c6b",
+    "preserved_existing": false,
+    "source_page": "https://www.talabat.com/egypt",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "cleopatra",
+    "resource": "brand_cleopatra",
+    "original_sha256": "d0dceec218a8154df70c0a8c72db515b01e2e6b449daccddb104a147a7c34321",
+    "output_sha256": "e7590ba7309ece68786a1750f813fcb104bacc50409fc781f55ff3c2cddc089a",
+    "preserved_existing": false,
+    "source_page": "https://www.cleopatrahospitals.com/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "fawry",
+    "resource": "brand_fawry",
+    "original_sha256": "16b2a0cb0cb98b29842a5406c486c3413c4697e261b3c74f1a80b384fbb25160",
+    "output_sha256": "961f2d6e7161d5bf8a8803291019076776e15d62f722d07acf3a97922cd9b8a9",
+    "preserved_existing": false,
+    "source_page": "https://www.fawry.com/",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "instapay",
+    "resource": "brand_instapay",
+    "original_sha256": "c458c72269f9a065d8a8fbdde8e08d070645549ec0417ab31457be4d14be655b",
+    "output_sha256": "a2d6d462d525f635c7c3d12bdf9f5a1990341862e3a62240803684cb7883a875",
+    "preserved_existing": false,
+    "source_page": "https://www.instapay.eg/?lang=en",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "espressolab",
+    "resource": "brand_espressolab",
+    "original_sha256": "9435759d2e5a9e4b058e60030fc970ce79d73e94b9c1e4a75e4cc7204160d43c",
+    "output_sha256": "60e6cbfc13553f184c0946a5131922bbc05ed51a8486c7a39a9fe31b4240dbad",
+    "preserved_existing": false,
+    "source_page": "https://espressolab-eg.com/",
+    "rights_status": "review_brand_terms_before_release"
+  }
+]

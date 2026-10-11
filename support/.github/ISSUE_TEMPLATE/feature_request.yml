@@ -1,0 +1,32 @@
+name: "اقتراح تحسين / Feature request"
+description: "فكرة تحل مشكلة استخدام محددة"
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "وضح موقف الاستخدام والنتيجة المطلوبة. استخدم بيانات تجريبية فقط؛ لا ترفق بيانات مالية شخصية."
+  - type: textarea
+    id: problem
+    attributes:
+      label: "إيه المشكلة اللي محتاج تحلها؟"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "اقتراحك إيه؟"
+      description: "مثال بسيط قبل/بعد يساعدنا نفهم المطلوب."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "بتتعامل معها إزاي حاليًا؟ (اختياري)"
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: "مراجعة الخصوصية"
+      options:
+        - label: "المثال والصور خالية من البيانات الشخصية والمالية الحقيقية."
+          required: true

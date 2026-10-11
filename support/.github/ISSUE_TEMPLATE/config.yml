@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "إزاي تكتب بلاغ مفيد؟"
+    url: "https://github.com/MohamedGamal-Ahmed/Follow-Money-Support/blob/main/CONTRIBUTING.md"
+    about: "خطوات تكرار المشكلة وإخفاء البيانات الشخصية من الصور."
+  - name: "دليل الاستخدام"
+    url: "https://github.com/MohamedGamal-Ahmed/Follow-Money-Support/blob/main/GUIDE.md"
+    about: "ابدأ بدليل Follow Money بالعربي."

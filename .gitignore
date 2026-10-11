@@ -1,0 +1,42 @@
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+*.iml
+*.apk
+*.aab
+.tmp/
+
+# Local configuration, signing material, exports and personal evidence
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+*.db
+*.db-*
+*.sqlite*
+*.tar
+*.log
+*.hprof
+captures/
+content.mp3
+
+# Historical device audits contain private financial data. Keep them locally.
+docs/*
+!docs/ARCHITECTURE.md
+!docs/USAGE_AR.md
+!docs/PRIVACY.md
+!docs/GITHUB_SETUP.md
+!docs/screenshots/
+!docs/brand-catalog-2026-10-10/
+!docs/BRAND_CATALOG_CANDIDATES_2026-10-10.csv
+
+# Reproducible tools may create these local artifacts
+__pycache__/
+.pytest_cache/
+.DS_Store
+Thumbs.db

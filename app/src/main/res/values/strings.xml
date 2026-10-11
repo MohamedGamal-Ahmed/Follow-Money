@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_description">ميزانية اليوم مع إضافة عملية وفتح العمليات</string>
+    <string name="widget_small_description">المتبقي والصرف اليومي في مساحة صغيرة</string>
+    <string name="widget_large_description">ميزانية اليوم وصرف الأسبوع والشهر</string>
+</resources>

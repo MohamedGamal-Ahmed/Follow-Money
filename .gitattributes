@@ -1,0 +1,18 @@
+* text=auto eol=lf
+*.java text eol=lf
+*.md text eol=lf
+*.xml text eol=lf
+*.gradle text eol=lf
+*.properties text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ps1 text eol=lf
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.ttf binary
+*.jar binary
+# Preserve upstream font license formatting without whitespace lint noise.
+app/src/main/assets/fonts/OFL.txt whitespace=-blank-at-eol

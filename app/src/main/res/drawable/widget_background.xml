@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Forest card with a soft diagonal sheen, matching the app hero cards. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="315" android:startColor="#0B3D2E" android:endColor="#0F4A38" />
+    <corners android:radius="26dp" />
+</shape>

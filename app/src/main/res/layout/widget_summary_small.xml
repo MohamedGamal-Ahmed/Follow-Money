@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compact widget: remaining for today, what was spent, and a meter. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center_vertical"
+    android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingTop="6dp" android:paddingBottom="6dp"
+    android:layoutDirection="rtl" android:background="@drawable/widget_background">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+        <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_logo_mark" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+        <TextView android:id="@+id/widget_updated" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="6dp"
+            android:text="@string/widget_today_currency" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" android:ellipsize="end" />
+    </LinearLayout>
+    <TextView android:id="@+id/widget_remaining" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:text="@string/widget_preview_remaining_short" android:textSize="17sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="12sp" android:autoSizeMaxTextSize="17sp" android:autoSizeStepGranularity="1sp" android:textColor="#FFFFFF" android:fontFamily="sans-serif-medium" android:singleLine="true" android:ellipsize="end" />
+    <TextView android:id="@+id/widget_amount" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/widget_preview_spent_short" android:textSize="10sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="8sp" android:autoSizeMaxTextSize="10sp" android:autoSizeStepGranularity="1sp" android:textColor="#B9D3C8" android:singleLine="true" android:ellipsize="end" />
+    <ProgressBar android:id="@+id/widget_progress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="5dp"
+        android:layout_marginTop="6dp" android:max="100" android:progressDrawable="@drawable/widget_progress" />
+    <ProgressBar android:id="@+id/widget_progress_over" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="5dp"
+        android:layout_marginTop="6dp" android:max="100" android:progress="100" android:progressDrawable="@drawable/widget_progress_over" android:visibility="gone" />
+</LinearLayout>

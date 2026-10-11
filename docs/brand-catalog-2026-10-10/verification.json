@@ -1,0 +1,21 @@
+{
+  "downloaded": 34,
+  "banks": 11,
+  "non_banks": 23,
+  "already_integrated": 7,
+  "pending": 9,
+  "sha256_checks": 34,
+  "catalog_records": 43,
+  "original_files": 34,
+  "application_code_changed": false,
+  "browser": {
+    "local_preview_opened": true,
+    "image_assets_loaded": 15,
+    "inline_svg_assets": 19,
+    "filters_checked": [
+      "bank",
+      "other"
+    ],
+    "visual_review": "sampled, not Android rendering or commercial rights approval"
+  }
+}
