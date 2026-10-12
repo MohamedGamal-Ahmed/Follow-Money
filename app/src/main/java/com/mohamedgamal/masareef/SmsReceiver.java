@@ -30,7 +30,7 @@ public final class SmsReceiver extends BroadcastReceiver {
         try (ExpenseDb db = new ExpenseDb(context)) {
             changed = handle(db, context, parts);
         } catch (RuntimeException error) {
-            android.util.Log.e("FollowMoney", "SMS skipped", error);
+            android.util.Log.e("FollowMoney", "SMS skipped: " + error.getClass().getSimpleName());
         }
         if (changed) notifyDataChanged(context);
         else DailyRefreshReceiver.refresh(context);

@@ -174,6 +174,41 @@ public final class ParserSmokeTest {
         if (gpt == null || !"ChatGPT".equals(gpt.merchant) || !"اشتراكات".equals(gpt.category))
             throw new AssertionError("ChatGPT subscription not recognized: " + (gpt == null ? null : gpt.merchant));
         checked++;
+        // A completed payment survives future fees/installments; the future amount never becomes the payment.
+        expect("BANK", "تم خصم ١٠٠٠ جنيه لدى كارفور، وسيتم خصم رسوم ٥ جنيه", 100000, "EGP");
+        expect("BANK", "Your card was debited EGP 500 at AMAZON. Installment will be debited monthly", 50000, "EGP");
+        expectCategory("Your card was debited EGP 500 at AMAZON. Installment will be debited monthly", "غير مصنف");
+        expect("BANK", "Card purchase at UBER EGP 100 pending", 10000, "EGP");
+        expect("BANK", "EGP 500 was debited from your account. EGP 5 will be charged tomorrow", 50000, "EGP");
+        expect("BANK", "تم سحب ٥٠٠ جنيه من حسابك، وسيتم خصم رسوم ٥ جنيه", 50000, "EGP");
+        expect("BANK", "سيتم خصم ٥٠٠ جنيه غدًا، وتم خصم ٥ جنيه رسوم من حسابك", 500, "EGP");
+        skip("هيتم خصم ٧٠٠ جنيه بكرة");
+        skip("هيتم خصم ٧٠٠ جنيه من حسابك بكرة");
+        skip("هيتخصم ٧٠٠ جنيه بكرة");
+        skip("هيتخصم ٧٠٠ جنيه من حسابك بكرة");
+        skip("سيتم خصم ٧٠٠ جنيه من حسابك بكرة");
+        skip("سوف يتم خصم ٧٠٠ جنيه من حسابك غدًا");
+        skip("Your payment EGP 700 will be processed tomorrow");
+        skip("EGP 500 will be debited from your account");
+        skip("Your payment EGP 500 is pending");
+        skip("Scheduled transaction EGP 500 from your account");
+        skip("تم خصم رسوم الخدمة. سيتم خصم 500 جنيه من حسابك غدًا");
+        skip("Successfully scheduled: payment EGP 500 will be processed tomorrow");
+        skip("تم تنفيذ التعليمات لمبلغ 500 جنيه من حسابك وسيتم خصم المبلغ غدًا");
+        String future="Your payment EGP 700 will be processed tomorrow";
+        if (!ExpenseParser.isFutureOnly(future) || ExpenseParser.isUnsuccessful(future) ||
+                ExpenseParser.isUnsuccessful("هيتم خصم ٧٠٠ جنيه من حسابك بكرة") ||
+                ExpenseParser.isFutureOnly("تم خصم ١٠٠٠ جنيه لدى كارفور، وسيتم خصم رسوم ٥ جنيه"))
+            throw new AssertionError("Future wording was confused with failure or completed payment");
+        checked++;
+        if(ExpenseParser.isCompletedFinancialCandidate("سيتم خصم 700 جنيه من حسابك بكرة"))
+            throw new AssertionError("Future alert appeared completed in coverage review");
+        checked++;
+        String distant="تم خصم رسوم الخدمة " + "تفاصيل ".repeat(25) + "500 جنيه وسيتم خصم رسوم غدًا";
+        skip(distant);
+        ExpenseParser.Parsed mixedCredit=ExpenseParser.parseIncome("BANK","تم إضافة 500 جنيه لحسابك، وسيتم خصم 5 جنيه رسوم");
+        if(mixedCredit==null || mixedCredit.amountMinor!=50000) throw new AssertionError("Completed credit lost to future fee");
+        checked++;
         System.out.println("Parser smoke tests passed: " + checked);
     }
 }

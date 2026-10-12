@@ -35,7 +35,7 @@ jobs:
           cache: gradle
       - name: Install Android SDK components
         run: |
-          & "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-34' 'build-tools;34.0.0'
+          & "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.1.0'
           if ($LASTEXITCODE -ne 0) { throw 'SDK setup failed' }
       - name: Verify repository files
         run: python tools/check-repo.py

@@ -14,14 +14,15 @@ import java.util.Set;
 
 /**
  * Replays the repair rules and MoneyFlow definitions on a private, local export of the phone database.
- * Usage: java RealDataReplay tx.tsv sources.tsv YYYY-MM-DD [excludeId,...] [installmentSource:amountMinor]
+ * Usage: java RealDataReplay tx.tsv sources.tsv YYYY-MM-DD [excludeId,...] [installmentSource:amountMinor] [month] [refunds.tsv]
+ * refunds.tsv contains income_id, expense_id, originally linked amount_minor; allocations are read-only.
  * The export never belongs in the repository; this only prints aggregates.
  */
 public final class RealDataReplay {
     static final class Tx {
-        long id, when, received, amount; String currency, kind, category, source, direction, merchant; Long from, to; boolean edited;
+        long id, when, received, amount, offset; String currency, kind, category, source, direction, merchant; Long from, to; boolean edited;
         RepairRules.Row row() { return new RepairRules.Row(id, when, received, amount, currency, kind, category, source, direction, from, to, edited, merchant); }
-        MoneyFlow.Item item() { return new MoneyFlow.Item(id, when, amount, currency, kind, category, merchant); }
+        MoneyFlow.Item item() { return new MoneyFlow.Item(id, when, Math.max(0,amount-offset), currency, kind, category, merchant); }
     }
 
     public static void main(String[] args) throws Exception {
@@ -43,6 +44,12 @@ public final class RealDataReplay {
         }
         LocalDate today = LocalDate.parse(args[2]);
         LocalDate[] year = MoneyFlow.period(MoneyFlow.Range.YEAR, today, today);
+        List<long[]> refunds=new ArrayList<>();
+        if(args.length>6 && !args[6].isEmpty()) for(String line:Files.readAllLines(Path.of(args[6]),StandardCharsets.UTF_8)) {
+            if(line.isBlank())continue;String[] f=line.split("\t");
+            refunds.add(new long[]{Long.parseLong(f[0]),Long.parseLong(f[1]),Long.parseLong(f[2])});
+        }
+        applyRefunds(txs,refunds);
         report("BEFORE", txs, year, zone);
 
         Set<Long> excluded = new HashSet<>();
@@ -86,7 +93,7 @@ public final class RealDataReplay {
         for (RepairRules.RepeatingTransfer r : RepairRules.repeatingTransfers(rows, 100000, zone))
             System.out.println("repeating transfer suggestion: source " + r.sourceId + " · " + money(r.amountMinor) + " × " + r.ids.size() + " · day " + r.typicalDay);
 
-        if (args.length > 4) {
+        if (args.length > 4 && !args[4].isEmpty()) {
             String[] spec = args[4].split(":");
             long source = Long.parseLong(spec[0]), amount = Long.parseLong(spec[1]);
             int n = 0;
@@ -95,19 +102,35 @@ public final class RealDataReplay {
             }
             System.out.println("confirmed installment rows: " + n);
         }
+        applyRefunds(txs,refunds);
         report("AFTER", txs, year, zone);
         List<MoneyFlow.Item> all = new ArrayList<>();
         for (Tx t : txs) all.add(t.item());
         List<Insights.Plan> plans = new ArrayList<>();
         plans.add(new Insights.Plan("قسط الشقة", 5060000, 51, "installment"));
         for (MoneyFlow.Range range : MoneyFlow.Range.values()) {
-            LocalDate anchor = range == MoneyFlow.Range.MONTH && args.length > 5 ? LocalDate.parse(args[5]) : today;
+            LocalDate anchor = range == MoneyFlow.Range.MONTH && args.length > 5 && !args[5].isEmpty() ? LocalDate.parse(args[5]) : today;
             LocalDate[] period = MoneyFlow.period(range, anchor, today);
             System.out.println("\n== INSIGHTS " + range + " " + period[0] + " → " + period[1].minusDays(1) + " ==");
             for (Insights.Insight i : Insights.compute(all, period, range, today, zone, plans, RealDataReplay::money))
                 System.out.println("[" + i.tone + "] " + i.title + " = " + i.value + "\n    " + i.detail);
         }
         report("AFTER · LAST 12 MONTHS", txs, MoneyFlow.period(MoneyFlow.Range.LAST_12, today, today), zone);
+    }
+
+    private static void applyRefunds(List<Tx> txs,List<long[]> refunds) {
+        Map<Long,Tx> byId=new HashMap<>();for(Tx tx:txs){tx.offset=0;byId.put(tx.id,tx);}
+        refunds.sort(java.util.Comparator.<long[]>comparingLong(link->byId.containsKey(link[0])?byId.get(link[0]).when:Long.MIN_VALUE)
+                .thenComparingLong(link->link[0]));
+        Map<Long,Long> remaining=new HashMap<>();
+        for(long[] link:refunds) {
+            Tx income=byId.get(link[0]),expense=byId.get(link[1]);
+            if(income==null || expense==null || !"income".equals(income.kind) || !"expense".equals(expense.kind) ||
+                    !income.currency.equals(expense.currency))continue;
+            long left=remaining.getOrDefault(expense.id,expense.amount);
+            long applied=Math.max(0,Math.min(link[2],Math.min(income.amount,left)));
+            income.offset+=applied;expense.offset+=applied;remaining.put(expense.id,Math.max(0,left-applied));
+        }
     }
 
     private static void report(String title, List<Tx> txs, LocalDate[] period, ZoneId zone) {

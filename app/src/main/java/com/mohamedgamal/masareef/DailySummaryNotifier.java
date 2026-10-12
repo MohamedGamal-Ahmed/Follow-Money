@@ -27,6 +27,6 @@ final class DailySummaryNotifier {
             manager.notify(ID,new Notification.Builder(context,"daily_summary").setSmallIcon(R.drawable.ic_stat_notify)
                     .setContentTitle(snapshot.remaining(currency,hidden)).setContentText(detail).setContentIntent(open)
                     .setVisibility(hidden?Notification.VISIBILITY_PUBLIC:Notification.VISIBILITY_PRIVATE).setOnlyAlertOnce(true).setAutoCancel(true).build());
-        }catch(RuntimeException error){manager.cancel(ID);android.util.Log.e("FollowMoney","Daily summary unavailable",error);}
+        }catch(RuntimeException error){manager.cancel(ID);android.util.Log.e("FollowMoney","Daily summary unavailable: "+error.getClass().getSimpleName());}
     }
 }

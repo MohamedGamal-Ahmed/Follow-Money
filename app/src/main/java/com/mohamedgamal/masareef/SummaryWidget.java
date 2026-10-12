@@ -107,7 +107,7 @@ public class SummaryWidget extends AppWidgetProvider {
                 if(isLarge(manager,id)||isWideSmall(context,manager,id)){views.setTextViewText(R.id.widget_week,"—");views.setTextViewText(R.id.widget_month,"—");}
                 views.setTextViewText(R.id.widget_updated,"");manager.updateAppWidget(id,views);
             }
-            android.util.Log.e("FollowMoney","Widget refresh failed",error);
+            android.util.Log.e("FollowMoney","Widget refresh failed: "+error.getClass().getSimpleName());
         }
     }
     private static boolean isSmall(AppWidgetManager manager,int id) {

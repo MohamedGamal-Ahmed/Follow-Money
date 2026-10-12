@@ -27,8 +27,10 @@ public final class ReconciliationTest extends Instrumentation {
     private String confirmedCardLink;
     private boolean captureBalances;
     private boolean captureRing;
-    @Override public void onCreate(Bundle args) { super.onCreate(args);featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
+    private String rescanAudit,expectedBefore;
+    @Override public void onCreate(Bundle args) { super.onCreate(args);rescanAudit=args.getString("rescan_audit");expectedBefore=args.getString("expected_before");featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
     @Override public void onStart() {
+        if(rescanAudit!=null){new RescanAudit(this).run(rescanAudit,expectedBefore);return;}
         if (featureAudit != null) { new FeatureAuditTest(this).run(featureAudit); return; }
         if(captureBalances) {
             Bundle result=new Bundle();

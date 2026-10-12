@@ -63,6 +63,23 @@ final class FeatureAuditTest {
         ok(GitHubSupport.version(context).equals(uri.getQueryParameter("app_version")));
         ok("feature_request.yml".equals(GitHubSupport.featureUri().getQueryParameter("template")));
     }
+    public void testEmailSupportDraftAndCopyContainReviewedTextOnly() {
+        db.addManual(at(LocalDate.now()),987654,"EGP","QA PRIVATE MERCHANT","تسوق");
+        String description="اقتراح عربي & + ? #\nسطر تاني";
+        android.content.Intent draft=EmailSupport.draft(context,true,description);
+        ok(android.content.Intent.ACTION_SENDTO.equals(draft.getAction()));
+        android.net.Uri uri=draft.getData();ok("mailto".equals(uri.getScheme()));
+        ok(uri.toString().startsWith("mailto:"+EmailSupport.ADDRESS+"?"));
+        // MailTo.parse decodes the whole query before splitting '&'; validate RFC encoding field by field instead.
+        android.net.Uri query=android.net.Uri.parse("https://example.invalid/?"+uri.toString().split("\\?",2)[1]);
+        ok(EmailSupport.subject(true).equals(query.getQueryParameter("subject")));
+        ok(EmailSupport.body(context,description).equals(query.getQueryParameter("body")));
+        ok(EmailSupport.body(context,description).equals(draft.getStringExtra(android.content.Intent.EXTRA_TEXT)));
+        ok(!query.getQueryParameter("body").contains("QA PRIVATE MERCHANT") && !query.getQueryParameter("body").contains("987654"));
+        ok(EmailSupport.copyText(context,true,description).contains(description));
+        ok(EmailSupport.copyText(context,true,description).startsWith(EmailSupport.ADDRESS+"\n"));
+        ok(!EmailSupport.subject(true).equals(EmailSupport.subject(false)));
+    }
     public void testPurchaseAndUnrelatedTransferAreNotDuplicates() {
         long t = at(LocalDate.now());
         ok(db.addSms("HSBC", "Purchase EGP100 at QA SHOP ONE", t));
@@ -73,6 +90,40 @@ final class FeatureAuditTest {
         long t = at(LocalDate.now());
         db.addSms("BanqueMisr", "Your payment EGP700 to QA FUTURE will be processed tomorrow", t);
         eq(0, db.transactions().size());
+    }
+    private long legacyCapture(String message,long t,boolean edited) {
+        db.addManual(t,70000,"EGP","QA legacy","غير مصنف");long id=db.latestInserted().id;
+        ContentValues row=new ContentValues();row.put("source","SMS");row.put("user_edited",edited?1:0);
+        row.put("message_hash",CaptureIdentity.hash("BANK\n"+message.trim()));
+        db.getWritableDatabase().update("transactions",row,"id=?",new String[]{Long.toString(id)});
+        return id;
+    }
+    private long countRows(String table) {
+        try(android.database.Cursor c=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM "+table,null)){c.moveToFirst();return c.getLong(0);}
+    }
+    public void testRescanPreservesHistoricalFutureAndFailedRows() {
+        long t=at(LocalDate.now());
+        for(String message:Arrays.asList("هيتم خصم ٧٠٠ جنيه من حسابك بكرة","Purchase EGP 700 declined")) {
+            long id=legacyCapture(message,t,false);
+            ok(!db.addSms("BANK",message,t));
+            ExpenseDb.Transaction retained=db.transactionById(id);ok(retained!=null && retained.needsReview);eq(70000,retained.amountMinor);
+            eq(0,countRows("transaction_archive"));eq(0,countRows("excluded_messages"));
+            t+=600000;
+        }
+        eq(2,db.transactions().size());
+    }
+    public void testRescanDoesNotTouchEditedHistoricalRows() {
+        String message="هيتخصم ٧٠٠ جنيه من حسابك بكرة";long t=at(LocalDate.now());
+        long id=legacyCapture(message,t,true);ok(!db.addSms("BANK",message,t));
+        ExpenseDb.Transaction retained=db.transactionById(id);ok(retained!=null && !retained.needsReview);eq(70000,retained.amountMinor);
+        eq(0,countRows("transaction_archive"));eq(0,countRows("excluded_messages"));
+    }
+    public void testMixedFutureAlertBooksOnlyCompletedPurchase() {
+        long t=at(LocalDate.now());
+        ok(db.addSms("BANK","تم خصم ١٠٠٠ جنيه لدى كارفور، وسيتم خصم رسوم ٥ جنيه",t));
+        eq(100000,db.latestInserted().amountMinor);eq(1,db.transactions().size());
+        ok(db.addSms("BANK","Your card was debited EGP 500 at AMAZON. Installment will be debited monthly",t+600000));
+        eq(50000,db.latestInserted().amountMinor);ok(!"أقساط".equals(db.latestInserted().category));
     }
     public void testRefundAmountAndBudgetRoundTrip() {
         LocalDate today = LocalDate.now(); long t = at(today);
@@ -107,6 +158,9 @@ final class FeatureAuditTest {
         ok(db.reimbursedOf(buy) <= db.transactionById(buy).amountMinor);
         eq(50000,db.reimbursedOf(buy));
         eq(70000,ExpenseDb.effectiveAmount(db.transactionById(back),db.reimbursementOffsets()));
+        db.close();db=new ExpenseDb(context);
+        db.updateTransaction(buy,111288,"EGP","QA SHOP","تسوق",null,"expense",null,null,t);
+        eq(111288,db.reimbursedOf(buy));eq(8712,ExpenseDb.effectiveAmount(db.transactionById(back),db.reimbursementOffsets()));
     }
     public void testEditedIncomeAndCurrencyRevalidateRefund() {
         long t=at(LocalDate.now());db.addManual(t,111288,"EGP","QA SHOP","تسوق");long buy=db.latestInserted().id;
@@ -116,6 +170,9 @@ final class FeatureAuditTest {
         eq(40000,db.reimbursedOf(buy));eq(71288,ExpenseDb.effectiveAmount(db.transactionById(buy),db.reimbursementOffsets()));
         db.updateTransaction(buy,111288,"USD","QA SHOP","تسوق",null,"expense",null,null,t);
         eq(0,db.reimbursedOf(buy));eq(40000,ExpenseDb.effectiveAmount(db.transactionById(back),db.reimbursementOffsets()));
+        db.updateTransaction(buy,111288,"EGP","QA SHOP","تسوق",null,"expense",null,null,t);
+        db.updateTransaction(back,120000,"EGP","QA friend","دخل",null,"income",null,null,t+1000);
+        eq(111288,db.reimbursedOf(buy));
     }
     public void testMultipleRefundsRemainBoundedAfterEditAndReopen() {
         long t=at(LocalDate.now());db.addManual(t,100000,"EGP","QA SHOP","تسوق");long buy=db.latestInserted().id;
@@ -125,11 +182,14 @@ final class FeatureAuditTest {
         db.updateTransaction(buy,70000,"EGP","QA SHOP","تسوق",null,"expense",null,null,t);
         eq(70000,db.reimbursedOf(buy));eq(0,ExpenseDb.effectiveAmount(db.transactionById(a),db.reimbursementOffsets()));
         eq(40000,ExpenseDb.effectiveAmount(db.transactionById(b),db.reimbursementOffsets()));
-        // Also repair stale links left by an older app, before its first financial summary is read.
+        // Reading/reopening a database must bound offsets without changing saved links.
         db.getWritableDatabase().execSQL("UPDATE transactions SET amount_minor=30000 WHERE id="+buy);
         db.close();db=new ExpenseDb(context);eq(30000,db.reimbursedOf(buy));
         eq(30000,ExpenseDb.effectiveAmount(db.transactionById(a),db.reimbursementOffsets()));
         eq(50000,ExpenseDb.effectiveAmount(db.transactionById(b),db.reimbursementOffsets()));
+        db.updateTransaction(buy,100000,"EGP","QA SHOP","تسوق",null,"expense",null,null,t);
+        eq(100000,db.reimbursedOf(buy));eq(0,ExpenseDb.effectiveAmount(db.transactionById(a),db.reimbursementOffsets()));
+        eq(10000,ExpenseDb.effectiveAmount(db.transactionById(b),db.reimbursementOffsets()));
     }
     public void testMonthPaymentMovesCardOnce() {
         long id = db.putCommitment(null, "QA card", 547872, "EGP", LocalDate.of(2026, 10, 26), "monthly", "installment", 24, 14, 1, "QA card", null);

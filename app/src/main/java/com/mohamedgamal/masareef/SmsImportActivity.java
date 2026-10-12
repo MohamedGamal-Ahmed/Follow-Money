@@ -82,6 +82,7 @@ public final class SmsImportActivity extends Activity {
         page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(20),dp(20),dp(20),dp(28));page.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         page.setBackgroundColor(background);scroll.addView(page);setContentView(scroll);
+        scroll.setBackgroundColor(background);SystemUi.apply(this,scroll);
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
         ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.ic_launcher);header.addView(logo,new LinearLayout.LayoutParams(dp(36),dp(36)));
         TextView brand=text("Follow Money",18);brand.setPadding(dp(10),0,dp(10),0);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));page.addView(header);
@@ -267,7 +268,7 @@ public final class SmsImportActivity extends Activity {
                     writeDb.repairBetween(first-86_400_000L,last+86_400_000L);
                     app.getSharedPreferences("MainActivity",MODE_PRIVATE).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
                     items.clear();phase="done";
-                    try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException refreshError){android.util.Log.e("FollowMoney","Imported data; refresh unavailable",refreshError);}
+                    try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException refreshError){android.util.Log.e("FollowMoney","Imported data; refresh unavailable: "+refreshError.getClass().getSimpleName());}
                     publish(true);
                 } catch(RuntimeException e){error="تعذر اعتماد المحدد؛ تم التراجع عن دفعة الحفظ. راجع الإذن وأعد الفحص.";phase="error";publish(true);}
             },"sms-apply").start();

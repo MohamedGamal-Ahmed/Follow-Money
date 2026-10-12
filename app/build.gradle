@@ -4,12 +4,13 @@ plugins {
 
 android {
     namespace 'com.mohamedgamal.masareef'
-    compileSdk 34
+    compileSdk 36
+    buildToolsVersion '36.1.0'
 
     defaultConfig {
         applicationId 'com.mohamedgamal.masareef'
         minSdk 26
-        targetSdk 34
+        targetSdk 36
         versionCode 2
         versionName '0.2.0'
         testInstrumentationRunner 'com.mohamedgamal.masareef.ReconciliationTest'
@@ -18,6 +19,38 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    def uploadSigning = [
+        file: System.getenv('FOLLOW_MONEY_UPLOAD_KEYSTORE'),
+        storePassword: System.getenv('FOLLOW_MONEY_UPLOAD_STORE_PASSWORD'),
+        alias: System.getenv('FOLLOW_MONEY_UPLOAD_KEY_ALIAS'),
+        keyPassword: System.getenv('FOLLOW_MONEY_UPLOAD_KEY_PASSWORD')
+    ]
+    def providedSigningValues = uploadSigning.values().count { it != null && !it.isBlank() }
+    if (providedSigningValues != 0 && providedSigningValues != uploadSigning.size()) {
+        throw new GradleException('Set all four FOLLOW_MONEY_UPLOAD_* signing variables, or unset them for an unsigned validation build.')
+    }
+    if (providedSigningValues == uploadSigning.size()) {
+        signingConfigs {
+            upload {
+                storeFile file(uploadSigning.file)
+                storePassword uploadSigning.storePassword
+                keyAlias uploadSigning.alias
+                keyPassword uploadSigning.keyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+            if (providedSigningValues == uploadSigning.size()) signingConfig signingConfigs.upload
+        }
     }
 
 }

@@ -19,7 +19,7 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 - **Understand:** spending categories, money flow, recurring payments and insights with links to the underlying transactions. Currencies stay separate.
 - **Plan:** daily limits, category budgets and confirmed installment/subscription/bill schedules.
 - **Keep it visible:** three resizable home screen widgets, optional hidden amounts, daily reminders and payment alerts.
-- **Get help:** GitHub bug and feature forms, with a review step before sharing basic device information.
+- **Get help:** Arabic problem/suggestion drafts sent through your configured email app, with a preview of basic device information. GitHub remains available for developers.
 
 The parser runs locally and uses rules. It does not guarantee recognition of every bank or notification format. Review ambiguous transfers, unclassified expenses and proposed commitments before relying on totals.
 
@@ -43,7 +43,7 @@ These are records captured by the app, not a complete bank statement. Different 
 
 ## Run locally
 
-Install Android Studio, Java 17 and Android SDK platform 34 / build tools 34.0.0. Use the Gradle wrapper included in this repository.
+Install Android Studio with API 36 support, Java 17 and Android SDK platform 36 / build tools 36.1.0. This project targets API 36 with AGP 8.9.1 and Gradle 8.11.1; use the included wrapper.
 
 ```powershell
 git clone https://github.com/MohamedGamal-Ahmed/Follow-Money.git
@@ -57,7 +57,7 @@ Open the project in Android Studio and select your local SDK. Alternatively, cre
 .\gradlew.bat assembleDebug
 ```
 
-The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`. This is a development build; production signing and distribution are not configured. Repository access is required to clone this private project.
+The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`. Upload signing uses local environment variables; no key is included. Use `tools/build-release.ps1 -Unsigned` for local validation or configure an upload key for a signed build. [Google Play preparation and declaration drafts](docs/GOOGLE_PLAY_RELEASE.md). Repository access is required to clone this private project. No Play approval or publication is implied.
 
 ## Checks
 
@@ -88,7 +88,7 @@ docs/                                     Curated usage, architecture and privac
 
 ## Report a problem
 
-Use **الإعدادات ← المساعدة وعن التطبيق ← الإبلاغ عن مشكلة**, or [open a bug report](https://github.com/MohamedGamal-Ahmed/Follow-Money-Support/issues/new?template=bug_report.yml). Include the app version, device, Android version, steps and expected behavior. Use invented sample transactions and redact screenshots; never attach real SMS, databases, account details or exports.
+Use **الإعدادات ← المساعدة وعن التطبيق ← الإبلاغ عن مشكلة / اقتراح تحسين**. Describe the issue, review the device metadata and open an email draft to **mgamal.ahmed@outlook.com**. Send it yourself from your configured email app. If no email app handles the draft, the address and request are copied to the clipboard. Use invented sample transactions; never include real SMS, databases, account/card numbers or financial exports.
 
 **Application source stays private.** User reports go to the separate [public support repository](https://github.com/MohamedGamal-Ahmed/Follow-Money-Support), which requires GitHub sign-in to submit but no source access or invitation. Reports and attachments are public. The app opens a form in the browser; it does not create an issue automatically. [Reporting and contribution guide](CONTRIBUTING.md)
 
@@ -96,7 +96,7 @@ The `support/` folder is the reviewed, code-free publishing source for the suppo
 
 ## Privacy and ownership
 
-Financial data stays in app-local storage. Stored source text is encrypted with Android Keystore; the SQLite ledger itself is not encrypted. Android backup is disabled in the app configuration. CSV exports are created only when requested and contain financial data. GitHub support details contain app/device/Android/locale information, not transactions. [Privacy details](docs/PRIVACY.md)
+Financial data stays in app-local storage. Stored source text is encrypted with Android Keystore; the SQLite ledger itself is not encrypted. Android backup is disabled in the app configuration. CSV exports are created only when requested and contain financial data. Support drafts automatically include only app/device/Android/locale information, plus the description you write. [Privacy details](docs/PRIVACY.md)
 
 No open-source license has been granted for this private project's original code. Third-party fonts and brand assets retain their own terms; see [asset attribution](BRAND_ASSETS.md). Commercial redistribution needs an asset-rights review.
 

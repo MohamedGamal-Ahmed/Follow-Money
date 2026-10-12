@@ -521,10 +521,13 @@ public final class MainActivity extends Activity {
                 break;
             case "data":
                 note("مصادر العمليات محفوظة مشفرة. CSV يحتوي على معاملاتك، ويحتاج مشاركة واعية منك.");
+                setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("استيراد معاملات CSV",this::chooseCsvImport);
                 setting("تصدير معاملات "+selectedMonth.toString().substring(0,7)+" CSV",this::exportCsv);
-                section("أدوات متقدمة",null,null);
-                setting("أدوات المراجعة",this::reviewToolsDialog);
+                if(BuildConfig.DEBUG) {
+                    section("أدوات متقدمة",null,null);
+                    setting("أدوات المراجعة",this::reviewToolsDialog);
+                }
                 // Keep access to existing records without promoting unused financial modules.
                 if(!db.assets().isEmpty())setting("الأصول المسجلة",()->{selectedTab=8;render();});
                 if(!db.debts().isEmpty())setting("الديون المسجلة",()->{selectedTab=9;render();});
@@ -542,12 +545,12 @@ public final class MainActivity extends Activity {
                 break;
             default:
                 note("Follow Money · "+GitHubSupport.version(this));
+                setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("الإبلاغ عن مشكلة",this::reportProblem);
-                setting("اقتراح تحسين",()->openGitHub(GitHubSupport.featureUri()));
-                setting("متابعة المشاكل على GitHub",()->openGitHub(Uri.parse(GitHubSupport.REPOSITORY+"/issues")));
-                setting("مركز دعم Follow Money",()->openGitHub(Uri.parse(GitHubSupport.REPOSITORY)));
+                setting("اقتراح تحسين",()->supportDialog(true));
                 setting("نسخ بيانات التشخيص",this::copySupportDetails);
-                note("بلاغات GitHub عامة وتحتاج حسابًا لإرسالها. بيانات الدعم تشمل النسخة والجهاز والنظام فقط؛ لا تشارك بياناتك المالية.");
+                setting("للمطورين: متابعة على GitHub",()->openGitHub(Uri.parse(GitHubSupport.REPOSITORY+"/issues")));
+                note("الدعم بالإيميل: "+EmailSupport.ADDRESS+". التطبيق بيضيف بيانات النسخة والجهاز والنظام واللغة فقط؛ إنت بتراجع المسودة وبتضغط إرسال في تطبيق الإيميل. بلاغات GitHub عامة وتحتاج حسابًا.");
                 break;
         }
     }
@@ -570,10 +573,57 @@ public final class MainActivity extends Activity {
     }
 
     private void reportProblem() {
-        new AlertDialog.Builder(this).setTitle("الإبلاغ عن مشكلة")
-                .setMessage("هيفتح فورم الدعم ببيانات النسخة والجهاز اللي تحت. محتاج حساب GitHub للإرسال، والبلاغ هيكون عامًا. راجعه قبل الإرسال، ولا تضف رسائل البنك الأصلية أو بيانات مالية شخصية.\n\n"+GitHubSupport.details(this))
-                .setPositiveButton("فتح الفورم",(d,w)->openGitHub(GitHubSupport.bugUri(this)))
-                .setNeutralButton("نسخ البيانات",(d,w)->copySupportDetails()).setNegativeButton("إلغاء",null).show();
+        supportDialog(false);
+    }
+
+    private void privacyPolicyDialog() {
+        try (java.io.InputStream stream=getAssets().open("privacy-policy.txt")) {
+            java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
+            byte[] buffer=new byte[4096];int read;
+            while((read=stream.read(buffer))!=-1)bytes.write(buffer,0,read);
+            LinearLayout policy=form();
+            TextView text=label(bytes.toString("UTF-8"),14,INK,false);
+            text.setTextIsSelectable(true);policy.addView(text);
+            new AlertDialog.Builder(this).setTitle("سياسة الخصوصية · Privacy Policy")
+                    .setView(scrollForm(policy)).setPositiveButton("إغلاق",null).show();
+        } catch(java.io.IOException error) {
+            toast("تعذر فتح السياسة؛ تواصل مع "+EmailSupport.ADDRESS);
+        }
+    }
+
+    private void supportDialog(boolean suggestion) {
+        LinearLayout form=form();
+        form.addView(label("إلى: "+EmailSupport.ADDRESS,12,MUTED,false));
+        EditText description=input(suggestion?"وصف الاقتراح والفائدة منه":"إيه اللي حصل؟ وإيه اللي كنت متوقعه؟",form);
+        description.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        description.setSingleLine(false);description.setMinLines(3);description.setGravity(Gravity.TOP|Gravity.START);
+        description.getLayoutParams().height=android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+        description.setPadding(dp(14),dp(10),dp(14),dp(10));
+        description.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(4000)});
+        form.addView(label("متكتبش أرقام حسابات أو كروت، ولا تلصق رسائل البنك الأصلية.",12,CORAL,false));
+        form.addView(label("التطبيق بيضيف بيانات النسخة والجهاز والنظام واللغة فقط:",12,MUTED,false));
+        TextView metadata=label(GitHubSupport.details(this),12,INK,false);
+        metadata.setTextDirection(View.TEXT_DIRECTION_LTR);metadata.setTextIsSelectable(true);form.addView(metadata);
+        form.addView(label("هيفتح مسودة في تطبيق الإيميل؛ راجعها واضغط إرسال بنفسك. محتاج إيميل متظبط على الموبايل.",12,MUTED,false));
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(suggestion?"اقتراح تحسين":"الإبلاغ عن مشكلة")
+                .setView(scrollForm(form)).setPositiveButton("فتح مسودة إيميل",null)
+                .setNeutralButton("نسخ الطلب",null).setNegativeButton("إلغاء",null).create();
+        dialog.setOnShowListener(ignored->{
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                String text=description.getText().toString().trim();
+                if(text.isEmpty()){description.setError("اكتب وصف مختصر الأول");return;}
+                try {startActivity(EmailSupport.draft(this,suggestion,text));}
+                catch(android.content.ActivityNotFoundException error){copySupportRequest(suggestion,text,"مفيش تطبيق إيميل متاح؛ اتنسخ عنوان الدعم والطلب");}
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->copySupportRequest(suggestion,description.getText().toString(),"اتنسخ عنوان الدعم والطلب"));
+        });
+        dialog.show();
+    }
+
+    private void copySupportRequest(boolean suggestion,String description,String message) {
+        android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+        if(clipboard!=null){clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Follow Money support",EmailSupport.copyText(this,suggestion,description)));toast(message);}
+        else toast("تعذر النسخ؛ عنوان الدعم: "+EmailSupport.ADDRESS);
     }
 
     private void copySupportDetails() {
@@ -1076,6 +1126,13 @@ public final class MainActivity extends Activity {
     }
 
     private void voiceInput() {
+        new AlertDialog.Builder(this).setTitle("الإدخال بالصوت")
+                .setMessage("التعرف على الصوت بيتم من خلال خدمة النظام على جهازك. مزود الخدمة قد يرسل التسجيل لسيرفراته حسب إعداداته وسياسة خصوصيته. Follow Money يستقبل النص الناتج لتراجع العملية قبل حفظها، ولا يحفظ التسجيل الصوتي. تقدر تختار الإدخال اليدوي بدل الصوت.")
+                .setPositiveButton("موافق، افتح خدمة الصوت",(dialog,which)->startVoiceInput())
+                .setNegativeButton("إلغاء",null).show();
+    }
+
+    private void startVoiceInput() {
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG");
@@ -1204,7 +1261,21 @@ public final class MainActivity extends Activity {
 
     private void requestSmsImport() {
         if (checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) importSms();
-        else requestPermissions(new String[]{Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS}, SMS_REQUEST);
+        else smsDisclosure(null);
+    }
+
+    private void smsDisclosure(Runnable declined) {
+        new AlertDialog.Builder(this).setTitle("قراءة رسائل المعاملات")
+                .setMessage("Follow Money يطلب قراءة رسائل SMS لاستيراد المعاملات المالية القديمة بعد معاينتها، والتقاط الرسائل المالية الجديدة تلقائيًا حتى والتطبيق مقفول. " +
+                        "يحلل الرسائل محليًا ويسجل العمليات والأرصدة والالتزامات المدعومة. يحفظ نص مصدر المعاملة وأدلتها المؤرشفة مشفّرًا على جهازك للمراجعة، ويستبعد رسائل التحقق اللي يتعرف عليها ولا يرسل الرسائل لسيرفر. " +
+                        "الإذن اختياري؛ لو رفضت تقدر تدخل العمليات يدويًا أو تشارك رسالة محددة. تقدر تلغي الإذن من إعدادات Android.")
+                .setPositiveButton("موافق، اطلب الإذن",(dialog,which)->{
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("sms_permission_prompted",true).apply();
+                    requestPermissions(new String[]{Manifest.permission.READ_SMS,Manifest.permission.RECEIVE_SMS},SMS_REQUEST);
+                }).setNegativeButton("لاحقًا",(dialog,which)->{
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("sms_permission_prompted",true).apply();
+                    if(declined!=null)declined.run();
+                }).show();
     }
 
     private void requestSmsAtStartup() {
@@ -1218,16 +1289,7 @@ public final class MainActivity extends Activity {
             }
         } else {
             if (getPreferences(MODE_PRIVATE).getBoolean("sms_permission_prompted", false)) return;
-            new AlertDialog.Builder(this).setTitle("قراءة رسائل المعاملات")
-                    .setMessage("Follow Money سيقرأ رسائل SMS القديمة والجديدة على جهازك لتسجيل المدفوعات وتصنيفها. " +
-                            "يحفظ نص الرسالة المالية المطابقة مشفّرًا على جهازك لتراجع مصدر العملية. لا يرسل الرسائل لأي سيرفر، ولا يحفظ أكواد التحقق.")
-                    .setPositiveButton("موافق، اطلب الإذن", (dialog, which) -> {
-                        getPreferences(MODE_PRIVATE).edit().putBoolean("sms_permission_prompted", true).apply();
-                        requestPermissions(new String[]{Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS}, SMS_REQUEST);
-                    }).setNegativeButton("لاحقًا", (dialog, which) -> {
-                        getPreferences(MODE_PRIVATE).edit().putBoolean("sms_permission_prompted", true).apply();
-                        requestNotificationAtStartup();
-                    }).show();
+            smsDisclosure(this::requestNotificationAtStartup);
         }
     }
 
@@ -1246,12 +1308,7 @@ public final class MainActivity extends Activity {
         SharedPreferences settings = getSharedPreferences("notification_settings", MODE_PRIVATE);
         if (hasNotificationAccess() || settings.getBoolean("access_prompted", false)) return;
         settings.edit().putBoolean("access_prompted", true).apply();
-        new AlertDialog.Builder(this).setTitle("إشعارات تطبيقات الدفع")
-                .setMessage("لو فعّلت Notification Access، Follow Money هيشوف إشعارات التطبيقات أثناء وصولها. " +
-                        "هيقرأ محتوى التطبيقات المالية اللي تختارها فقط، لاستخدام بيانات الدفع محليًا في التصنيف. " +
-                        "إشعارات التطبيقات القديمة مش هتكون متاحة غالبًا.")
-                .setPositiveButton("فتح إعدادات الإذن", (dialog, which) -> openNotificationSettings())
-                .setNegativeButton("لاحقًا", null).show();
+        openNotificationSettings();
     }
 
     private boolean hasNotificationAccess() {
@@ -1263,6 +1320,16 @@ public final class MainActivity extends Activity {
     }
 
     private void openNotificationSettings() {
+        if(hasNotificationAccess()) { launchNotificationSettings();return; }
+        new AlertDialog.Builder(this).setTitle("إشعارات تطبيقات الدفع")
+                .setMessage("Notification Access يتيح للنظام إرسال الإشعارات إلى Follow Money حتى والتطبيق مقفول. التطبيق يعالج محتوى التطبيقات اللي تختارها فقط لاستخراج معاملات مالية وحفظ مصدرها مشفّرًا على الجهاز للمراجعة. اختار تطبيقات الدفع فقط. " +
+                        "لا يرسل الإشعارات لسيرفر. رسائل تطبيق SMS وإشعارات Truecaller مستبعدة. الإشعارات النشطة قد تُقرأ عند الاتصال؛ سجل الإشعارات القديم غير متاح. " +
+                        "الإذن اختياري وتقدر تلغيه أو تغير التطبيقات المختارة من الإعدادات.")
+                .setPositiveButton("موافق، افتح إعدادات الإذن",(dialog,which)->launchNotificationSettings())
+                .setNegativeButton("لاحقًا",null).show();
+    }
+
+    private void launchNotificationSettings() {
         try { startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)); }
         catch (Exception error) { toast("افتح إعدادات الجهاز ثم Notification Access وفعّل Follow Money"); }
     }
@@ -1632,6 +1699,7 @@ public final class MainActivity extends Activity {
         boolean fullScreen = introVisible || selectedTab >= 10 && selectedTab <= 12 || selectedTab == 14;
         if (!fullScreen) root.addView(bottomNavigation());
         setContentView(root);
+        SystemUi.apply(this,root);
         if(introVisible) introScreen();
         else if (selectedTab == 0) homeScreen();
         else if (selectedTab == 1) sourcesScreen();
@@ -2137,6 +2205,7 @@ public final class MainActivity extends Activity {
         LinearLayout meta = new LinearLayout(this); meta.setGravity(Gravity.CENTER_VERTICAL);
         String categoryName = "income".equals(item.kind) ? "دخل" : "transfer".equals(item.kind) ? "تحويلات" : item.category;
         meta.addView(categoryPill(categoryName));
+        if(item.needsReview) meta.addView(label(" · للمراجعة",11,CORAL,true));
         if (UiKit.isInstaPay(item.merchant)) {
             LinearLayout.LayoutParams ipaParams = new LinearLayout.LayoutParams(-2, -2); ipaParams.setMarginStart(dp(4));
             meta.addView(instaPayPill(), ipaParams);
@@ -2218,6 +2287,7 @@ public final class MainActivity extends Activity {
         String origin = "SMS".equals(item.source) ? "رسالة البنك تلقائيًا" : "يدوي".equals(item.source) ? "إضافة يدوية" :
                 "CSV".equals(item.source) ? "ملف CSV" : item.source;
         detailRow(details, "اتسجلت من", label(origin, 14, INK, true));
+        if(item.needsReview) detailRow(details,"حالة المراجعة",label("مصدر العملية يحتاج مراجعة؛ المبلغ ما زال محسوبًا",12,CORAL,false));
         TextView original=label("عرض الرسالة الأصلية",14,ACCENT,true);
         original.setOnClickListener(v -> showOriginalMessages(db.sourceEvidence(item.id)));
         detailRow(details,"مصدر الرقم",original);
@@ -3505,7 +3575,7 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("تبدأ تسجيل عملياتك إزاي؟")
                 .setMessage("الراتب وإعداد الميزانية اختياريان. اختر مصدر التسجيل؛ تقدر تضيف مصدرًا آخر من الإعدادات.")
                 .setPositiveButton("رسائل SMS",(d,w)->requestSmsImport())
-                .setNeutralButton("إشعارات الدفع",(d,w)->requestNotificationAtStartup())
+                .setNeutralButton("إشعارات الدفع",(d,w)->openNotificationSettings())
                 .setNegativeButton("إدخال يدوي",null).show();
     }
 
@@ -4818,7 +4888,7 @@ public final class MainActivity extends Activity {
             ExpenseDb.RepairReport report;
             try { report = db.repairAll(); }
             catch (RuntimeException error) {
-                android.util.Log.e("FollowMoney", "Data repair failed", error);
+                android.util.Log.e("FollowMoney", "Data repair failed: " + error.getClass().getSimpleName());
                 if (manual) runOnUiThread(() -> toast("تعذر فحص البيانات"));
                 return;
             }
@@ -4847,6 +4917,7 @@ public final class MainActivity extends Activity {
     }
 
     private void reviewToolsDialog() {
+        if(!BuildConfig.DEBUG)return;
         String[] options = {"تصحيح البيانات: إعلانات وتكرار وتحويلات داخلية", "فحص تغطية رسائل SMS", "تقرير تشخيص الأرقام",
                 "مراجعة التحويلات بين حساباتك", "عينات رسائل البنوك"};
         new AlertDialog.Builder(this).setTitle("أدوات المراجعة")

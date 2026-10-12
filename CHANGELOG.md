@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Route SMS and Notification Access permission entry points through disclosures; explain the external system speech provider before voice entry.
+- Bundle a bilingual privacy policy, generate its public HTML from the same source, and document Google Play declaration/signing gates.
+- Configure upload signing through local environment variables; enable release shrinking and restrict developer financial review tools to debug builds.
+
+- Target Android 16 / API 36 with AGP 8.9.1 and Gradle 8.11.1; apply native system/keyboard insets and retain legacy back handling through the documented predictive-back opt-out.
+
+- Parse completed payments independently of future fees/installments; reject future-only colloquial Arabic alerts.
+- Preserve historical rejected captures and flag them for review instead of archiving them; retain user edits.
+- Calculate reimbursement offsets on reading without shrinking the saved link, including multiple refunds and edit/reopen round trips.
+- Add Arabic email support drafts, reviewed metadata and clipboard fallback; retain GitHub as an optional developer route.
+
 - Organize Settings into six focused groups; keep review and destructive tools under Data and Privacy.
 - Add GitHub bug/feature links and a preview of basic support metadata.
 - Route users to a separate public support repository while keeping application source private.

@@ -28,7 +28,9 @@ public final class ExpenseParser {
     private static final Pattern FUTURE_PAYMENT = Pattern.compile(
             "(?i)(\\bwill\\s+(?:be\\s+)?(?:processed|paid|debited|charged|deducted|transferred)|" +
             "\\b(?:scheduled|pending)\\s+(?:payment|transfer|transaction)|\\b(?:payment|transfer)\\s+(?:is\\s+)?pending|" +
-            "سيتم\\s+(?:تنفيذ|خصم|دفع|سداد|تحويل)|سوف\\s+(?:يتم\\s+)?(?:خصم|دفع|سداد|تحويل))");
+            "\\b(?:payment|transfer|transaction)\\b[^،;\\n!?]{0,100}?\\b(?:is\\s+)?pending\\b|" +
+            "(?<![\\p{L}])و?(?:سيتم|هيتم)\\s+(?:تنفيذ|خصم|سحب|دفع|سداد|تحويل)|" +
+            "(?<![\\p{L}])و?هيتخصم|سوف\\s+(?:يتم\\s+)?(?:خصم|سحب|دفع|سداد|تحويل))");
     private static final Pattern OTP = Pattern.compile(
             "(?i)(otp|one.time.password|verification code|كود التحقق|رمز التحقق|الرقم السري)");
     private static final Pattern ACCOUNT_CONTEXT = Pattern.compile(
@@ -65,7 +67,7 @@ public final class ExpenseParser {
             "\\boffers?\\b|\\bpromo(?:tion)?\\b|\\bwin\\b|\\bchance\\b|\\bup\\s+to\\b|\\bcash\\s*back\\b|terms\\s+(?:and|&)\\s+conditions|\\bT&Cs?\\b)");
     /** Wording a bank uses only once money actually moved. */
     private static final Pattern COMPLETED_EVENT = Pattern.compile(
-            "(?i)(تم\\s+(?:(?:الآن|الان)\\s+)?(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|تنفيذ|إجراء|اجراء|استخدام|ايداع|إيداع|اضافة|إضافة|استلام|إستلام|رد|إرسال|ارسال|شحن)|" +
+            "(?i)((?<![\\p{L}])تم\\s+(?:(?:الآن|الان)\\s+)?(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|تنفيذ|إجراء|اجراء|استخدام|ايداع|إيداع|اضافة|إضافة|استلام|إستلام|رد|إرسال|ارسال|شحن)|" +
             "عملية\\s+(?:شراء|خصم|سحب|دفع|تحويل)\\s+(?:بمبلغ|بقيمة|من|على|ب)|(?:transfer|payment)\\s+(?:was\\s+|has\\s+been\\s+)?received|\\bsuccessful(?:ly)?\\b|" +
             "استلمت|إستلمت|أرسلت|ارسلت|\\bdebited\\b|\\bcredited\\b|has\\s+been\\s+(?:deducted|debited|credited|charged)|" +
             "\\bpurchase\\s+(?:at|from|of)\\b|transaction\\s+of|\\bwas\\s+charged\\b|successfully\\s+purchased|" +
@@ -83,6 +85,46 @@ public final class ExpenseParser {
 
     private ExpenseParser() {}
 
+    /** Execution verbs, not a free-standing success word or "تم" embedded in "سيتم". */
+    private static final Pattern EXECUTED_PAYMENT = Pattern.compile(
+            "(?i)((?<![\\p{L}])تم\\s+(?:(?:الآن|الان)\\s+)?(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|استخدام|" +
+            "ايداع|إيداع|اضافة|إضافة|استلام|إستلام|رد|إرسال|ارسال|(?:تنفيذ|اجراء|إجراء)\\s+(?:عملية\\s+)?(?:ال)?تحويل)|" +
+            "استلمت|إستلمت|أرسلت|ارسلت|\\b(?:debited|credited|withdrawn)\\b|" +
+            "\\b(?:was|has\\s+been)\\s+(?:charged|deducted|paid|transferred)|" +
+            "\\byou(?:\\s+have)?\\s+(?:paid|sent|received|transferred)|\\bpurchase\\s+(?:at|from|of)\\b|" +
+            "successfully\\s+(?:paid|purchased|transferred))");
+
+    /** Future wording is a capture filter, never evidence that an earlier payment failed. */
+    public static boolean isFutureOnly(String body) {
+        if (body == null) return false;
+        String text = normalizeDigits(body);
+        return FUTURE_PAYMENT.matcher(text).find() && completedPaymentText(text) == null;
+    }
+
+    /** In mixed alerts, parse only the completed clause and its nearby amount, not a later scheduled fee. */
+    private static String paymentText(String text) {
+        return FUTURE_PAYMENT.matcher(text).find() ? completedPaymentText(text) : text;
+    }
+
+    private static String completedPaymentText(String text) {
+        String[] clauses = text.split("(?i)(?:[،;!?\\n]|(?<![0-9])[.,]|[.,](?![0-9])|\\b(?:and|but)\\b|" +
+                "(?<![\\p{L}])و(?=(?:سيتم|هيتم|هيتخصم|سوف|تم\\s)))");
+        for (String clause : clauses) {
+            Matcher future = FUTURE_PAYMENT.matcher(clause);
+            String completed = future.find() ? clause.substring(0, future.start()) : clause;
+            completed = completed.replaceFirst("(?i)\\s+(?:installments?|رسوم|قسط)\\s*$", "");
+            String transaction = SENSITIVE_TAIL.matcher(completed).replaceFirst("");
+            Matcher event = EXECUTED_PAYMENT.matcher(transaction);
+            while (event.find()) {
+                int start = Math.max(0, event.start() - 100), end = Math.min(transaction.length(), event.end() + 100);
+                String nearby = transaction.substring(start, end);
+                if (AMOUNT_AFTER_CURRENCY.matcher(nearby).find() || AMOUNT_BEFORE_CURRENCY.matcher(nearby).find() ||
+                        Pattern.compile("بمبلغ\\s+[0-9]").matcher(nearby).find()) return completed.trim();
+            }
+        }
+        return null;
+    }
+
     public static Parsed parse(String sender, String body) {
         if (body == null || body.trim().isEmpty()) return null;
         String normalized = normalizeDigits(body);
@@ -90,6 +132,8 @@ public final class ExpenseParser {
                 normalized.matches("(?is).*(بنفكرك|نذكرك|يرجى\\s*(?:سداد|دفع)|برجاء\\s*(?:سداد|دفع)|payment\\s+due|minimum\\s+due|amount\\s+due|due\\s+(?:before|on)|to\\s+be\\s+paid).*") &&
                         !normalized.matches("(?is).*(تم\\s*(?:سداد|خصم|دفع)|paid\\s+successfully).*")) return null;
         if (OTP.matcher(normalized).find() || isUnsuccessful(normalized) || isPromotion(normalized)) return null;
+        normalized = paymentText(normalized);
+        if (normalized == null) return null;
         Matcher cardTransfer = CARD_INSTANT_TRANSFER.matcher(normalized);
         if (cardTransfer.find()) {
             long amount = parseMinor(cardTransfer.group(1));
@@ -163,6 +207,8 @@ public final class ExpenseParser {
     public static Parsed parseIncome(String sender, String body) {
         if (body == null) return null;
         String normalized = normalizeDigits(body);
+        normalized = paymentText(normalized);
+        if (normalized == null) return null;
         // "عن طريق التحويل اللحظي" names a channel; it does not make an incoming credit a debit.
         if (OTP.matcher(normalized).find() || !CREDIT_ONLY.matcher(normalized).find() ||
                 isUnsuccessful(normalized) || isPromotion(normalized) ||
@@ -228,7 +274,7 @@ public final class ExpenseParser {
 
     /** Prioritizes completed-looking messages for review without booking them as expenses. */
     public static boolean isCompletedFinancialCandidate(String body) {
-        if (!isFinancialCandidate(body) || isPromotion(body)) return false;
+        if (!isFinancialCandidate(body) || isPromotion(body) || isUnsuccessful(body) || isFutureOnly(body)) return false;
         String text = normalizeDigits(body);
         if (Pattern.compile("(?i)(نذكرك|بنفكرك|يرجى|جاهز[ة]?\\s+للدفع|طلب\\s+سداد|" +
                 "للتقديم|خصومات|خصم\\s+على|العرض\\s+سار|offer\\s+valid|payment\\s+due)")
@@ -319,7 +365,7 @@ public final class ExpenseParser {
     public static boolean isUnsuccessful(String body) {
         if (body == null) return false;
         String normalized = normalizeDigits(body);
-        return NOT_COMPLETED.matcher(normalized).find() || FUTURE_PAYMENT.matcher(normalized).find();
+        return NOT_COMPLETED.matcher(normalized).find();
     }
     static boolean isVerificationMessage(String body) {
         return body!=null && OTP.matcher(normalizeDigits(body)).find();
@@ -428,6 +474,8 @@ public final class ExpenseParser {
         if (body == null) return null;
         String text = normalizeDigits(body);
         if (OTP.matcher(text).find() || isUnsuccessful(text) || isPromotion(text)) return null;
+        text = paymentText(text);
+        if (text == null) return null;
         for (int pass = 0; pass < 2; pass++) {
             Matcher matcher = (pass == 0 ? IPA_IN : IPA_OUT).matcher(text);
             if (!matcher.find()) continue;
@@ -443,7 +491,9 @@ public final class ExpenseParser {
     public static String paidService(String body) {
         if (body == null) return null;
         if (isUnsuccessful(body)) return null;
-        Matcher matcher = SERVICE_PAID.matcher(normalizeDigits(body));
+        String text = paymentText(normalizeDigits(body));
+        if (text == null) return null;
+        Matcher matcher = SERVICE_PAID.matcher(text);
         if (!matcher.find()) return null;
         String name = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
         name = name == null ? "" : name.trim();

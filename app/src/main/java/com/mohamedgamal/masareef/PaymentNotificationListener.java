@@ -24,7 +24,7 @@ public final class PaymentNotificationListener extends NotificationListenerServi
             processSafely(item);
         } catch (RuntimeException error) {
             // A message the app cannot handle must never crash the listener (and with it the whole app).
-            android.util.Log.e("FollowMoney", "Notification skipped", error);
+            android.util.Log.e("FollowMoney", "Notification skipped: " + error.getClass().getSimpleName());
         }
     }
 

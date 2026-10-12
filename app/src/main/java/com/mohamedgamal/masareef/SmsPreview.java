@@ -26,6 +26,10 @@ final class SmsPreview {
     static SmsPreview parse(String sender, String body, long when, long sentAt) {
         long captureAt=CaptureIdentity.smsTimestamp(when, sentAt);
         if(body==null || ExpenseParser.isVerificationMessage(body)) return null;
+        if(ExpenseParser.isFutureOnly(body)) {
+            return ExpenseParser.isFinancialCandidate(body) ? new SmsPreview(sender,body,when,captureAt,
+                    sender,"صيغة مستقبل · مراجعة التسجيل السابق فقط","",0,"correction",false,false) : null;
+        }
         if(ExpenseParser.isUnsuccessful(body)) {
             return ExpenseParser.isFinancialCandidate(body) ? new SmsPreview(sender,body,when,captureAt,
                     sender,"رسالة رفض/إلغاء · قد تصحح عملية سابقة","",0,"correction",false,false) : null;

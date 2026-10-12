@@ -14,6 +14,9 @@ local.properties
 !.env.example
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.dpapi.xml
 keystore.properties
 signing.properties
 *.db
@@ -31,6 +34,7 @@ docs/*
 !docs/USAGE_AR.md
 !docs/PRIVACY.md
 !docs/GITHUB_SETUP.md
+!docs/GOOGLE_PLAY_RELEASE.md
 !docs/screenshots/
 !docs/brand-catalog-2026-10-10/
 !docs/BRAND_CATALOG_CANDIDATES_2026-10-10.csv
