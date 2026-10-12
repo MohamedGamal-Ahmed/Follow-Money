@@ -44,7 +44,7 @@ final class BrandCatalog {
         new Entry("fawry",false,new String[]{"FAWRY","فوري","Fawry"}),
         new Entry("instapay",false,new String[]{"INSTAPAY","IPN","إنستاباي","InstaPay"})
     };
-    static String merchant(String name){return match(name,false);}
+    static String merchant(String name){return match(MerchantClassifier.displayName(name),false);}
     static String bank(String name){return match(name,true);}
     private static String match(String name,boolean bank) {
         if(name==null)return null;String value=normalize(name);

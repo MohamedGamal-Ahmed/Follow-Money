@@ -7,6 +7,7 @@ local.properties
 *.apk
 *.aab
 .tmp/
+release/
 
 # Local configuration, signing material, exports and personal evidence
 .env
@@ -35,6 +36,8 @@ docs/*
 !docs/PRIVACY.md
 !docs/GITHUB_SETUP.md
 !docs/GOOGLE_PLAY_RELEASE.md
+!docs/CLOSED_TESTING_PLAN.md
+!docs/NEXT_STEPS_2026-10-13.md
 !docs/screenshots/
 !docs/brand-catalog-2026-10-10/
 !docs/BRAND_CATALOG_CANDIDATES_2026-10-10.csv

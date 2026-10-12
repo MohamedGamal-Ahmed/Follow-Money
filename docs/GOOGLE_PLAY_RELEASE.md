@@ -1,8 +1,10 @@
 # Google Play release preparation
 
-Prepared 12 October 2026. This is a preparation record, not approval or a published release. The owner reports a personal Play Console account created around 2017: the mandatory closed test for personal accounts created after 13 November 2023 does not apply. Internal testing and meaningful release validation are still needed.
+Prepared 12 October 2026. This is a preparation record, not approval or a published release. Correction: the owner clarified that the Google/Gmail account dates to about 2017, but no Play Console developer account exists yet. Gmail age does not exempt a newly created personal developer account from the mandatory closed test: at least 12 opted-in testers continuously for 14 days before applying for production access. Verify the appropriate developer account type for the app before paying registration fees.
 
 ## Submission gates
+
+Registration/payment is deferred to the start of November 2026. [Closed test plan and account-type clarification](CLOSED_TESTING_PLAN.md) records the updated account facts and the official-policy uncertainty to resolve before paying.
 
 | Item | Evidence / remaining action |
 | --- | --- |
@@ -17,7 +19,7 @@ Prepared 12 October 2026. This is a preparation record, not approval or a publis
 | Store listing | Draft Arabic/English text below. Synthetic screenshots, final icon/feature graphic and reviewer demo video are pending. |
 | Reviewer access | No app login. Provide synthetic SMS instructions/video; do not expect a reviewer to have Egyptian bank SMS. |
 | Financial QA | Re-run synthetic database/reconciliation checks. Historical financial-audit claims, including the previously mentioned inter-account difference and repair dry run, need a separate local evidence review after timestamp correction. No phone export or repair is authorized by this publishing task. |
-| Account setup | Owner verifies developer identity/contact details, account verification, countries, pricing, target audience and content rating in Console. No minimum tester-count assumption for this older account. |
+| Account setup | New developer registration is required. Confirm account type, then verify identity/contact details, account/device verification, countries, pricing, target audience and content rating. A new personal account requires the 12-tester/14-day closed test; the old Gmail date is irrelevant. |
 
 ## Build and upload signing
 
@@ -140,3 +142,13 @@ Policy statements are a dated preparation reference. Re-check before actual subm
 - Release shrinker output lists the private diagnostics/review methods as removed; check-release.py also checks actual bundle Dex content and the production manifest. Full grant/revoke flows, selected notification integration, system speech, the final reviewer video and store graphics remain separate QA/media tasks.
 - Claude Code completed an independent read-only review. Its snapshot excluded DB/evidence storage and artifacts; it is supporting feedback, not an approval or completed release test. The stale public support policy, broad verification-code claim and exception logging it flagged were addressed.
 - No Google Play upload, SMS declaration submission, or Play approval has occurred.
+
+## App checkpoint after classification and navigation work — 12 October 2026
+
+- 343 JVM checks and 50 synthetic Android tests passed (18 reconciliation, 14 phase-one, 18 feature tests). Debug/release builds succeeded; lint still has 61 warnings and no errors.
+- Merchant identities and saved category corrections are local. Known processor prefixes preserve the actual shop even when it is unknown. Health care and cafés are distinct categories; previous user edits, manual/CSV choices, transfer fees and transfer semantics are protected.
+- The actual isolated UI was checked in light and dark mode, including percentage badges, active navigation, and opting into a saved merchant correction through the edit dialog. This does not establish full real-device background SMS/notification reliability.
+- The verified debug APK was installed over the owner's existing Samsung app on 12 October, retaining its data. The app version remains 0.2.0 / versionCode 2. Owner acceptance testing is still pending.
+- Synthetic UI captures are local QA evidence, not final Play listing media. The final feature graphic and reviewer demo video are not complete. The new media AVD was unstable; use the working emulator with an isolated package for further recording.
+- This checkpoint includes classification/navigation changes and testing/media preparation tools. Review later working-tree changes before any commit or push; signing material, generated binaries and phone financial data stay outside Git. The [next-day handoff](NEXT_STEPS_2026-10-13.md) records remaining work.
+- Before publishing: resolve account-type eligibility with Google, arrange portable signing-key recovery, finish release consent/capture/revoke QA, complete store media and Console declarations, and run the required testing track. Google sign-in/cloud backup remains deferred.

@@ -15,8 +15,8 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 ## What it does
 
 - **Capture:** supported banking SMS, selected payment app notifications, manual transactions and text sharing. Historical SMS import includes a preview before saving.
-- **Review:** transactions grouped by date, filters, editable categories, original source details and account/card identity when available.
-- **Understand:** spending categories, money flow, recurring payments and insights with links to the underlying transactions. Currencies stay separate.
+- **Review:** transactions grouped by date, filters, original source details and account/card identity. A local merchant catalog recognizes known branches and payment-processor prefixes. Save a category correction for future purchases, with a separate preview before applying it to earlier automatic captures.
+- **Understand:** a home spending breakdown and focused reports for spending, categories, money flow and recorded living costs, plus links to assets and recurring payments. Report amounts open their underlying transactions; currencies stay separate.
 - **Plan:** daily limits, category budgets and confirmed installment/subscription/bill schedules.
 - **Keep it visible:** three resizable home screen widgets, optional hidden amounts, daily reminders and payment alerts.
 - **Get help:** Arabic problem/suggestion drafts sent through your configured email app, with a preview of basic device information. GitHub remains available for developers.

@@ -11,11 +11,11 @@ try {
     $out = '.tmp/qa-jvm'
     New-Item -ItemType Directory -Force $out | Out-Null
     $src = 'app/src/main/java/com/mohamedgamal/masareef'
-    $files = @('ExpenseParser','CsvImport','BudgetPeriod','SourceIdentity','CaptureIdentity','BalanceTimeline','CommitmentHint','MoneyTotals','SmsPreview','SmsParts','BrandCatalog','DailyAllowance','MoneyFlow','RepairRules','Insights') | ForEach-Object { "$src/$_.java" }
-    $tests = @('ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','BalanceTimelineSmokeTest','CommitmentHintSmokeTest','PhaseOneLogicTest','MoneyFlowTest','RepairRulesTest','InsightsTest') | ForEach-Object { "tools/$_.java" }
+    $files = @('ExpenseParser','MerchantClassifier','NavigationState','CsvImport','BudgetPeriod','SourceIdentity','CaptureIdentity','BalanceTimeline','CommitmentHint','MoneyTotals','SmsPreview','SmsParts','BrandCatalog','DailyAllowance','MoneyFlow','RepairRules','Insights') | ForEach-Object { "$src/$_.java" }
+    $tests = @('ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','BalanceTimelineSmokeTest','CommitmentHintSmokeTest','PhaseOneLogicTest','MoneyFlowTest','RepairRulesTest','InsightsTest','MerchantClassificationTest') | ForEach-Object { "tools/$_.java" }
     & "$env:JAVA_HOME/bin/javac$suffix" -encoding UTF-8 -d $out @files @tests
     if ($LASTEXITCODE -ne 0) { throw 'JVM compilation failed' }
-    foreach ($class in @('ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','com.mohamedgamal.masareef.BalanceTimelineSmokeTest','com.mohamedgamal.masareef.CommitmentHintSmokeTest','com.mohamedgamal.masareef.PhaseOneLogicTest','com.mohamedgamal.masareef.MoneyFlowTest','com.mohamedgamal.masareef.RepairRulesTest','com.mohamedgamal.masareef.InsightsTest')) {
+    foreach ($class in @('ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','com.mohamedgamal.masareef.BalanceTimelineSmokeTest','com.mohamedgamal.masareef.CommitmentHintSmokeTest','com.mohamedgamal.masareef.PhaseOneLogicTest','com.mohamedgamal.masareef.MoneyFlowTest','com.mohamedgamal.masareef.RepairRulesTest','com.mohamedgamal.masareef.InsightsTest','com.mohamedgamal.masareef.MerchantClassificationTest')) {
         & "$env:JAVA_HOME/bin/java$suffix" -cp $out $class
         if ($LASTEXITCODE -ne 0) { throw "Test failed: $class" }
     }

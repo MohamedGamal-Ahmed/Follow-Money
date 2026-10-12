@@ -198,7 +198,7 @@ public final class PhaseOneTest {
         ok(db.addSms("Banque Misr",full,when+25000));long complete=db.latestInserted().id;eq(2L,count("transactions"));eq(1,db.abbreviatedSmsCopies(complete).size());
         long plan=db.putCommitmentFromTransaction(partial,"espresso fixture",25501,"EGP",LocalDate.now().plusMonths(1),"bill");
         db.confirmAbbreviatedSmsCopy(complete,partial);eq(1L,count("transactions"));eq(2L,count("capture_evidence"));eq(1L,count("transaction_archive"));eq(complete,db.commitmentOriginId(plan));
-        ok(!db.addSms("Banque Misr",part,when));ok(!db.addSms("Banque Misr",full,when+25000));eq("ESPRESSO LAB",db.transactionById(complete).merchant);eq(25501L,DailySummary.load(context,db).currencies.get("EGP").expense);
+        ok(!db.addSms("Banque Misr",part,when));ok(!db.addSms("Banque Misr",full,when+25000));eq("Espresso Lab",db.transactionById(complete).merchant);eq(25501L,DailySummary.load(context,db).currencies.get("EGP").expense);
         ok(db.addSms("Banque Misr",full,when+600000));eq(2L,count("transactions"));
         try{db.confirmAbbreviatedSmsCopy(complete,db.latestInserted().id);throw new AssertionError("Unrelated purchase merged");}catch(IllegalArgumentException expected){}
     }
@@ -214,13 +214,18 @@ public final class PhaseOneTest {
             long when=at(LocalDate.now());long bank=fixture.addPaymentSource("بنك مصر","بنك","1111");
             fixture.addManual(when,18550,"EGP","Carrefour","بقالة",bank);
             fixture.addManual(when+1000,6450,"EGP","Uber","مواصلات",bank);
+            fixture.addManual(when+1100,8825,"EGP","Butlers","أكل وشرب",bank);
+            fixture.addManual(when+1200,4525,"EGP","Espresso Lab","مقاهي",bank);
+            fixture.addManual(when+1300,16000,"EGP","Cleopatra Hospital","رعاية صحية",bank);
             fixture.addManual(when+2000,1000,"USD","Apple","اشتراكات");
             fixture.addManualEntry(when+3000,200000,"EGP","راتب تجريبي","دخل",bank,"income",null,null);
             fixture.addManual(at(LocalDate.now().minusDays(1)),9950,"EGP","Netflix","اشتراكات");
         }
         DailySummary.save(target,new DailyAllowance.Plan("EGP",50000,LocalDate.now(),25));
         DailySummary.save(target,new DailyAllowance.Plan("USD",2500,LocalDate.now(),0));
-        target.getSharedPreferences("MainActivity",0).edit().putBoolean("intro_completed",true).putBoolean("sms_permission_prompted",true).putBoolean("initial_import_prompted",true).commit();
+        String activityClass=MainActivity.class.getName(),prefix=target.getPackageName()+".";
+        String activityPrefs=activityClass.startsWith(prefix)?activityClass.substring(prefix.length()):activityClass;
+        target.getSharedPreferences(activityPrefs,0).edit().putString("opening_mode","off").putBoolean("intro_completed",true).putBoolean("sms_permission_prompted",true).putBoolean("initial_import_prompted",true).commit();
         target.getSharedPreferences("notification_settings",0).edit().putBoolean("access_prompted",true).commit();
         MainActivity activity=(MainActivity)runner.startActivitySync(new android.content.Intent(target,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
         runner.waitForIdleSync();
@@ -232,7 +237,39 @@ public final class PhaseOneTest {
         java.lang.reflect.Method render=MainActivity.class.getDeclaredMethod("render");render.setAccessible(true);
         for(int i=0;i<3;i++){final int index=i;runner.runOnMainSync(()->{try{intro.setBoolean(activity,true);step.setInt(activity,index);render.invoke(activity);}catch(Exception e){throw new RuntimeException(e);}});runner.waitForIdleSync();android.os.SystemClock.sleep(300);saveScreen(captures,"intro-"+(i+1));}
         runner.runOnMainSync(()->{try{intro.setBoolean(activity,false);tab.setInt(activity,6);render.invoke(activity);}catch(Exception e){throw new RuntimeException(e);}});runner.waitForIdleSync();android.os.SystemClock.sleep(400);saveScreen(captures,"transactions");
+        java.lang.reflect.Field report=MainActivity.class.getDeclaredField("insightsSection");report.setAccessible(true);
+        for(String name:new String[]{"","categories","spending","flow","living"}) {
+            runner.runOnMainSync(()->{try{tab.setInt(activity,4);report.set(activity,name);render.invoke(activity);}catch(Exception e){throw new RuntimeException(e);}});
+            runner.waitForIdleSync();android.os.SystemClock.sleep(250);saveScreen(captures,name.isEmpty()?"analytics":name);
+        }
+        runner.runOnMainSync(()->{try{tab.setInt(activity,5);render.invoke(activity);}catch(Exception e){throw new RuntimeException(e);}});
+        runner.waitForIdleSync();android.os.SystemClock.sleep(250);saveScreen(captures,"settings");
+        ExpenseDb.Transaction coffee;
+        try(ExpenseDb live=new ExpenseDb(target)) {
+            coffee=live.transactions().stream().filter(tx->"Espresso Lab".equals(tx.merchant)).findFirst().orElseThrow(()->new IllegalStateException("Missing coffee fixture"));
+        }
+        java.lang.reflect.Method edit=MainActivity.class.getDeclaredMethod("editTransactionDialog",ExpenseDb.Transaction.class);edit.setAccessible(true);
+        runner.runOnMainSync(()->{try{edit.invoke(activity,coffee);}catch(Exception e){throw new RuntimeException(e);}});runner.waitForIdleSync();
+        android.view.accessibility.AccessibilityNodeInfo dialog=runner.getUiAutomation().getRootInActiveWindow();
+        List<android.view.accessibility.AccessibilityNodeInfo> choices=dialog.findAccessibilityNodeInfosByText("افتكر التصنيف للتاجر ده في العمليات الجديدة");
+        ok(choices.size()==1 && choices.get(0).isCheckable());
+        ok(choices.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();
+        dialog=runner.getUiAutomation().getRootInActiveWindow();
+        ok(dialog.findAccessibilityNodeInfosByText("افتكر التصنيف للتاجر ده في العمليات الجديدة").get(0).isChecked());
+        saveScreen(captures,"learning");
+        List<android.view.accessibility.AccessibilityNodeInfo> save=dialog.findAccessibilityNodeInfosByViewId("android:id/button1");
+        ok(save.size()==1 && save.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();
+        try(ExpenseDb live=new ExpenseDb(target)) {
+            ok(live.merchantRules().stream().anyMatch(rule->"=espresso lab".equals(rule.matchText) && "مقاهي".equals(rule.category)));
+        }
         runner.runOnMainSync(()->activity.finish());
+        runner.waitForIdleSync();target.getSharedPreferences(activityPrefs,0).edit().putBoolean("dark_mode",true).commit();
+        MainActivity night=(MainActivity)runner.startActivitySync(new android.content.Intent(target,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        runner.waitForIdleSync();android.os.SystemClock.sleep(300);saveScreen(captures,"home-dark");
+        runner.runOnMainSync(()->{try{tab.setInt(night,4);report.set(night,"categories");render.invoke(night);}catch(Exception e){throw new RuntimeException(e);}});
+        runner.waitForIdleSync();android.os.SystemClock.sleep(250);saveScreen(captures,"categories-dark");
+        runner.runOnMainSync(()->night.finish());
+        target.getSharedPreferences(activityPrefs,0).edit().putBoolean("dark_mode",false).commit();
 
     }
 }

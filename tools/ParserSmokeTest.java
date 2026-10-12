@@ -85,7 +85,7 @@ public final class ParserSmokeTest {
         String starbucks = "تم الآن خصم 230.00 EGPعند STARBUCKS CITY STA يوم 09/10/2026 ، الرصيد المتاح EGP 9509.02 من بطاقة بنك مصر ****2700";
         ExpenseParser.Parsed coffee = ExpenseParser.parse("Banque Misr", starbucks);
         if (coffee == null || coffee.amountMinor != 23000 || !"STARBUCKS".equals(coffee.merchant) ||
-                !"أكل وشرب".equals(coffee.category) || !"2700".equals(coffee.cardLast4))
+                !"مقاهي".equals(coffee.category) || !"2700".equals(coffee.cardLast4))
             throw new AssertionError("Starbucks SMS was missed or balance confused with transaction amount");
         checked++;
         String atm = "تم الآن خصم EGP 2000.00 على AAIBN123 AAIB يوم 09/10/2026 ، الرصيد المتاح EGP 7504.02 من بطاقة بنك مصر ****2700";

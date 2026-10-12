@@ -198,7 +198,8 @@ public final class ExpenseParser {
         if ("سحب نقدي".equals(merchant)) category = "سحب نقدي";
         else if (normalized.matches("(?is).*(installment|قسط|اقساط|أقساط).*") && !category.equals("اشتراكات"))
             category = "أقساط";
-        else if (normalized.matches("(?is).*(transfer|تحويل|حولت).*") && category.equals("غير مصنف"))
+        else if (normalized.matches("(?is).*(transfer|تحويل|حولت).*") &&
+                !java.util.Arrays.asList("أقساط","فواتير","اشتراكات").contains(category))
             category = "تحويلات";
         return new Parsed(amount, currency, merchant, category, last4(normalized));
     }
@@ -402,6 +403,8 @@ public final class ExpenseParser {
         if (english.find()) return merchantName(english.group(1));
         Matcher dated = DATE_MERCHANT.matcher(body);
         if (dated.find()) {
+            if (MerchantClassifier.category(dated.group(1)) != null) return merchantName(dated.group(1));
+            if (MerchantClassifier.processorDescriptor(dated.group(1))) return MerchantClassifier.displayName(dated.group(1));
             String found = dated.group(1).split("\\*")[0].trim();
             if (found.length() >= 2) return found.length() > 36 ? found.substring(0, 36).trim() : found;
         }
@@ -410,6 +413,12 @@ public final class ExpenseParser {
         candidate = SENSITIVE_TAIL.matcher(candidate).replaceFirst("").trim();
         candidate = CARD_TAIL.matcher(candidate).replaceAll("").trim();
         candidate = candidate.replaceAll("(?i)(?:\\bon\\b|في|بتاريخ|يوم).*$", "").trim();
+        if (MerchantClassifier.category(candidate) != null) return merchantName(candidate);
+        if (MerchantClassifier.processorDescriptor(candidate)) {
+            // Keep the unknown shop, rather than collapsing every processor payment to "KASHIER".
+            String shop=candidate.replaceFirst("(?i)\\s+(?:EGP|LE|USD|EUR|GBP)\\s*[0-9].*$", "");
+            return MerchantClassifier.displayName(shop);
+        }
         candidate = candidate.replaceAll("[0-9*#].*$", "").trim();
         candidate = candidate.replaceAll("(?i)\\s*(?:EGP|LE|E£|USD|EUR|ج\\.?م\\.?|جنيه|دولار|يورو)$", "").trim();
         candidate = candidate.replaceAll("(?i)\\s*(?:بنجاح|successfully)\\.?$", "").trim();
@@ -426,6 +435,7 @@ public final class ExpenseParser {
     static String normalizeMerchant(String raw) { return raw == null ? "" : merchantName(raw); }
 
     private static String merchantName(String raw) {
+        if (MerchantClassifier.category(raw) != null) return MerchantClassifier.displayName(raw);
         String name = raw.trim().replaceAll("\\s+", " ");
         String upper = name.toUpperCase(Locale.ROOT);
         if (upper.contains("CLAUDE") || upper.contains("ANTHROPIC")) return "Claude";
@@ -439,6 +449,9 @@ public final class ExpenseParser {
     }
 
     static String category(String merchant) {
+        String known = MerchantClassifier.category(merchant);
+        if (known != null) return known;
+        if (merchant == null) return "غير مصنف";
         String value = merchant.toLowerCase(Locale.ROOT);
         if (value.equals("tru") || value.equals("ترو")) return "أقساط";
         if (value.contains("vodafone") || value.contains("فودافون")) return "فواتير";
@@ -448,7 +461,9 @@ public final class ExpenseParser {
         if (value.matches(".*(uber|careem|كريم|اوبر|fuel|petrol|بنزين).*")) return "مواصلات";
         if (value.matches(".*(netflix|spotify|youtube|google|apple|شاهد|انترنت|internet).*")) return "اشتراكات";
         if (value.matches(".*(market|grocery|carrefour|سبينس|سوبر|ماركت).*")) return "بقالة";
-        if (value.matches(".*(restaurant|cafe|coffee|starbucks|مطعم|كافيه).*")) return "أكل وشرب";
+        if (value.matches(".*(\\bcafe\\b|\\bcoffee\\b|\\bstarbucks\\b|مقاهي|كافيه).*")) return "مقاهي";
+        if (value.matches(".*(restaurant|مطعم).*")) return "أكل وشرب";
+        if (value.matches(".*(\\bhospital\\b|\\bclinic\\b|\\bpharmacy\\b|مستشفى|صيدلية|عيادة).*")) return "رعاية صحية";
         if (value.matches(".*(electric|water|gas|كهرباء|مياه|غاز).*")) return "فواتير";
         return "غير مصنف";
     }

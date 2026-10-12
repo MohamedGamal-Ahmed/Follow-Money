@@ -825,9 +825,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (note != null) values.put("note", note.trim());
         if (sourceId != null) values.put("payment_source_id", sourceId);
         MerchantRule rule = matchingRule(merchant);
-        if (rule != null) {
+        if (rule != null && !"يدوي".equals(source) && !"CSV".equals(source)) {
             if (rule.ignored) return false;
-            if ("expense".equals(kind) && !rule.category.isBlank()) values.put("category", rule.category);
+            if ("expense".equals(kind) && !java.util.Arrays.asList("تحويلات","رسوم تحويل","سحب نقدي").contains(category)
+                    && !rule.category.isBlank()) values.put("category", rule.category);
         }
         return getWritableDatabase().insertWithOnConflict("transactions", null, values,
                 SQLiteDatabase.CONFLICT_IGNORE) != -1;
@@ -1070,10 +1071,75 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     private MerchantRule matchingRule(String merchant) {
-        String name = merchant.toLowerCase(Locale.ROOT);
-        for (MerchantRule rule : merchantRules())
-            if (name.contains(rule.matchText.toLowerCase(Locale.ROOT))) return rule;
+        return matchingRule(merchant,merchantRules());
+    }
+
+    private MerchantRule matchingRule(String merchant,List<MerchantRule> rules) {
+        // A correction saved from a transaction wins over a broad text rule.
+        for (MerchantRule rule : rules)
+            if (rule.matchText.startsWith("=") && MerchantClassifier.matchesRule(merchant,rule.matchText)) return rule;
+        for (MerchantRule rule : rules)
+            if (MerchantClassifier.matchesRule(merchant,rule.matchText)) return rule;
         return null;
+    }
+
+    public void rememberMerchantCategory(String merchant, String category) {
+        if (!canRememberMerchant(merchant,category)) throw new IllegalArgumentException("Not a spending merchant");
+        putMerchantRule("="+MerchantClassifier.identity(merchant),category,false);
+    }
+
+    static boolean canRememberMerchant(String merchant,String category) {
+        String key=MerchantClassifier.identity(merchant);
+        return key.length()>=3 && !key.matches("(?:غير معروف|غير مصنف|حساب رقم.*|hsbc|banque misr|bank misr|بنك مصر|bm online|atm|instapay|kashier|paymob|تحويل لحظي|تحويلات)")
+                && spendingCategory(category);
+    }
+
+    private static boolean spendingCategory(String category) {
+        return category!=null && !category.isBlank() && !MoneyFlow.UNCATEGORIZED.equals(category)
+                && !MoneyFlow.COMMITMENT_CATEGORIES.contains(category)
+                && !java.util.Arrays.asList("تحويلات","رسوم تحويل","سحب نقدي","دخل").contains(category);
+    }
+
+    /** Preview and explicit application affect automatic captures only, never user edits or money fields. */
+    public List<Long> merchantCategoryCandidates(String merchant,String category) {
+        List<Long> ids=new ArrayList<>();
+        if(!canRememberMerchant(merchant,category)) return ids;
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT id,merchant,category FROM transactions WHERE kind='expense' " +
+                "AND user_edited=0 AND fee_parent_id IS NULL AND source NOT IN ('يدوي','CSV')",null)) {
+            while(c.moveToNext()) if(MerchantClassifier.sameMerchant(merchant,c.getString(1))
+                    && !category.equals(c.getString(2)) && (spendingCategory(c.getString(2)) || MoneyFlow.UNCATEGORIZED.equals(c.getString(2)))) ids.add(c.getLong(0));
+        }
+        return ids;
+    }
+
+    public int applyMerchantCategory(String merchant,String category) {
+        // Recompute on acceptance; edits made since the preview still stay protected.
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        try {
+            int changed=updateCategories(merchantCategoryCandidates(merchant,category),category);
+            sql.setTransactionSuccessful();return changed;
+        } finally {sql.endTransaction();}
+    }
+
+    /** New catalog labels for untouched automatic purchases; no amount/account/type or source-text changes. */
+    public int refreshMerchantCategories() {
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();int changed=0;
+        List<MerchantRule> rules=merchantRules();
+        try(Cursor c=sql.rawQuery("SELECT id,merchant,category FROM transactions WHERE kind='expense' AND user_edited=0 " +
+                "AND fee_parent_id IS NULL AND source NOT IN ('يدوي','CSV')",null)) {
+            while(c.moveToNext()) {
+                String current=c.getString(2);
+                if(!spendingCategory(current) && !MoneyFlow.UNCATEGORIZED.equals(current)) continue;
+                MerchantRule rule=matchingRule(c.getString(1),rules);
+                // Ignore rules never remove historical records here.
+                if(rule!=null && rule.ignored) continue;
+                String category=rule==null?MerchantClassifier.category(c.getString(1)):rule.category;
+                if(category==null || category.equals(current) || !spendingCategory(category)) continue;
+                ContentValues values=new ContentValues();values.put("category",category);
+                changed+=sql.update("transactions",values,"id=?",new String[]{Long.toString(c.getLong(0))});
+            }
+            sql.setTransactionSuccessful();return changed;
+        } finally {sql.endTransaction();}
     }
 
     public void addAsset(String name, String kind, long valueMinor, String currency) {
@@ -2066,14 +2132,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     /** Uncategorized rows the user never touched get the category today's rules give their merchant (e.g. ChatGPT → اشتراكات). */
     private int recategorizeWithCurrentRules() {
         int changed=0;
-        try (Cursor c=getReadableDatabase().rawQuery("SELECT id,merchant FROM transactions WHERE kind='expense' AND user_edited=0 AND category=?",new String[]{MoneyFlow.UNCATEGORIZED})) {
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT id,merchant FROM transactions WHERE kind='expense' AND user_edited=0 AND fee_parent_id IS NULL " +
+                "AND source NOT IN ('يدوي','CSV') AND category=?",new String[]{MoneyFlow.UNCATEGORIZED})) {
             while (c.moveToNext()) {
                 String merchant=c.getString(1),known=ExpenseParser.normalizeMerchant(merchant);
                 boolean brand=known.length()<=20 && !merchant.toUpperCase(Locale.ROOT).startsWith(known.toUpperCase(Locale.ROOT));
                 String name=brand?known:merchant;
-                String category=ExpenseParser.category(name);
+                MerchantRule rule=matchingRule(merchant);
+                if(rule!=null && rule.ignored) continue;
+                String category=rule==null?ExpenseParser.category(name):rule.category;
                 if (MoneyFlow.UNCATEGORIZED.equals(category)) continue;
-                ContentValues values=new ContentValues();values.put("category",category);if (brand) values.put("merchant",name);
+                ContentValues values=new ContentValues();values.put("category",category);
                 changed+=getWritableDatabase().update("transactions",values,"id=?",new String[]{Long.toString(c.getLong(0))});
             }
         }

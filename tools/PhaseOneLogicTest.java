@@ -74,7 +74,7 @@ public final class PhaseOneLogicTest {
         parts.add("Banque Misr",when+25000,"PRESSO LAB يوم 09/10/2026 ، الرصيد المتاح EGP 500.00");
         equal(1,parts.messages.size());SmsParts.Message complete=parts.messages.values().iterator().next();
         ExpenseParser.Parsed purchase=ExpenseParser.parse(complete.sender,complete.body.toString());
-        equal("ESPRESSO LAB",purchase.merchant);equal(25501L,purchase.amountMinor);equal(when,complete.when);
+        equal("Espresso Lab",purchase.merchant);equal(25501L,purchase.amountMinor);equal(when,complete.when);
         equal(LocalDate.of(2026,10,9),java.time.Instant.ofEpochMilli(ExpenseParser.eventTime(complete.body.toString(),when)).atZone(ZoneId.systemDefault()).toLocalDate());
         SmsParts otherBroadcast=new SmsParts();otherBroadcast.add("Banque Misr",when+30000,complete.body.toString());equal(1,otherBroadcast.messages.size());
         System.out.println("Phase one logic checks passed: "+checked);

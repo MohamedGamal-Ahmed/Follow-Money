@@ -207,6 +207,62 @@ final class FeatureAuditTest {
         ok(plan.nextDue.equals(LocalDate.of(2026, 11, 1)));
         eq(50, plan.totalCount - plan.paidCount);
     }
+    public void testMerchantCorrectionLearnsBranchesWithoutChangingMoneyOrTransfers() {
+        long t=at(LocalDate.now());
+        db.rememberMerchantCategory("KASHIER*BUTLERS & CO C","مقاهي");
+        ok(db.addSms("BANK","Card purchase EGP 88.25 at BUTLERS & CO CAIRO",t));
+        ExpenseDb.Transaction purchase=db.latestInserted();eq("مقاهي",purchase.category);eq(8825L,purchase.amountMinor);eq("EGP",purchase.currency);
+        db.close();db=new ExpenseDb(context);
+        ok(db.addNotification("qa.bank","BANK","Card purchase EGP 91.25 at KASHIER*BUTLERS & CO MALL",t+1000));
+        eq("مقاهي",db.latestInserted().category);eq(9125L,db.latestInserted().amountMinor);
+        db.addManual(t+2000,5000,"USD","Butlers","تسوق");eq("تسوق",db.latestInserted().category);
+        ok(db.addSms("BANK","You sent EGP 42.00 to Butlers",t+3000));eq("تحويلات",db.latestInserted().category);
+        ok(!ExpenseDb.canRememberMerchant("HSBC","تسوق"));ok(!ExpenseDb.canRememberMerchant("Butlers","تحويلات"));
+    }
+
+    private long oldPurchase(String merchant,String category,long t,boolean edited) {
+        db.addManual(t,8250,"EGP",merchant,category);long id=db.latestInserted().id;
+        ContentValues values=new ContentValues();values.put("source","SMS");values.put("user_edited",edited?1:0);
+        db.getWritableDatabase().update("transactions",values,"id=?",new String[]{Long.toString(id)});return id;
+    }
+
+    public void testCatalogRefreshPreservesUserEditsRawNamesAndFinancialFields() {
+        long t=at(LocalDate.now());
+        long coffee=oldPurchase("ESPRESSO LAB-CENTER ALMA","أكل وشرب",t,false);
+        long hospital=oldPurchase("CLEOPATRA HOSPITAL","غير مصنف",t+1000,false);
+        long edited=oldPurchase("SEOUDI MARKET SODIC E","تسوق",t+2000,true);
+        long transfer=oldPurchase("Butlers","تحويلات",t+3000,false);
+        long installment=oldPurchase("Seoudi","أقساط",t+4000,false);
+        db.addManual(t+5000,2000,"USD","Espresso Lab","أكل وشرب");long manual=db.latestInserted().id;
+        int count=db.transactions().size();eq(2,db.refreshMerchantCategories());eq(0,db.refreshMerchantCategories());
+        ExpenseDb.Transaction row=db.transactionById(coffee);eq("مقاهي",row.category);eq("ESPRESSO LAB-CENTER ALMA",row.merchant);
+        eq(8250L,row.amountMinor);eq("EGP",row.currency);eq(t,row.when);eq("expense",row.kind);
+        eq("رعاية صحية",db.transactionById(hospital).category);eq("تسوق",db.transactionById(edited).category);
+        eq("تحويلات",db.transactionById(transfer).category);eq("أقساط",db.transactionById(installment).category);
+        eq("أكل وشرب",db.transactionById(manual).category);eq(count,db.transactions().size());
+        db.addManual(t+6000,1500,"EGP","CLEOPATRA HOSPITAL","غير مصنف");long unknownManual=db.latestInserted().id;
+        db.repairAll();eq("غير مصنف",db.transactionById(unknownManual).category);
+        eq("ESPRESSO LAB-CENTER ALMA",db.transactionById(coffee).merchant);
+    }
+
+    public void testPastMerchantPreviewIsReadOnlyAndAcceptanceRechecksEdits() {
+        long t=at(LocalDate.now());
+        long first=oldPurchase("SEOUDI MARKET SODIC E","غير مصنف",t,false);
+        long second=oldPurchase("SEOUDI-Sodic East","تسوق",t+1000,false);
+        long edited=oldPurchase("SEOUDI MARKET","أخرى",t+2000,true);
+        long transfer=oldPurchase("SEOUDI MARKET","تحويلات",t+3000,false);
+        eq(2,db.merchantCategoryCandidates("Seoudi","بقالة").size());eq("غير مصنف",db.transactionById(first).category);
+        db.updateCategories(Collections.singletonList(second),"عائلة ومساعدات");
+        eq(1,db.applyMerchantCategory("Seoudi","بقالة"));eq("بقالة",db.transactionById(first).category);
+        eq("عائلة ومساعدات",db.transactionById(second).category);eq("أخرى",db.transactionById(edited).category);
+        eq("تحويلات",db.transactionById(transfer).category);eq(8250L,db.transactionById(first).amountMinor);
+        eq(0,db.applyMerchantCategory("Seoudi","بقالة"));
+    }
+
+    private void eq(String expected,String actual) {
+        if(!java.util.Objects.equals(expected,actual)) throw new AssertionError("Expected "+expected+", got "+actual);
+    }
+
     private void seed() {
         Context target = runner.getTargetContext();
         try (ExpenseDb live = new ExpenseDb(target)) {
