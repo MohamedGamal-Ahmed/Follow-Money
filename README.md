@@ -6,11 +6,13 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 
 | | |
 | --- | --- |
-| Status | Private project, under active development |
+| Status | Private project; feature freeze from 14 October 2026 — fixes, testing and Play preparation only |
 | App version | 0.2.0 — development build |
 | Platform | Android 8.0+ / API 26+ |
 | Implementation | Java 17, native Android views, SQLite |
 | Services | No backend, account registration or analytics service |
+
+[Current freeze checkpoint and remaining release gates](docs/RELEASE_FREEZE_2026-10-14.md). Existing features are frozen; no new features are planned for this publication cycle. This checkpoint is not a production-readiness or Google Play approval claim.
 
 ## What it does
 
@@ -18,6 +20,8 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 - **Review:** transactions grouped by date, filters, original source details and account/card identity. A local merchant catalog recognizes known branches and payment-processor prefixes. Save a category correction for future purchases, with a separate preview before applying it to earlier automatic captures.
 - **Understand:** a home spending breakdown and focused reports for spending, categories, money flow and recorded living costs, plus links to assets and recurring payments. Report amounts open their underlying transactions; currencies stay separate.
 - **Plan:** daily limits, category budgets and confirmed installment/subscription/bill schedules.
+- **Finish a task:** reimbursement selection, impact preview, confirmation and undo; related details return to their parent, with search/filter/scroll context retained.
+- **Optional points:** whole daily-limit points rounded per day after explicit coverage confirmation; a clear balance/yesterday/today summary and 100-point milestones, with today's result provisional and refunds correcting the original purchase day.
 - **Keep it visible:** three resizable home screen widgets, optional hidden amounts, daily reminders and payment alerts.
 - **Get help:** Arabic problem/suggestion drafts sent through your configured email app, with a preview of basic device information. GitHub remains available for developers.
 
@@ -95,6 +99,10 @@ Use **الإعدادات ← المساعدة وعن التطبيق ← الإب
 The `support/` folder is the reviewed, code-free publishing source for the support repository. Its README, forms and guides are copied into a separate checkout; application source and private development docs are never copied there.
 
 ## Privacy and ownership
+
+**Monthly summaries:** Analytics retains completed-month reports with currency-separated totals and spending behavior. The home entry disappears after reading. A neutral first-of-month notification can be disabled independently; Android may delay delivery. Percentage comparisons require confirmed coverage and invalidate when the underlying effective records change. [Arabic usage](docs/USAGE_AR.md)
+
+Brand signature: **بكل فخر، صُنع في مصر 🇪🇬** / **Proudly made in Egypt**, with **Developed by Mohamed Gamal** in Settings. Campaigns lead with the product benefit, **اعرف فلوسك راحت فين**, and use **#صنع_في_مصر #FollowMoney**. Use actual app captures with invented demo data for promotional material; the origin signature is a quiet secondary mark.
 
 Financial data stays in app-local storage. Stored source text is encrypted with Android Keystore; the SQLite ledger itself is not encrypted. Android backup is disabled in the app configuration. CSV exports are created only when requested and contain financial data. Support drafts automatically include only app/device/Android/locale information, plus the description you write. [Privacy details](docs/PRIVACY.md)
 

@@ -1446,6 +1446,21 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 new String[]{Long.toString(id)})) { return cursor.moveToFirst() ? cursor.getLong(0) : id; }
     }
 
+    /** Read-only grouping by confirmed parent relationships. Same-bank cards are never guessed to be linked. */
+    public java.util.Map<Long,List<Transaction>> accountTransactionGroups(LocalDate from,LocalDate to,String currency) {
+        java.util.Map<Long,Long> roots=new java.util.HashMap<>();
+        for(PaymentSource source:paymentSources()) roots.put(source.id,source.parentSourceId==null?source.id:source.parentSourceId);
+        java.util.Map<Long,List<Transaction>> groups=new java.util.LinkedHashMap<>();
+        for(Transaction tx:transactionsBetween(from,to)) {
+            if(!currency.equals(tx.currency)) continue;
+            Long debit=roots.get(tx.paymentSourceId);
+            Long credit="transfer".equals(tx.kind)?roots.get(tx.destinationSourceId):null;
+            if(debit!=null) groups.computeIfAbsent(debit,k->new ArrayList<>()).add(tx);
+            if(credit!=null && !credit.equals(debit)) groups.computeIfAbsent(credit,k->new ArrayList<>()).add(tx);
+        }
+        return groups;
+    }
+
     /** Keep card/SMS identities and all financial rows intact; only the confirmed relationship changes. */
     public void linkCardToAccount(long cardId, long accountId) {
         PaymentSource card=paymentSource(cardId), account=paymentSource(accountId);
@@ -1980,20 +1995,72 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return result;
     }
 
-    /** Purchases in the 30 days before an incoming payment that still have something left to be repaid, closest amount first. */
+    /** Default to the incoming payment's day; older purchases are an explicit second choice. */
     public List<Transaction> reimbursementCandidates(Transaction income) {
+        return reimbursementCandidates(income,false);
+    }
+
+    public List<Transaction> reimbursementCandidates(Transaction income,boolean older) {
         List<Transaction> result=new ArrayList<>();
         if (income==null || !"income".equals(income.kind)) return result;
         java.util.Map<Long,Long> offsets=reimbursementOffsets();
         LocalDate day=Instant.ofEpochMilli(income.when).atZone(ZoneId.systemDefault()).toLocalDate();
-        for (Transaction tx:transactionsBetween(day.minusDays(30),day.plusDays(1)))
+        for (Transaction tx:transactionsBetween(older?LocalDate.of(1970,1,1):day,older?day:day.plusDays(1)))
             if ("expense".equals(tx.kind) && tx.currency.equals(income.currency) && tx.when<=income.when+60_000 &&
                     effectiveAmount(tx,offsets)>0 && MoneyFlow.bucket(tx.kind,tx.category)!=MoneyFlow.Bucket.OPEN_TRANSFER) result.add(tx);
         result.sort((a,b)->{
-            int byAmount=Long.compare(Math.abs(effectiveAmount(a,offsets)-income.amountMinor),Math.abs(effectiveAmount(b,offsets)-income.amountMinor));
-            return byAmount!=0?byAmount:Long.compare(b.when,a.when);
+            int byTime=Long.compare(b.when,a.when);
+            return byTime!=0?byTime:Long.compare(b.id,a.id);
         });
-        return result.size()>8?new ArrayList<>(result.subList(0,8)):result;
+        return result;
+    }
+
+    static final class ReimbursementPreview {
+        final Transaction income,expense;
+        final LocalDate day;
+        final long applied,personal,daySpending;
+        final String fingerprint;
+        ReimbursementPreview(Transaction income,Transaction expense,long applied,long personal,long daySpending,String fingerprint) {
+            this.income=income;this.expense=expense;this.applied=applied;this.personal=personal;this.daySpending=daySpending;this.fingerprint=fingerprint;
+            day=Instant.ofEpochMilli(expense.when).atZone(ZoneId.systemDefault()).toLocalDate();
+        }
+    }
+
+    ReimbursementPreview previewReimbursement(long incomeId,long expenseId) {
+        Transaction income=transactionById(incomeId),expense=transactionById(expenseId);
+        if(income==null || expense==null || !"income".equals(income.kind) || !"expense".equals(expense.kind) ||
+                !income.currency.equals(expense.currency) || expense.when>income.when+60_000 || reimbursedExpense(incomeId)!=null ||
+                MoneyFlow.bucket(expense.kind,expense.category)==MoneyFlow.Bucket.OPEN_TRANSFER)
+            throw new IllegalArgumentException("Purchase or repayment changed");
+        java.util.Map<Long,Long> offsets=reimbursementOffsets();
+        long left=effectiveAmount(expense,offsets),applied=Math.min(left,income.amountMinor);
+        if(applied<=0)throw new IllegalArgumentException("Nothing left to repay");
+        LocalDate day=Instant.ofEpochMilli(expense.when).atZone(ZoneId.systemDefault()).toLocalDate();
+        MoneyTotals totals=new MoneyTotals();
+        for(Transaction tx:transactionsBetween(day,day.plusDays(1)))totals.add(tx.currency,tx.kind,tx.category,effectiveAmount(tx,offsets));
+        MoneyTotals.Totals currencyTotals=totals.currencies.get(expense.currency);
+        long spending=currencyTotals==null?0:currencyTotals.living;
+        String fingerprint=income.when+":"+income.amountMinor+":"+income.currency+":"+income.merchant+":"+
+                expense.when+":"+expense.amountMinor+":"+expense.category+":"+expense.merchant+":"+left+":"+spending;
+        return new ReimbursementPreview(income,expense,applied,left-applied,
+                spending-(MoneyFlow.bucket(expense.kind,expense.category)==MoneyFlow.Bucket.LIVING?applied:0),fingerprint);
+    }
+
+    /** The confirmation must still describe the records the user actually reviewed. */
+    long confirmReimbursement(ReimbursementPreview preview) {
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        try {
+            ReimbursementPreview current=previewReimbursement(preview.income.id,preview.expense.id);
+            if(!current.fingerprint.equals(preview.fingerprint))throw new IllegalArgumentException("Preview changed");
+            long applied=linkReimbursement(current.income.id,current.expense.id);
+            sql.setTransactionSuccessful();return applied;
+        } finally {sql.endTransaction();}
+    }
+
+    /** Undo this exact link only; never erase a replacement or another incoming repayment. */
+    boolean undoReimbursement(long incomeId,long expenseId,long amount) {
+        return getWritableDatabase().delete("reimbursements","income_id=? AND expense_id=? AND amount_minor=?",
+                new String[]{Long.toString(incomeId),Long.toString(expenseId),Long.toString(amount)})==1;
     }
 
     /** Links an incoming payment to the purchase it repaid. Only the part up to what is left of the purchase counts. */

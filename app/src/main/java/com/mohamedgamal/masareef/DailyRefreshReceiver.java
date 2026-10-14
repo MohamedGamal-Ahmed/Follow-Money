@@ -25,7 +25,8 @@ public final class DailyRefreshReceiver extends BroadcastReceiver {
         } catch(SecurityException denied) {alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,midnight,pending);}
     }
     static void refresh(Context context) {
-        SummaryWidget.refresh(context);DailySummaryNotifier.refresh(context);schedule(context);
+        DailyPointsStore.observeToday(context);
+        SummaryWidget.refresh(context);DailySummaryNotifier.refresh(context);MonthlySummaryReceiver.refresh(context);schedule(context);
     }
     @Override public void onReceive(Context context,Intent intent) {
         refresh(context);

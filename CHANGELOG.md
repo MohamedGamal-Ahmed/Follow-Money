@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Freeze the existing feature scope on 14 October 2026; restrict the publication cycle to defect fixes, validation and Google Play preparation. Record known issues and verification limits in the release checkpoint.
+
+- Prevent the muted opening video from requesting audio focus and interrupting background music.
+
+- Present reimbursement selection in a native bottom sheet with selectable cards and a separate review action; display the linked purchase's current personal share under the incoming transaction and in its details.
+
+- Guide reimbursements through same-day chronological selection, an explicit older-purchase search, read-only impact preview, guarded confirmation, success and undo.
+- Preserve related transaction parents and screen/query/filter scroll context, retain details after editing, and return daily-budget/points drilldowns to their initiating dialog.
+- Add optional currency-separated daily points with gains/deductions rounded to whole points per day, frozen observed daily limits, provisional today and revocable coverage confirmation for closed dates. Recompute historical scores after edits/refunds without awarding incoming repayments twice. Separate confirmed balance, yesterday and today's estimate, with 100-point milestones and a separate history/help view.
+
+- Add closed-month summaries with currency-separated totals, spending behavior, transaction drilldowns and coverage-confirmed comparisons that invalidate after data changes.
+- Add a neutral monthly notification with catch-up/deduplication, an independent opt-out, and a home card that disappears after reading while reports remain available in Analytics.
+
+- Aggregate account analytics through confirmed card/account links, include archived linked cards in historical activity, and keep unrelated same-bank sources separate. Show own-account transfer direction separately from recorded inflows and external outflows.
+- Identify unlinked card views and offer the existing explicit linking flow; retain the selected account across activity recreation.
+- Add the Egyptian maker signature to Settings, onboarding, the opening and bilingual promotional templates.
+
 - Route SMS and Notification Access permission entry points through disclosures; explain the external system speech provider before voice entry.
 - Bundle a bilingual privacy policy, generate its public HTML from the same source, and document Google Play declaration/signing gates.
 - Configure upload signing through local environment variables; enable release shrinking and restrict developer financial review tools to debug builds.

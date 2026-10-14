@@ -8,6 +8,7 @@ local.properties
 *.aab
 .tmp/
 release/
+brag-output*/
 
 # Local configuration, signing material, exports and personal evidence
 .env
@@ -36,6 +37,7 @@ docs/*
 !docs/PRIVACY.md
 !docs/GITHUB_SETUP.md
 !docs/GOOGLE_PLAY_RELEASE.md
+!docs/RELEASE_FREEZE_2026-10-14.md
 !docs/CLOSED_TESTING_PLAN.md
 !docs/NEXT_STEPS_2026-10-13.md
 !docs/screenshots/

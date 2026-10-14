@@ -28,6 +28,24 @@ Settings is organized by task: budgets/widgets, capture, appearance/profile, rem
 
 `GitHubSupport` constructs browser URLs using encoded fields. The user reviews device metadata before opening a bug form. No issue is submitted automatically, and no financial data is included in that metadata.
 
+## Transaction journeys and daily points
+
+`TransactionJourney` preserves the parent detail chain. `MainActivity` keeps bounded scroll positions by screen/query/filter context and saves them, transaction parents and drilldown return targets in the activity state bundle. A transaction edit finishes in the same details screen. Budget and points drilldowns return to their initiating dialog.
+
+Reimbursement candidates default to the incoming transaction's local calendar day, sorted by timestamp/id descending, without an eight-item cap. An explicit older-purchase branch includes eligible earlier records. `previewReimbursement` is read-only and projects the purchase day's living total; `confirmReimbursement` rechecks the preview under a transaction. Undo deletes only that exact income/expense/amount link. Gross ledger records remain unchanged.
+
+The native picker is a bottom-aligned dialog with selectable cards, checked-state accessibility, a scrollable candidate area and a separate review button. Returning from the impact preview retains the selection and search. Incoming transaction rows and details derive a personal-share caption from valid effective reimbursement offsets, including all repayments against that purchase; they retain the gross incoming amount.
+
+`DailyPointsStore` stores opt-in, the first observed daily limit per currency/date and explicit coverage confirmations in local preferences; it never writes transactions or cached score totals. No historical budget anchors are inferred. `DailyPoints` derives each day's points from `(limitMinor - effectiveLivingMinor) / 1000` using `BigDecimal`, then rounds to a whole number with `HALF_UP` (ties away from zero). The balance sums those rounded daily awards so it matches the visible history. Only closed, coverage-confirmed dates without review-flagged rows contribute; today remains provisional. Edits/refunds recompute the relevant purchase-date score using its anchored limit. Coverage is a revocable user assertion of complete recording, rather than a guarantee of bank/SMS coverage. Disabling keeps the history; deleting all local data also clears points preferences. The points summary separates the confirmed balance, yesterday and provisional today; the next 100-point milestone is visual encouragement only, not a monetary reward. History and calculation guidance are separate from the initial summary.
+
+`JourneyUiTest` is restricted to an emulator and the separate `.journeyqa` package. It exercises real dialogs and Back using a synthetic private database, including preview/cancel/confirm/undo, related-detail parents, search scroll restoration and points review/coverage. Captures stay local and ignored.
+
+## Monthly summaries
+
+`MonthlyReport` derives closed-calendar-month totals from the same effective `MoneyFlow.Item` amounts as Analytics, with separate currency summaries and explicit behavior thresholds. Coverage confirmations are keyed by currency/month and hashed effective rows; changed imports, edits or reimbursements invalidate the relevant confirmation. An empty or zero prior denominator never produces a percentage.
+
+`MonthlySummaryReceiver` uses an inexact local first-of-month alarm from 09:00 and catches up on activity resume, date/time changes and reboot. It stores the start, latest notified and latest seen months in local preferences. Notifications contain no amounts or merchants, require system permission/channel availability and recorded activity, and deep-link to the completed month. Reading hides the home entry while retaining the Analytics report. This scheduling does not promise delivery while Android force-stops or restricts the app.
+
 ## Validation
 
 Standalone JVM tests cover parser, time/budget, money-flow, repair and insight rules. Android instrumentation covers SQLite reconciliation, feature integration and widgets using synthetic data. `tools/run-checks.ps1` is the shared entry point for local checks and CI; Android instrumentation is optional and emulator-only. `tools/check-repo.py` checks documentation links, support form field consistency, pinned CI actions and excluded private artifacts.

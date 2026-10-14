@@ -15,6 +15,22 @@ public final class MoneyFlowTest {
     private static final ZoneId ZONE = ZoneId.of("Africa/Cairo");
 
     public static void main(String[] args) {
+        AccountMovement bank = new AccountMovement();
+        bank.add("expense", "بقالة", 10000, true, false);
+        bank.add("expense", "رسوم تحويل", 150, true, false);
+        bank.add("expense", "تحويلات", 50000, true, false);
+        bank.add("income", "دخل", 120000, true, false);
+        bank.add("transfer", "تحويلات", 20000, false, true);
+        bank.add("transfer", "تحويلات", 30000, true, false);
+        bank.add("transfer", "تحويلات", 99999, true, true);
+        bank.add("income", "دخل", 99999, false, false);
+        check(bank.spent == 10150, "bank purchases and fees remain gross movements");
+        check(bank.sent == 50000 && bank.outgoing() == 60150, "external transfers count once in outflow");
+        check(bank.incoming == 120000, "recorded inflow, not a guessed salary");
+        check(bank.ownIncoming == 20000 && bank.ownOutgoing == 30000, "own transfers retain direction and exclude same-root endpoints");
+        AccountMovement purposeful = new AccountMovement();
+        purposeful.add("expense", "أقساط", 70000, true, false);
+        check(purposeful.spent == 70000 && purposeful.sent == 0, "known-purpose transfers follow existing expense categories");
         check(MoneyFlow.bucket("expense", "أكل وشرب") == MoneyFlow.Bucket.LIVING, "food is living");
         check(MoneyFlow.bucket("expense", "سحب نقدي") == MoneyFlow.Bucket.LIVING, "cash withdrawal counts as spending");
         check(MoneyFlow.bucket("expense", "رسوم تحويل") == MoneyFlow.Bucket.LIVING, "bank fees are spending");

@@ -35,6 +35,8 @@ final class FeatureAuditTest {
             @Override public SharedPreferences getSharedPreferences(String name, int mode) { return target.getSharedPreferences("feature-audit-" + name, mode); }
         };
         db = new ExpenseDb(context); db.getWritableDatabase();
+        context.getSharedPreferences(DailySummary.SETTINGS,0).edit().clear().commit();
+        context.getSharedPreferences(DailyPointsStore.SETTINGS,0).edit().clear().commit();
     }
     void run(String mode) {
         if (!"ranchu".equals(android.os.Build.HARDWARE) && !"goldfish".equals(android.os.Build.HARDWARE)) throw new SecurityException("Emulator only");
@@ -62,6 +64,79 @@ final class FeatureAuditTest {
         ok(GitHubSupport.details(context).equals(uri.getQueryParameter("diagnostics")));
         ok(GitHubSupport.version(context).equals(uri.getQueryParameter("app_version")));
         ok("feature_request.yml".equals(GitHubSupport.featureUri().getQueryParameter("template")));
+    }
+    public void testAccountMovementIncludesLinkedCardsWithoutGuessingOrDuplication() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        long account=db.addPaymentSource("Banque Misr","حساب","1111");
+        long card=db.addPaymentSource("Banque Misr","بطاقة","2222");
+        long oldCard=db.addPaymentSource("Banque Misr","بطاقة","4444");
+        long other=db.addPaymentSource("Banque Misr","حساب","3333");
+        long unlinked=db.addPaymentSource("Banque Misr","بطاقة","5555");
+        db.linkCardToAccount(card,account);db.linkCardToAccount(oldCard,account);
+        db.updateSourceProfile(oldCard,"",true,true);
+        ok(db.addManual(t,10000,"EGP","QA groceries","بقالة",card));
+        long purchase=db.latestInserted().id;
+        ok(db.addManual(t+1000,2000,"EGP","QA old card","مقاهي",oldCard));
+        ok(db.addManualEntry(t+2000,80000,"EGP","QA inflow","دخل",account,"income",null,null));
+        long inflow=db.latestInserted().id;
+        ok(db.addManualEntry(t+3000,15000,"EGP","QA external","تحويلات",account,"expense",null,null));
+        ok(db.addManualEntry(t+4000,30000,"EGP","QA own transfer","تحويلات",other,"transfer",card,null));
+        long transfer=db.latestInserted().id;
+        ok(db.addManual(t+5000,7000,"EGP","QA separate","بقالة",unlinked));
+        ok(db.addManual(t+6000,99999,"USD","QA other currency","بقالة",card));
+        ok(db.addManual(at(day.minusDays(1)),88888,"EGP","QA other day","بقالة",card));
+        Map<Long,java.util.List<ExpenseDb.Transaction>> groups=db.accountTransactionGroups(day,day.plusDays(1),"EGP");
+        eq(3,groups.size());eq(5,groups.get(account).size());eq(1,groups.get(other).size());eq(1,groups.get(unlinked).size());
+        ok(!groups.containsKey(card) && !groups.containsKey(oldCard));
+        eq(5,new java.util.HashSet<>(groups.get(account).stream().map(tx->tx.id).collect(java.util.stream.Collectors.toList())).size());
+        AccountMovement movement=new AccountMovement();
+        for(ExpenseDb.Transaction tx:groups.get(account)) movement.add(tx.kind,tx.category,tx.amountMinor,
+                tx.paymentSourceId!=null && db.accountId(tx.paymentSourceId)==account,
+                tx.destinationSourceId!=null && db.accountId(tx.destinationSourceId)==account);
+        eq(12000,movement.spent);eq(15000,movement.sent);eq(80000,movement.incoming);eq(30000,movement.ownIncoming);eq(0,movement.ownOutgoing);
+        // Reimbursements do not rewrite actual bank movements, and grouping is read-only.
+        eq(10000,db.linkReimbursement(inflow,purchase));
+        eq(5,db.accountTransactionGroups(day,day.plusDays(1),"EGP").get(account).size());
+        eq(10000,db.transactionById(purchase).amountMinor);eq(card,db.transactionById(purchase).paymentSourceId);
+        eq(30000,db.transactionById(transfer).amountMinor);eq(8,countRows("transactions"));
+        db.unlinkCard(card);
+        groups=db.accountTransactionGroups(day,day.plusDays(1),"EGP");
+        eq(3,groups.get(account).size());eq(2,groups.get(card).size());
+        eq(10000,db.transactionById(purchase).amountMinor);eq(card,db.transactionById(purchase).paymentSourceId);
+    }
+    public void testHistoricalTransferWithinOneLinkedAccountAppearsOnce() {
+        LocalDate day=LocalDate.now();long account=db.addPaymentSource("HSBC","حساب","0001");
+        long card=db.addPaymentSource("HSBC","بطاقة","0002");
+        ok(db.addManualEntry(at(day),5000,"EGP","QA old internal","تحويلات",card,"transfer",account,null));
+        db.linkCardToAccount(card,account);
+        Map<Long,java.util.List<ExpenseDb.Transaction>> groups=db.accountTransactionGroups(day,day.plusDays(1),"EGP");
+        eq(1,groups.size());eq(1,groups.get(account).size());
+        AccountMovement movement=new AccountMovement();movement.add("transfer","تحويلات",5000,true,true);
+        eq(0,movement.ownIncoming);eq(0,movement.ownOutgoing);eq(0,movement.outgoing());eq(1,countRows("transactions"));
+    }
+    public void testMonthlySummaryUsesEffectiveAmountsAndNeverWritesLedger() {
+        LocalDate day=LocalDate.of(2026,9,10);
+        ok(db.addManual(at(day),10000,"EGP","QA purchase","بقالة"));long purchase=db.latestInserted().id;
+        ok(db.addManualEntry(at(day.plusDays(1)),20000,"EGP","QA recorded inflow","دخل",null,"income",null,null));
+        ok(db.addManualEntry(at(LocalDate.of(2026,10,2)),5000,"EGP","QA repayment","دخل",null,"income",null,null));long refund=db.latestInserted().id;
+        db.linkReimbursement(refund,purchase);
+        ok(db.addManual(at(LocalDate.of(2026,10,3)),12000,"EGP","QA October","مقاهي"));long octoberBuy=db.latestInserted().id;
+        java.util.List<MoneyFlow.Item> effective=new java.util.ArrayList<>();Map<Long,Long> offsets=db.reimbursementOffsets();
+        for(ExpenseDb.Transaction tx:db.transactionsBetween(day.withDayOfMonth(1),LocalDate.of(2026,11,1))) {
+            long amount=ExpenseDb.effectiveAmount(tx,offsets);
+            if(amount>0)effective.add(new MoneyFlow.Item(tx.id,tx.when,amount,tx.currency,tx.kind,tx.category,tx.merchant));
+        }
+        MonthlyReport report=MonthlyReport.build(effective,java.time.YearMonth.of(2026,10),ZoneId.systemDefault());
+        MonthlyReport.Currency egp=report.currencies.get("EGP");
+        eq(12000,egp.current.totalOut());eq(0,egp.current.of(MoneyFlow.Bucket.INFLOW));eq(5000,egp.previous.of(MoneyFlow.Bucket.LIVING));
+        ok(egp.livingChangePercent(false)==null);eq(140,egp.livingChangePercent(true));
+        eq(4,countRows("transactions"));eq(10000,db.transactionById(purchase).amountMinor);eq(5000,db.transactionById(refund).amountMinor);
+        eq(5000,db.reimbursementOffsets().get(purchase));
+        ok(db.addManualEntry(at(LocalDate.of(2026,10,4)),12000,"EGP","QA full repayment","دخل",null,"income",null,null));
+        eq(12000,db.linkReimbursement(db.latestInserted().id,octoberBuy));
+        long remaining=0;offsets=db.reimbursementOffsets();
+        for(ExpenseDb.Transaction tx:db.transactionsBetween(LocalDate.of(2026,10,1),LocalDate.of(2026,11,1)))remaining+=ExpenseDb.effectiveAmount(tx,offsets);
+        eq(0,remaining);eq(3,db.transactionsBetween(LocalDate.of(2026,10,1),LocalDate.of(2026,11,1)).size());
     }
     public void testEmailSupportDraftAndCopyContainReviewedTextOnly() {
         db.addManual(at(LocalDate.now()),987654,"EGP","QA PRIVATE MERCHANT","تسوق");
@@ -218,6 +293,91 @@ final class FeatureAuditTest {
         db.addManual(t+2000,5000,"USD","Butlers","تسوق");eq("تسوق",db.latestInserted().category);
         ok(db.addSms("BANK","You sent EGP 42.00 to Butlers",t+3000));eq("تحويلات",db.latestInserted().category);
         ok(!ExpenseDb.canRememberMerchant("HSBC","تسوق"));ok(!ExpenseDb.canRememberMerchant("Butlers","تحويلات"));
+    }
+
+    public void testReimbursementJourneyKeepsTodayChronologicalAndUncapped() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        db.addManual(at(day.minusDays(2)),29500,"EGP","older exact match","بقالة");long old=db.latestInserted().id;
+        db.addManual(t,41900,"EGP","Seoudi","بقالة");long seoudi=db.latestInserted().id;
+        for(int i=0;i<12;i++)db.addManual(t+1000+i,100+i,"EGP","more "+i,"مقاهي");
+        db.addManual(t+3000,500,"USD","other currency","بقالة");
+        db.addManual(t+4000,100,"EGP","unresolved transfer","تحويلات");
+        db.addManual(t+120000,29500,"EGP","future","بقالة");
+        db.addManualEntry(t+10000,29500,"EGP","repayment","دخل",null,"income",null,null);ExpenseDb.Transaction income=db.latestInserted();
+        java.util.List<ExpenseDb.Transaction> today=db.reimbursementCandidates(income);
+        eq(13,today.size());eq(seoudi,today.get(12).id);
+        for(int i=1;i<today.size();i++)ok(today.get(i-1).when>=today.get(i).when);
+        java.util.List<ExpenseDb.Transaction> older=db.reimbursementCandidates(income,true);eq(1,older.size());eq(old,older.get(0).id);
+    }
+
+    public void testSeoudiCoffeePreviewConfirmUndoAndOldDay() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,day.minusDays(3),0));
+        db.addManual(t,41900,"EGP","Seoudi","بقالة");long buy=db.latestInserted().id;
+        db.addManual(t+1000,2500,"EGP","Coffee","مقاهي");
+        db.addManualEntry(t+2000,29500,"EGP","colleague","دخل",null,"income",null,null);long back=db.latestInserted().id;
+        ExpenseDb.ReimbursementPreview preview=db.previewReimbursement(back,buy);
+        eq(12400,preview.personal);eq(14900,preview.daySpending);eq(0,db.reimbursedOf(buy)); // Preview is read-only.
+        eq(29500,db.confirmReimbursement(preview));eq(10100,DailySummary.load(context,db).currencies.get("EGP").remaining);
+        eq(41900,db.transactionById(buy).amountMinor);eq(29500,db.transactionById(back).amountMinor);eq(3,db.transactions().size());
+        ok(!db.undoReimbursement(back,buy,100));ok(db.undoReimbursement(back,buy,29500));
+        eq(-19400,DailySummary.load(context,db).currencies.get("EGP").remaining);
+        db.addManual(at(day.minusDays(1)),41900,"EGP","yesterday","بقالة");long old=db.latestInserted().id;
+        eq(29500,db.confirmReimbursement(db.previewReimbursement(back,old)));
+        eq(-19400,DailySummary.load(context,db).currencies.get("EGP").remaining); // Yesterday refund must not fund today.
+        eq(12400,ExpenseDb.effectiveAmount(db.transactionById(old),db.reimbursementOffsets()));
+    }
+
+    public void testConfirmationRejectsStalePreviewWithoutMovingTheLink() {
+        long t=at(LocalDate.now());db.addManual(t,41900,"EGP","Seoudi","بقالة");long buy=db.latestInserted().id;
+        db.addManualEntry(t+2000,29500,"EGP","colleague","دخل",null,"income",null,null);long back=db.latestInserted().id;
+        ExpenseDb.ReimbursementPreview preview=db.previewReimbursement(back,buy);
+        db.updateTransaction(buy,50000,"EGP","Seoudi","بقالة",null);
+        try{db.confirmReimbursement(preview);throw new AssertionError("Stale confirmation saved");}catch(IllegalArgumentException expected){}
+        eq(0,db.reimbursedOf(buy));eq(29500,db.confirmReimbursement(db.previewReimbursement(back,buy)));
+        ok(!db.undoReimbursement(back,buy,10000));eq(29500,db.reimbursedOf(buy));
+    }
+
+    public void testDailyPointsRecomputeRefundDayWithoutFundingTodayOrDoubling() {
+        LocalDate today=LocalDate.now(),yesterday=today.minusDays(1);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,yesterday,0));
+        DailyPointsStore.enable(context,"EGP",yesterday);DailyPointsStore.observe(context,"EGP",today);
+        db.addManual(at(yesterday),41900,"EGP","Seoudi","بقالة");long buy=db.latestInserted().id;
+        db.addManual(at(yesterday)+1000,2500,"EGP","Coffee","مقاهي");long coffee=db.latestInserted().id;
+        db.addManual(at(today),1000,"EGP","today","مقاهي");
+        db.addManualEntry(at(today)+1000,29500,"EGP","colleague","دخل",null,"income",null,null);long back=db.latestInserted().id;
+        ok(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)).signum()==0);
+        DailyPointsStore.confirm(context,db,"EGP",yesterday,today);DailyPointsStore.confirm(context,db,"EGP",yesterday,today);
+        ok("-19".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)))));
+        db.linkReimbursement(back,buy);
+        java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",today);
+        ok("+10".equals(DailyPoints.format(DailyPoints.total(days))));eq(1000,days.get(1).spending);ok(!days.get(1).finalized);
+        db.updateTransaction(coffee,3500,"EGP","Coffee","مقاهي",null);
+        ok("+9".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)))));
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",50000,yesterday,0));DailyPointsStore.observe(context,"EGP",today);
+        days=DailyPointsStore.load(context,db,"EGP",today);eq(25000,days.get(0).limit);eq(25000,days.get(1).limit);
+        DailyPointsStore.disable(context,"EGP");DailyPointsStore.enable(context,"EGP",today);eq(25000,DailyPointsStore.load(context,db,"EGP",today).get(1).limit);
+        try{DailyPointsStore.confirm(context,db,"EGP",today,today);throw new AssertionError("Open day finalized");}catch(IllegalArgumentException expected){}
+        DailyPointsStore.revoke(context,"EGP",yesterday);ok(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)).signum()==0);
+    }
+
+    public void testPointsRequireCoverageAndKeepCurrenciesAndUnknownDaysSeparate() {
+        LocalDate today=LocalDate.now(),yesterday=today.minusDays(1);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,yesterday.minusDays(1),0));
+        DailySummary.save(context,new DailyAllowance.Plan("USD",1000,yesterday,0));
+        DailyPointsStore.enable(context,"EGP",yesterday);DailyPointsStore.enable(context,"USD",yesterday);
+        db.addManual(at(yesterday),100,"USD","USD coffee","مقاهي");
+        eq(1,DailyPointsStore.load(context,db,"EGP",today).size());eq(0,DailyPointsStore.load(context,db,"EGP",today).get(0).spending);
+        ok(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)).signum()==0);
+        DailyPointsStore.confirm(context,db,"EGP",yesterday,today);
+        ok("+25".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)))));
+        DailyPointsStore.confirm(context,db,"USD",yesterday,today);
+        ok("+1".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"USD",today)))));
+        db.addManual(at(yesterday),100,"EGP","needs review","أخرى");long id=db.latestInserted().id;
+        db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{id});
+        ok(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)).signum()==0);
+        try{DailyPointsStore.confirm(context,db,"EGP",yesterday,today);throw new AssertionError("Uncertain day finalized");}catch(IllegalArgumentException expected){}
+        try{DailyPointsStore.confirm(context,db,"EGP",yesterday.minusDays(1),today);throw new AssertionError("Unobserved day finalized");}catch(IllegalArgumentException expected){}
     }
 
     private long oldPurchase(String merchant,String category,long t,boolean edited) {

@@ -6,7 +6,7 @@ final class NavigationState {
         if(screen==10) return destination(transactionReturn==10?6:transactionReturn,6);
         if(screen==6) return 6;
         if(screen==2 || screen==11 || screen==12) return 2;
-        if(screen==3 || screen==4 || screen==8 || screen==9 || screen==13 || screen==14) return 4;
+        if(screen==3 || screen==4 || screen==8 || screen==9 || screen==13 || screen==14 || screen==15) return 4;
         return 0; // Home, accounts, Settings and merchant rules.
     }
     private NavigationState() {}
