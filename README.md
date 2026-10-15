@@ -63,11 +63,28 @@ Open the project in Android Studio and select your local SDK. Alternatively, cre
 
 The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`. Upload signing uses local environment variables; no key is included. Use `tools/build-release.ps1 -Unsigned` for local validation or configure an upload key for a signed build. [Google Play preparation and declaration drafts](docs/GOOGLE_PLAY_RELEASE.md). Repository access is required to clone this private project. No Play approval or publication is implied.
 
+### Separate APK for private testers
+
+The `beta` build uses `com.mohamedgamal.masareef.beta`, the launcher/widget label **Follow Money Beta**, and version name `0.2.0-beta`. It inherits release shrinking and disables debugging. Its signature permission is scoped to its application ID, so it can coexist with the original app even with a different signer. Beta data is separate and does not automatically migrate to the production app.
+
+On the original Windows account, create a dedicated Beta key once, then retain that same key for updates:
+
+```powershell
+.\tools\create-beta-key.ps1
+.\tools\build-beta.ps1
+```
+
+The build script always uses `--offline` and verifies the APK signature. Output: `app/build/outputs/apk/beta/app-beta.apk`. Keep the key outside Git and back it up with portable password recovery; its DPAPI password file alone only works on this Windows user/machine. Beta never inherits the Play upload key. Increase `versionCode` for subsequent tester updates. A raw `assembleBeta` without Beta signing variables produces an unsigned validation artifact, not a shareable signed APK. Device sideloading/security checks still apply; building and signing do not guarantee every device will accept installation. Android API 26 runtime acceptance remains pending.
+
+لو ظهر تنبيه **إعداد مقيّد** عند تفعيل قراءة الإشعارات أو إذن آخر، والمختبر واثق في مصدر النسخة: **إعدادات الموبايل ← التطبيقات ← Follow Money Beta ← المزيد (⋮) ← السماح بالإعدادات المقيدة (Allow restricted settings)**، ثم يكمل تأكيد الجهاز ويرجع يفعّل الإذن. الاسم والمكان قد يختلفان حسب الجهاز وإصدار Android؛ لو الخيار غير موجود، اطلب لقطة للرسالة بدون بيانات شخصية. هذه الخطوة مختلفة عن تعطيل Play Protect. [Google's restricted-settings instructions](https://support.google.com/android/answer/12623953).
+
+The Beta build also writes `app-beta.provenance.json` next to the APK with the source commit/branch, source-dirty flag and APK SHA-256. The embedded APK version-control revision must match the checked-out commit. Commit source changes before preparing a distribution build, and preserve the receipt beside any renamed/shared APK; its SHA-256 identifies the exact binary. A dirty-source receipt is not evidence that the commit alone reproduces that build.
+
 ## Checks
 
 ```powershell
 python tools/check-repo.py
-# First run / dependencies not yet cached:
+# First run / missing cache: only after explicit download approval:
 .\tools\run-checks.ps1 -Online
 # Subsequent runs with dependencies cached:
 .\tools\run-checks.ps1
@@ -75,7 +92,7 @@ python tools/check-repo.py
 .\tools\run-checks.ps1 -Android -Device emulator-5554
 ```
 
-The script runs the standalone JVM suites, assembles the app and instrumentation APK, and runs Android lint. `-Android` also installs both APKs and runs the three instrumentation groups. Use an emulator with synthetic data: these checks exercise writes and repairs. They are deliberately blocked on physical device IDs.
+The script runs the standalone JVM suites, assembles the app and instrumentation APK, and runs Android lint. `-Android` also installs both APKs and runs four instrumentation groups (base, phase, features and focused audit regressions). Use an emulator with synthetic data: these checks exercise writes and repairs. They are deliberately blocked on physical device IDs. Additional installed-update and visual checks use separate QA packages so existing emulator data is preserved.
 
 GitHub Actions uses the same checks for pushes and pull requests to `main`; emulator instrumentation remains a local step. No CI pass or production readiness is implied by the presence of the workflow.
 

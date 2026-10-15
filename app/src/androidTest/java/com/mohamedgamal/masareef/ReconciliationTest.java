@@ -31,6 +31,8 @@ public final class ReconciliationTest extends Instrumentation {
     private String rescanAudit,expectedBefore;
     @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));rescanAudit=args.getString("rescan_audit");expectedBefore=args.getString("expected_before");featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
     @Override public void onStart() {
+        if("visual".equals(featureAudit)){new ReleaseVisualTest(this).run();return;}
+        if("regressions".equals(featureAudit)){new AuditRegressionTest(this).run();return;}
         if(journeyUi){new JourneyUiTest(this).run();return;}
         if(rescanAudit!=null){new RescanAudit(this).run(rescanAudit,expectedBefore);return;}
         if (featureAudit != null) { new FeatureAuditTest(this).run(featureAudit); return; }
@@ -311,8 +313,10 @@ public final class ReconciliationTest extends Instrumentation {
         writable.execSQL("DROP TABLE payment_sources");writable.execSQL("ALTER TABLE legacy_sources RENAME TO payment_sources");
         writable.execSQL("ALTER TABLE recurring DROP COLUMN last_paid_due");
         writable.execSQL("DROP TABLE reimbursements");writable.execSQL("DROP TABLE dismissed_patterns");writable.execSQL("DROP TABLE repair_log");
+        writable.execSQL("ALTER TABLE transactions DROP COLUMN time_precision");
         writable.setVersion(17);db.close();db=new ExpenseDb(context);
-        assertEquals(20,db.getReadableDatabase().getVersion());assertEquals(2,db.paymentSources().size());
+        assertEquals(21,db.getReadableDatabase().getVersion());assertEquals(2,db.paymentSources().size());
+        assertNull(db.transactionById(tx).timePrecision);
         assertEquals(1500,db.transactionById(tx).amountMinor);assertEquals(key,db.sourceEvidence(tx).get(0).body);
         assertEquals(724001,db.currentBalance(card,"EGP").amountMinor);assertNull(db.paymentSource(card).parentSourceId);
         assertFalse(db.paymentSource(account).reviewed);db.linkCardToAccount(card,account);

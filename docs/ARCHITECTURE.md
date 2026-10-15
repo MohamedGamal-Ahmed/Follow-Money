@@ -12,6 +12,12 @@ Follow Money is a single Android application module using Java 17, native views 
 
 Consult class definitions for field and migration contracts; database schema numbers in historical notes are not authoritative.
 
+Schema v21 adds nullable `transactions.time_precision` (`exact` or `date_only`). The v20 upgrade only adds the column; legacy rows remain null, including on re-import. `ExpenseParser.eventTimeWithPrecision` records the precision of the timestamp chosen at capture: an explicit date without a clock is `date_only`, an explicit clock or receipt-time fallback is `exact`. The latter does not prove a bank-stated event time. New CSV rows have date precision. UI list/detail/import preview labels date-only rows instead of showing their internal placeholder clock. Reimbursement selection, preview and confirmation use the same day-based eligibility when either endpoint is date-only; unknown legacy precision retains the prior timestamp rule.
+
+`ExpenseDb.mergeEntries` moves reimbursement endpoints, fee-parent references, recurring origins and source evidence inside a transaction. Conflicting repayment targets/allocations or fee parents leave automatic copies marked for review. Own-transfer reconciliation rejects repayment-linked rows before changing their kinds. Historical import reports an uncapped net ledger increase, distinct from the number of processed SMS.
+
+Capture notifications use private visibility and a generic public version; hidden amounts also remove merchant/card details from the private notification. CSV text columns prefix formula-like values with an apostrophe and escape quoted fields. Numeric amount columns stay numeric. Spreadsheet save/reopen behavior is not a universal security guarantee, and re-import retains the protective apostrophe as text.
+
 ## Financial boundaries
 
 - Amounts use integer minor units. Aggregation stays within a currency.
@@ -39,6 +45,10 @@ The native picker is a bottom-aligned dialog with selectable cards, checked-stat
 `DailyPointsStore` stores opt-in, the first observed daily limit per currency/date and explicit coverage confirmations in local preferences; it never writes transactions or cached score totals. No historical budget anchors are inferred. `DailyPoints` derives each day's points from `(limitMinor - effectiveLivingMinor) / 1000` using `BigDecimal`, then rounds to a whole number with `HALF_UP` (ties away from zero). The balance sums those rounded daily awards so it matches the visible history. Only closed, coverage-confirmed dates without review-flagged rows contribute; today remains provisional. Edits/refunds recompute the relevant purchase-date score using its anchored limit. Coverage is a revocable user assertion of complete recording, rather than a guarantee of bank/SMS coverage. Disabling keeps the history; deleting all local data also clears points preferences. The points summary separates the confirmed balance, yesterday and provisional today; the next 100-point milestone is visual encouragement only, not a monetary reward. History and calculation guidance are separate from the initial summary.
 
 `JourneyUiTest` is restricted to an emulator and the separate `.journeyqa` package. It exercises real dialogs and Back using a synthetic private database, including preview/cancel/confirm/undo, related-detail parents, search scroll restoration and points review/coverage. Captures stay local and ignored.
+
+`AuditRegressionTest` runs with `-e feature_audit regressions` on a disposable emulator. Its isolated fixtures cover merge relationships/conflicts, own-transfer rejection, imports above 500 rows and rollback, notification privacy, CSV escaping, time eligibility and the frozen `androidTest/assets/schema-v20.sql` migration fixture. These are functional database/view-construction checks, not full visual or physical-device acceptance tests.
+
+`UpgradeInstallTest` is a separate instrumentation runner for a fresh `.upgradeqa` install. Its `seed` mode runs with the archived v20 APK; after an in-place APK update, `verify` compares all old ledger columns, financial preferences, encrypted and decrypted evidence, repayment effects and points, checks null legacy precision/integrity, and opens the real updated activity. `ReleaseVisualTest` runs with `-e feature_audit visual` only in `.releasecheck.journeyqa`, captures native light/dark views, a compact RemoteViews preview and a posted notification, and generates a synthetic CSV through the actual export callback. SystemUI screenshot review and local Excel opening are separate manual checks. QA binaries, snapshots and captures remain local and ignored.
 
 ## Monthly summaries
 

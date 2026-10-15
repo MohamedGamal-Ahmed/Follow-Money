@@ -36,9 +36,9 @@ public final class ExpenseParser {
     private static final Pattern ACCOUNT_CONTEXT = Pattern.compile(
             "(?i)(بطاق|كارت|حساب|رصيد|محفظ|ماكين|صراف|bank|card|account|atm|pos|balance)");
     private static final Pattern AMOUNT_AFTER_CURRENCY = Pattern.compile(
-            "(?i)(?<![A-Za-z])(EGP|LE|E£|ج\\.?م\\.?|جنيه|USD|EUR|GBP|دولار|يورو|جنيه\\s+استرليني)\\s*([0-9][0-9., ]*)");
+            "(?i)(?<![A-Za-z])(EGP|LE|E£|ج\\.?م\\.?|جنيه\\s+استرليني|جنيه|USD|EUR|GBP|دولار|يورو)\\s*([0-9][0-9., ]*)");
     private static final Pattern AMOUNT_BEFORE_CURRENCY = Pattern.compile(
-            "(?i)([0-9][0-9., ]*)\\s*(EGP|LE|E£|ج\\.?م\\.?|جنيه|USD|EUR|GBP|دولار|يورو)(?![A-Za-z])");
+            "(?i)([0-9][0-9., ]*)\\s*(EGP|LE|E£|ج\\.?م\\.?|جنيه\\s+استرليني|جنيه|USD|EUR|GBP|دولار|يورو)(?![A-Za-z])");
     private static final Pattern MERCHANT = Pattern.compile(
             "(?i)(?:\\b(?:at|from|to)\\b|لدى|عند|على|لصالح|الى|إلى|من)\\s+([^.,;\\n]{2,45})");
     private static final Pattern DATE_MERCHANT = Pattern.compile(
@@ -288,7 +288,18 @@ public final class ExpenseParser {
 
     /** Uses a stated transaction date/time when available; otherwise keeps the message timestamp. */
     public static long eventTime(String body, long receivedAt) {
-        if (body == null) return receivedAt;
+        return eventTimeWithPrecision(body,receivedAt).when;
+    }
+
+    public static final class EventTime {
+        public final long when;
+        public final String precision;
+        EventTime(long when,String precision){this.when=when;this.precision=precision;}
+    }
+
+    /** Precision of the chosen timestamp, not a claim that receipt time was stated by the bank. */
+    public static EventTime eventTimeWithPrecision(String body,long receivedAt) {
+        if (body == null) return new EventTime(receivedAt,"exact");
         Matcher match = EVENT_DATE.matcher(normalizeDigits(body));
         while (match.find()) {
             try {
@@ -303,7 +314,8 @@ public final class ExpenseParser {
                         : LocalTime.of(Integer.parseInt(match.group(7)), Integer.parseInt(match.group(8)));
                 long event = LocalDateTime.of(date, time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
-                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return event;
+                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000)
+                    return new EventTime(event,match.group(7)==null?"date_only":"exact");
             } catch (NumberFormatException | java.time.DateTimeException ignored) { }
         }
         Matcher textDate = EVENT_DATE_TEXT.matcher(normalizeDigits(body));
@@ -316,10 +328,10 @@ public final class ExpenseParser {
                 long event = LocalDate.of(year, month, day).atTime(12, 0)
                         .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
-                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return event;
+                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return new EventTime(event,"date_only");
             } catch (NumberFormatException | java.time.DateTimeException ignored) { }
         }
-        return receivedAt;
+        return new EventTime(receivedAt,"exact");
     }
 
     static String normalizeDigits(String text) {

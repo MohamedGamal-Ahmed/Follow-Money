@@ -3,6 +3,7 @@ package com.mohamedgamal.masareef;
 /** Read-only interpretation for historical import. The original body stays in memory until approval. */
 final class SmsPreview {
     final String sender, body, title, category, currency, kind;
+    final String timePrecision;
     final long receivedAt, captureAt, eventAt, amountMinor;
     final boolean balanceIncluded, commitmentIncluded;
     boolean selected;
@@ -13,7 +14,9 @@ final class SmsPreview {
                        String currency, long amountMinor, String kind, boolean balance, boolean commitment) {
         this.sender=sender; this.body=body; this.receivedAt=receivedAt;
         this.captureAt=captureAt;
-        this.eventAt=ExpenseParser.eventTime(body, captureAt);
+        ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(body,captureAt);
+        this.eventAt=event.when;
+        this.timePrecision=event.precision;
         this.title=title; this.category=category; this.currency=currency;
         this.amountMinor=amountMinor; this.kind=kind;
         this.balanceIncluded=balance; this.commitmentIncluded=commitment;

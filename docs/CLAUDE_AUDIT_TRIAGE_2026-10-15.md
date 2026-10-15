@@ -1,6 +1,6 @@
 # Claude audit triage — 15 October 2026
 
-Reviewed against baseline `53b46822146b8a034262b9ad4c5fbece277411e9` and the pending transparent-widget change. This records verification and proposed scope; it does not implement audit fixes or approve publication. No real financial data was read or changed.
+Reviewed against baseline `53b46822146b8a034262b9ad4c5fbece277411e9` and the transparent-widget change. The findings below retain that baseline context; the implementation update at the end records the subsequently approved fixes. This document does not approve publication. No real financial data was read or changed.
 
 The widget files observed by Claude were this chat's owner-authorized work, already documented as a narrow freeze exception. They are not unexplained edits to revert. Claude intentionally excluded them from the audit, so its widget-provider count does not describe the final workspace.
 
@@ -34,4 +34,42 @@ The widget files observed by Claude were this chat's owner-authorized work, alre
 - The owner's screenshot validates the pictured Samsung/LockStar arrangement only, not other hosts, notification loads or background refresh.
 - Recommended first implementation scope: preserve merge relationships, correct import counts and sterling parsing, align notification privacy, protect CSV text and resolve time provenance, each with targeted synthetic regressions. Then run migration and performance checks. Defer broad activity/database extraction, new dependencies and additional features.
 
-All items above remain open at this checkpoint. Estimates in the external audit are planning guesses, not delivery commitments.
+Estimates in the external audit are planning guesses, not delivery commitments.
+
+## Owner-approved implementation update
+
+Final offline validation passed: 412 JVM checks across 14 suites, production debug/instrumentation APK builds, Android lint (0 errors, 66 warnings), repository preflight and whitespace checks. No downloads were used for this final validation pass.
+
+The five focused defect groups are implemented without new application dependencies or broad refactoring:
+
+- Transactional merge relationship preservation, allocation/target conflict checks and explicit rejection of repayment-linked own-transfer conversion. Automatic conflicts retain both rows with review flags.
+- An uncapped ledger count shared by the actual historical-import batch path, including duplicate and rollback coverage above 500 rows.
+- Arabic sterling alternatives precede generic pounds in both amount patterns, with EGP and GBP regression cases.
+- Capture notifications honor hiding and provide generic public content. CSV text columns neutralize leading formula markers with an apostrophe; numeric amounts remain numeric. The apostrophe remains on re-import; no universal spreadsheet save/reopen guarantee is claimed.
+- Nullable v21 time precision, frozen v20 schema fixture, preserved unknown legacy precision, date-only labels and shared day-based reimbursement eligibility for candidate selection, preview and confirmation. `exact` denotes timestamp precision, including receipt fallback; it is not proof of a bank-stated event clock.
+
+The 10 focused Android regressions passed on a separate `.auditqa` package using disposable fixtures. A new Android 16.1 emulator profile under `.tmp` was used; SystemUI was disabled and the emulator restarted to bypass a SurfaceFlinger failure. The user was unlocked before the successful run. Earlier environment failures are not test passes. The successful tests cover repayment/fee/commitment/evidence preservation, conflicting links, income reconciliation, linked/clean own transfers, >500-row import and rollback, notification objects, CSV text/numeric semantics, date precision/eligibility, and v20→v21 data/link/evidence integrity. This is functional instrumentation, not screenshot/notification-rendering or physical-device verification.
+
+`RealDataReplay` was also run on a new synthetic fixture (419 purchase, 295 repayment, 25 cafe); effective living spending stayed 149 before and after replay. This is a clean-fixture arithmetic check, not a replay of phone data or a replacement for the native merge tests.
+
+The initial emulator and task downloads were stopped at the owner's request. No further downloads are authorized without explicit approval. Android 35 image download did not complete and was not used for validation. Large-dataset benchmarks, broad refresh/architecture work, unknown-message review and real-device acceptance remain outside the completed focused regressions. No historical data repair/rescan, commit or push was performed for these fixes.
+
+## Subsequent installed-update and visual QA
+
+The owner started a Medium Phone API 36.1 emulator and authorized testing. It was identified as `emulator-5556`; Wi-Fi/mobile data were disabled during QA. All builds used the existing Gradle cache with `--offline`. The existing primary app/emulator ledger was preserved; only new `.upgradeqa` and `.releasecheck.journeyqa` packages received synthetic data. No downloads, phone writes, commits or pushes occurred in this follow-up.
+
+- **Installed update passed:** archived source `53b4682` built as QA versionCode 2/schema 20; five synthetic transactions included a linked repayment, multiple currencies and encrypted capture evidence. The new QA APK used versionCode 3/schema 21 and was installed with `-r`, without uninstalling. Hashes of every old table column, financial preferences and source plaintext matched, confirmed points stayed 10, legacy precision stayed null, integrity passed, and the real updated activity opened without changing the fixture. The later points-button color adjustment does not change this migration path.
+- **Broader native suites passed:** 18 base + 14 phase + 27 feature + 10 audit tests, zero failures. Two older migration fixtures initially failed because they retained the new v21 column while pretending to be schema 16/17 and still expected version 20. The fixtures now remove the new column and expect 21/null legacy precision; production migration code was not relaxed to hide those fixture errors.
+- **Journey UI passed:** 61 checks cover selection/review/confirm/undo, activity recreation, parent/scroll restoration, original purchase-day totals, points help/history and provisional/confirmed/negative states. Assertions remove only bidirectional formatting marks when reading points text; signs, values and rounding expectations are unchanged.
+- **Native visual/notification pass:** 43 checks plus manual screenshot review cover date-only list/details and repayment candidates, exact-noon distinction, light/dark points summaries, a 96×48dp transparent RemoteViews preview, hidden widget amounts and an actual posted capture notification. The latter's generic amount-free/merchant-free text was also seen in the real Android notification shade. Accessibility text lookup in SystemUI was unreliable; the final check validates the posted notification object and keeps screenshot review separate.
+- **CSV in local Excel passed:** a file generated by the actual export callback had seven data rows and ten columns, including four formula-like merchant names and notes. Excel's normal delimited import found zero formula cells and seven numeric amount cells. This verifies initial opening only; no Google Sheets or save/reopen guarantee is claimed.
+- **One visual correction:** points-dialog neutral/negative action text was too dark on its dark background. Only their text colors now follow the current palette; the visual checks and screenshots passed again after this change. Final QA build/lint passed with zero errors and 66 warnings.
+
+### Release packaging and review follow-up
+
+- Production versionCode is now 3 (versionName 0.2.0). Offline signed APK/AAB builds and release lint passed (0 errors, 66 warnings). The APK's actual badging reports the production package, versionCode 3, minSdk 26 and targetSdk 36. APK signature verification passed; AAB JAR signature verification passed and its signer matches the local upload certificate. The release checker passed merged-manifest, permissions, privacy-asset and forbidden audit-Dex checks. These checks do not prove API 26 runtime compatibility or Google Play acceptance. No upload occurred.
+- The final visual run passed 46 checks. CSV export now runs after the points/widget captures so its toast no longer covers points actions. Clean screenshots confirm readable footer actions. The grey day-confirmation button remains a cosmetic follow-up.
+- A real 96×48dp RemoteViews preview on white exposes weaker readability of white text/shadow. It is readable on the tested dark background; this is not universal wallpaper acceptance. No new widget theme/configuration feature was added during the freeze.
+- Widget picker description and existing budget settings now explicitly warn that visible lock-screen amounts can be seen by others and point to the shared amount-hiding control. Existing visibility choice/default is preserved; default hiding is not claimed.
+
+Limitations: the emulator never reported a showing keyguard, so actual lock-screen notification rendering is still unverified; Samsung LockStar positioning/AOD also needs Samsung hardware. API 26 runtime acceptance and large-history performance remain open. Only the API 36.1 system image is installed locally; downloading an older image requires the owner's prior approval. Private screenshots/exports were not added to Git.

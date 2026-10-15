@@ -519,6 +519,7 @@ public final class MainActivity extends Activity {
         setting(widgetHidden?"أرقام الويدجت: مخفية":"أرقام الويدجت: ظاهرة",()->{
             getSharedPreferences("widget_settings",MODE_PRIVATE).edit().putBoolean("hide_amounts",!widgetHidden).apply();render();
         });
+        note(getString(R.string.widget_lock_privacy_notice));
                 break;
             case "capture":
                 note("الرسائل والإشعارات الجديدة تُقرأ بعد منح الإذن. استيراد القديم يبدأ بمعاينة قبل الحفظ.");
@@ -1040,7 +1041,13 @@ public final class MainActivity extends Activity {
         } catch (Exception error) { toast("فشل تصدير الملف"); }
     }
 
-    private static String csvCell(String value) { return "\"" + value.replace("\"", "\"\"") + "\""; }
+    static String csvCell(String value) {
+        // Text columns only. Numeric amount cells retain their number type.
+        String start=value.stripLeading();
+        if((!start.isEmpty() && "=+-@＝＋－＠".indexOf(start.charAt(0))>=0) ||
+                value.startsWith("\t") || value.startsWith("\r") || value.startsWith("\n"))value="'"+value;
+        return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
 
     private void toggleDailyReminder() {
         SharedPreferences prefs = getSharedPreferences("reminder_settings", MODE_PRIVATE);
@@ -2394,8 +2401,7 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams ipaParams = new LinearLayout.LayoutParams(-2, -2); ipaParams.setMarginStart(dp(4));
             meta.addView(instaPayPill(), ipaParams);
         }
-        String time = Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault())
-                .format(DateTimeFormatter.ofPattern("h:mm a", new Locale("ar")));
+        String time = transactionTimeLabel(item,false);
         LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(-2, -2); timeParams.setMarginStart(dp(6));
         meta.addView(label(time, 11, MUTED, false), timeParams);
         copy.addView(meta);
@@ -2468,8 +2474,7 @@ public final class MainActivity extends Activity {
             TextView personal=label(share,14,INCOME,true);personal.setGravity(Gravity.CENTER);
             hero.addView(personal,new LinearLayout.LayoutParams(-1,-2));
         }
-        String when = Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault())
-                .format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy · h:mm a", new Locale("ar")));
+        String when = transactionTimeLabel(item,true);
         TextView date = label(when, 13, MUTED, false); date.setGravity(Gravity.CENTER);
         hero.addView(date, new LinearLayout.LayoutParams(-1, -2));
 
@@ -2666,7 +2671,7 @@ public final class MainActivity extends Activity {
                 LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);
                 TextView name=label(UiKit.displayName(tx.merchant),15,INK,true);name.setMaxLines(2);name.setEllipsize(android.text.TextUtils.TruncateAt.END);copy.addView(name);
                 LocalDate day=Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate();
-                String time=Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("h:mm a",new Locale("ar")));
+                String time=transactionTimeLabel(tx,false);
                 copy.addView(label(tx.category+" · "+dayLabel(day)+" · "+time,11,MUTED,false));
                 row.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
                 TextView amount=label("−"+money(tx.amountMinor,tx.currency),14,INK,true);amount.setTextDirection(View.TEXT_DIRECTION_LTR);amount.setMaxWidth(dp(145));
@@ -3843,6 +3848,8 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("تمام",null).show());content.addView(help);
         if(days.isEmpty())content.addView(label("فعّل النقاط وابدأ بالنهارده. أول رصيد معتمد يظهر بعد نهاية اليوم وتأكيد تسجيله.",13,MUTED,false));
         dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(ACCENT);
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(enabled?MUTED:ACCENT);
     }
 
     private LinearLayout pointsSummaryTile(String title,DailyPoints.Day day,boolean current,boolean enabled) {
@@ -4192,6 +4199,15 @@ public final class MainActivity extends Activity {
         if (days < 0) return "متأخر " + (-days) + " يوم";
         if (days < 7) return "بعد " + days + " أيام";
         return due.format(DateTimeFormatter.ofPattern("d MMMM", new Locale("ar")));
+    }
+
+    static String transactionTimeLabel(ExpenseDb.Transaction item,boolean fullDate) {
+        boolean dateOnly="date_only".equals(item.timePrecision);
+        if(dateOnly&&!fullDate)return "تاريخ فقط";
+        String pattern=fullDate?(dateOnly?"EEEE d MMMM yyyy":"EEEE d MMMM yyyy · h:mm a"):"h:mm a";
+        String value=Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern(pattern,new Locale("ar")));
+        return dateOnly?value+" · تاريخ فقط":value;
     }
 
     private String dayLabel(LocalDate day) {

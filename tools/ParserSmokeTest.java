@@ -32,6 +32,10 @@ public final class ParserSmokeTest {
         if (card == null || !"1234".equals(card.cardLast4)) throw new AssertionError("Card matching failed");
         checked++;
         expect("BANK", "You paid 99.99 EGP to Netflix", 9999, "EGP");
+        expect("BANK", "تم خصم 100 جنيه استرليني من حسابك لدى TEST", 10000, "GBP");
+        expect("BANK", "تم خصم جنيه استرليني 100 من حسابك لدى TEST", 10000, "GBP");
+        expect("BANK", "تم خصم 100 جنيه من حسابك لدى TEST", 10000, "EGP");
+        expect("BANK", "تم خصم جنيه 100 من حسابك لدى TEST", 10000, "EGP");
         expect("BANK", "Transfer sent USD 10.00 to JOHN", 1000, "USD");
         expectCategory("You transferred EGP 200.00 to JOHN", "تحويلات");
         expectCategory("Installment payment EGP 300.00 to valU", "أقساط");
@@ -68,6 +72,16 @@ public final class ParserSmokeTest {
         if (ExpenseParser.eventTime("Balance EGP 300", received) != received)
             throw new AssertionError("Missing date should use message time");
         checked++;
+        for(String body:new String[]{"on 08/10/2026","on 09/10/2026","08OCT26"}) {
+            if(!"date_only".equals(ExpenseParser.eventTimeWithPrecision(body,received).precision))
+                throw new AssertionError("Missing clock must retain date-only precision");
+            checked++;
+        }
+        for(String body:new String[]{"on 08/10/2026 12:00","on 09/10/2026 14:42","no stated date","on 31/02/2026"}) {
+            if(!"exact".equals(ExpenseParser.eventTimeWithPrecision(body,received).precision))
+                throw new AssertionError("Explicit noon and receipt fallback must not become date-only");
+            checked++;
+        }
         long arabicClock=ExpenseParser.eventTime("تم إضافة تحويل لحظي بمبلغ 1 جم يوم 2026-10-09 الساعه 00:40",received);
         java.time.LocalTime statedClock=java.time.Instant.ofEpochMilli(arabicClock).atZone(java.time.ZoneId.systemDefault()).toLocalTime();
         if(statedClock.getHour()!=0 || statedClock.getMinute()!=40) throw new AssertionError("Arabic transaction clock ignored");

@@ -34,6 +34,12 @@ final class CaptureNotifier {
         if (manager == null) return;
         manager.createNotificationChannel(new NotificationChannel(CHANNEL_ID, "العمليات الجديدة",
                 NotificationManager.IMPORTANCE_DEFAULT));
+        int id = 3_000_000 + (int) (item.id % 1_000_000);
+        manager.notify(id, build(context,item));
+    }
+
+    static Notification build(Context context,ExpenseDb.Transaction item) {
+        boolean hidden=context.getSharedPreferences("widget_settings",Context.MODE_PRIVATE).getBoolean("hide_amounts",false);
         String amount = MainActivity.money(item.amountMinor, item.currency);
         String who = UiKit.displayName(item.merchant);
         String title = "income".equals(item.kind) ? "دخل جديد " + amount + " من " + who :
@@ -42,6 +48,9 @@ final class CaptureNotifier {
         String category = "income".equals(item.kind) ? "دخل" : "transfer".equals(item.kind) ? "تحويلات" : item.category;
         String text = category + (UiKit.isInstaPay(item.merchant) ? " · إنستاباي" : "") +
                 (item.cardLast4 == null ? "" : " · •••• " + item.cardLast4);
+        String publicTitle="تم تسجيل عملية جديدة";
+        String publicText="افتح Follow Money لعرض التفاصيل";
+        if(hidden){title=publicTitle;text=publicText;}
         int id = 3_000_000 + (int) (item.id % 1_000_000);
         Intent open = new Intent(context, MainActivity.class)
                 .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -56,10 +65,14 @@ final class CaptureNotifier {
                 .setColor(0xff0b3d2e)
                 .setContentTitle(title)
                 .setContentText(text)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(new Notification.Builder(context,CHANNEL_ID)
+                        .setSmallIcon(R.drawable.ic_stat_notify).setContentTitle(publicTitle)
+                        .setContentText(publicText).setVisibility(Notification.VISIBILITY_PUBLIC).build())
                 .setContentIntent(content)
                 .setAutoCancel(true);
         if ("expense".equals(item.kind))
             builder.addAction(new Notification.Action.Builder(null, "غيّر التصنيف", editIntent).build());
-        manager.notify(id, builder.build());
+        return builder.build();
     }
 }

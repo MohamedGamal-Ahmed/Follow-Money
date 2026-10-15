@@ -22,6 +22,16 @@ import java.util.*;
 
 /** Historical SMS are scanned without database writes. Only checked messages are applied atomically. */
 public final class SmsImportActivity extends Activity {
+    /** One approved batch; the returned net ledger increase is independent of list pagination. */
+    static long applySelected(ExpenseDb db,List<SmsPreview> selected) {
+        android.database.sqlite.SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try {
+            long before=db.transactionCount();
+            for(SmsPreview row:selected)db.addSms(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe);
+            long added=db.transactionCount()-before;
+            sql.setTransactionSuccessful();return added;
+        }finally {sql.endTransaction();}
+    }
     private Session session;
     private LinearLayout page, rows;
     private TextView status, selection;
@@ -169,7 +179,9 @@ public final class SmsImportActivity extends Activity {
                 badge.setPadding(dp(5),dp(5),dp(5),dp(5));heading.addView(badge,new LinearLayout.LayoutParams(dp(44),dp(44)));
             }
             box.addView(heading);
-            String detail=r.category+"\n"+r.sender+" · "+Instant.ofEpochMilli(r.eventAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy · h:mm a",new Locale("ar")));
+            boolean dateOnly="date_only".equals(r.timePrecision);
+            String detail=r.category+"\n"+r.sender+" · "+Instant.ofEpochMilli(r.eventAt).atZone(ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern(dateOnly?"d MMM yyyy":"d MMM yyyy · h:mm a",new Locale("ar")))+(dateOnly?" · تاريخ فقط":"");
             if(r.isTransaction()&&r.balanceIncluded)detail+="\nيشمل أيضًا تحديث الرصيد من نفس الرسالة";
             if(r.isTransaction()&&r.commitmentIncluded)detail+="\nيشمل أيضًا تحديث/اقتراح التزام";
             if(r.captureStatus==1)detail+="\nمسجلة سابقًا · اختيارها قد يحدث مصدرها؛ التصحيح اليدوي محفوظ";
@@ -207,7 +219,8 @@ public final class SmsImportActivity extends Activity {
         final Context app;
         final List<SmsPreview> items=new ArrayList<>();
         volatile String phase="idle",error="",startLabel="";
-        volatile int total,scanned,processed,added;
+        volatile int total,scanned,processed;
+        volatile long added;
         volatile boolean cancelled;
         private volatile SmsImportActivity listener;
         private volatile int generation;
@@ -253,15 +266,8 @@ public final class SmsImportActivity extends Activity {
             if(selected.isEmpty())return;phase="apply";
             new Thread(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
-                    android.database.sqlite.SQLiteDatabase sql=writeDb.getWritableDatabase();
-                    sql.beginTransaction();
-                    try {
-                        int before=writeDb.transactions().size();
-                        for(SmsPreview r:selected)writeDb.addSms(r.sender,r.body,r.receivedAt,r.captureAt,r.receiptKeySafe);
-                        // Do not run a global transfer repair here: unselected history must stay untouched.
-                        added=writeDb.transactions().size()-before;processed=selected.size();
-                        sql.setTransactionSuccessful();
-                    } finally {sql.endTransaction();}
+                    // Do not run a global transfer repair here: unselected history must stay untouched.
+                    added=applySelected(writeDb,selected);processed=selected.size();
                     // Only around the imported messages: their bank/app copies and own-transfer legs.
                     long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
                     for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}

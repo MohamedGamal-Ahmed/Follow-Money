@@ -187,8 +187,10 @@ public final class PhaseOneTest {
         sql.execSQL("DROP TABLE payment_sources");sql.execSQL("ALTER TABLE legacy_sources RENAME TO payment_sources");
         sql.execSQL("ALTER TABLE recurring DROP COLUMN last_paid_due");
         sql.execSQL("DROP TABLE reimbursements");sql.execSQL("DROP TABLE dismissed_patterns");sql.execSQL("DROP TABLE repair_log");
+        sql.execSQL("ALTER TABLE transactions DROP COLUMN time_precision");
         sql.setVersion(16);db.close();
-        db=new ExpenseDb(context);eq(20,db.getReadableDatabase().getVersion());eq(1L,count("transactions"));eq(12345L,db.latestInserted().amountMinor);
+        db=new ExpenseDb(context);eq(21,db.getReadableDatabase().getVersion());eq(1L,count("transactions"));eq(12345L,db.latestInserted().amountMinor);
+        ok(db.latestInserted().timePrecision==null);
         long linked=db.putCommitmentFromTransaction(db.latestInserted().id,"fixture",12345,"EGP",LocalDate.now().plusMonths(1),"bill");ok(linked>=0);ok(db.commitmentOriginId(linked)!=null);
     }
     public void testConfirmedAbbreviatedSmsPreservesEvidenceAndReplay() {

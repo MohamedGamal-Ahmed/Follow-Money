@@ -34,10 +34,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'App installation failed' }
         & $adb -s $Device install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
         if ($LASTEXITCODE -ne 0) { throw 'Test installation failed' }
-        foreach ($mode in @('base','phase','features')) {
+        foreach ($mode in @('base','phase','features','audit')) {
             $arguments = @()
             if ($mode -eq 'phase') { $arguments = @('-e','phase_one','true') }
             if ($mode -eq 'features') { $arguments = @('-e','feature_audit','checks') }
+            if ($mode -eq 'audit') { $arguments = @('-e','feature_audit','regressions') }
             $result = & $adb -s $Device shell am instrument -w @arguments com.mohamedgamal.masareef.test/com.mohamedgamal.masareef.ReconciliationTest
             $result
             $report = $result -join "`n"
