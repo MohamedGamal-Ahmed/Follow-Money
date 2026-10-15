@@ -22,7 +22,7 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 - **Plan:** daily limits, category budgets and confirmed installment/subscription/bill schedules.
 - **Finish a task:** reimbursement selection, impact preview, confirmation and undo; related details return to their parent, with search/filter/scroll context retained.
 - **Optional points:** whole daily-limit points rounded per day after explicit coverage confirmation; a clear balance/yesterday/today summary and 100-point milestones, with today's result provisional and refunds correcting the original purchase day.
-- **Keep it visible:** three resizable home screen widgets, optional hidden amounts, daily reminders and payment alerts.
+- **Keep it visible:** three home screen widgets plus a compact transparent variant for compatible lock-screen hosts, optional hidden amounts, daily reminders and payment alerts. Lock-screen placement and notification space remain controlled by the host.
 - **Get help:** Arabic problem/suggestion drafts sent through your configured email app, with a preview of basic device information. GitHub remains available for developers.
 
 The parser runs locally and uses rules. It does not guarantee recognition of every bank or notification format. Review ambiguous transfers, unclassified expenses and proposed commitments before relying on totals.

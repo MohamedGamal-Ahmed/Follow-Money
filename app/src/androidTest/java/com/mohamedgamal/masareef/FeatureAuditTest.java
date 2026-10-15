@@ -65,6 +65,51 @@ final class FeatureAuditTest {
         ok(GitHubSupport.version(context).equals(uri.getQueryParameter("app_version")));
         ok("feature_request.yml".equals(GitHubSupport.featureUri().getQueryParameter("template")));
     }
+
+    public void testTransparentLockWidgetPreservesDailyAmountsCurrencyAndPrivacy() {
+        android.content.SharedPreferences settings=context.getSharedPreferences("widget_settings",0);
+        settings.edit().clear().putString("currency","EGP").commit();
+        try {
+            LocalDate today=LocalDate.now();
+            DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,today,0));
+            DailySummary.save(context,new DailyAllowance.Plan("USD",10000,today,0));
+            db.addManual(at(today),1500,"EGP","QA coffee","مقاهي");
+            db.addManual(at(today),1250,"USD","QA USD coffee","مقاهي");
+            db.addManualEntry(at(today)+1000,50000,"EGP","QA incoming","دخل",null,"income",null,null);
+            DailySummary snapshot=DailySummary.load(context,db);
+            android.view.View view=applyLockWidget(LockSummaryWidget.render(context,snapshot));
+            ok("235.00".contentEquals(((android.widget.TextView)view.findViewById(R.id.lock_remaining)).getText()));
+            ok(((android.widget.TextView)view.findViewById(R.id.lock_caption)).getText().toString().contains("EGP"));
+            ok(view.getBackground() instanceof android.graphics.drawable.ColorDrawable);
+            eq(0,android.graphics.Color.alpha(((android.graphics.drawable.ColorDrawable)view.getBackground()).getColor()));
+            settings.edit().putString("currency","USD").commit();
+            view=applyLockWidget(LockSummaryWidget.render(context,snapshot));
+            ok("87.50".contentEquals(((android.widget.TextView)view.findViewById(R.id.lock_remaining)).getText()));
+            settings.edit().putString("currency","EGP").putBoolean("hide_amounts",true).commit();
+            view=applyLockWidget(LockSummaryWidget.render(context,snapshot));
+            ok("••••".contentEquals(((android.widget.TextView)view.findViewById(R.id.lock_remaining)).getText()));
+            ok(!view.getContentDescription().toString().contains("235"));
+            settings.edit().putBoolean("hide_amounts",false).commit();
+            db.addManual(at(today)+2000,25000,"EGP","QA over budget","بقالة");
+            view=applyLockWidget(LockSummaryWidget.render(context,DailySummary.load(context,db)));
+            ok("15.00".contentEquals(((android.widget.TextView)view.findViewById(R.id.lock_remaining)).getText()));
+            ok(((android.widget.TextView)view.findViewById(R.id.lock_caption)).getText().toString().startsWith("تجاوز"));
+            DailySummary.remove(context,"EGP");
+            view=applyLockWidget(LockSummaryWidget.render(context,DailySummary.load(context,db)));
+            ok("—".contentEquals(((android.widget.TextView)view.findViewById(R.id.lock_remaining)).getText()));
+            ok(!view.getContentDescription().toString().contains("15.00"));
+            view=applyLockWidget(LockSummaryWidget.render(context,null));
+            ok("—".contentEquals(((android.widget.TextView)view.findViewById(R.id.lock_remaining)).getText()));
+            ok(!view.getContentDescription().toString().contains("235"));
+            eq(4,countRows("transactions")); // Rendering never rewrites the financial ledger.
+        }finally {settings.edit().clear().commit();}
+    }
+
+    private android.view.View applyLockWidget(android.widget.RemoteViews views) {
+        android.view.View[] result=new android.view.View[1];
+        runner.runOnMainSync(()->result[0]=views.apply(context,new android.widget.FrameLayout(context)));
+        return result[0];
+    }
     public void testAccountMovementIncludesLinkedCardsWithoutGuessingOrDuplication() {
         LocalDate day=LocalDate.now();long t=at(day);
         long account=db.addPaymentSource("Banque Misr","حساب","1111");

@@ -3,4 +3,7 @@
     <string name="widget_description">ميزانية اليوم مع إضافة عملية وفتح العمليات</string>
     <string name="widget_small_description">المتبقي والصرف اليومي في مساحة صغيرة</string>
     <string name="widget_large_description">ميزانية اليوم وصرف الأسبوع والشهر</string>
+    <string name="widget_lock_description">المتبقي من ميزانية اليوم بخلفية شفافة ومساحة صغيرة؛ الموضع يحدده تطبيق شاشة القفل</string>
+    <string name="widget_lock_preview">متبقي اليوم · EGP</string>
+    <string name="widget_lock_unavailable">—</string>
 </resources>

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the owner's explicitly requested compact transparent lock-screen widget variant, reusing daily-summary calculations and privacy settings; keep home widget layouts unchanged and leave placement to the host.
+
 - Freeze the existing feature scope on 14 October 2026; restrict the publication cycle to defect fixes, validation and Google Play preparation. Record known issues and verification limits in the release checkpoint.
 
 - Prevent the muted opening video from requesting audio focus and interrupting background music.

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No card/background; the host may still add its own padding or container. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/lock_widget_root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center" android:layoutDirection="rtl"
+    android:padding="2dp" android:background="@android:color/transparent">
+    <TextView android:id="@+id/lock_remaining"
+        android:layout_width="match_parent" android:layout_height="26dp"
+        android:text="@string/widget_lock_unavailable" android:textColor="#FFFFFF" android:textSize="20sp"
+        android:fontFamily="sans-serif-medium" android:gravity="center" android:textDirection="ltr"
+        android:includeFontPadding="false" android:singleLine="true"
+        android:autoSizeTextType="uniform" android:autoSizeMinTextSize="9sp"
+        android:autoSizeMaxTextSize="20sp" android:autoSizeStepGranularity="1sp"
+        android:shadowColor="#CC000000" android:shadowDx="0" android:shadowDy="1" android:shadowRadius="3" />
+    <TextView android:id="@+id/lock_caption"
+        android:layout_width="match_parent" android:layout_height="16dp"
+        android:text="@string/widget_lock_preview" android:textColor="#FFFFFF" android:textSize="11sp"
+        android:gravity="center" android:includeFontPadding="false" android:singleLine="true"
+        android:autoSizeTextType="uniform" android:autoSizeMinTextSize="9sp"
+        android:autoSizeMaxTextSize="11sp" android:autoSizeStepGranularity="1sp"
+        android:shadowColor="#CC000000" android:shadowDx="0" android:shadowDy="1" android:shadowRadius="3" />
+</LinearLayout>

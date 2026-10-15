@@ -2,6 +2,10 @@
 
 The owner closed new-feature work for this publication cycle. The remaining scope is reported defect fixes, validation, release packaging and Google Play preparation. No new features, libraries or redesign projects are planned for this cycle.
 
+Limited owner-approved exception on 15 October: add a compact transparent presentation of the existing daily remaining amount for LockStar/compatible hosts. This does not change financial rules or reopen other feature work. The implementation requires device/host acceptance testing; compilation is not proof of actual lock-screen placement.
+
+Owner-provided screenshot on 15 October confirms that the transparent widget is visible in the chosen lower lock-screen position while notifications remain visible above it. This validates that pictured arrangement only; background refresh, additional notification load, AOD, hidden amounts and other device/host versions still require testing. The screenshot and personal wallpaper are not included in the repository. Claude's audit was received and checked on 15 October; see [audit triage](CLAUDE_AUDIT_TRIAGE_2026-10-15.md). Audit fixes and structural changes are not implemented at this checkpoint.
+
 ## Frozen scope
 
 - Local supported SMS/payment-notification capture, manual entries, source review, account/card links, classification and separate currencies.
@@ -22,6 +26,7 @@ The application remains version **0.2.0 / versionCode 2**, minimum API 26 and ta
 
 ## Known issues and remaining acceptance checks
 
+- Confirmed audit defects remain open: merges do not preserve every transaction relationship, historical-import counts use a 500-row list, Arabic sterling amounts can be classified as EGP, and capture notifications ignore amount hiding. CSV text fields also need spreadsheet-formula protection. Resolve these with synthetic regressions before publication; see the audit triage for evidence and limits.
 - Date-only HSBC text such as `14OCT26` still receives an artificial noon timestamp. Fix/label time provenance before publication; the message timestamp is not a bank-confirmed transaction time.
 - Check the points dialog visually in light/dark mode, confirmed/pending/negative states, history/help, confirmation and Back navigation.
 - Verify opening playback with background music, new SMS/selected notifications while closed, permission denial/revocation, historical import deduplication, widgets and battery-constrained daily/monthly refresh.

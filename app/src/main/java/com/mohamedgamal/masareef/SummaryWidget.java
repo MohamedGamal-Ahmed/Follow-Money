@@ -12,7 +12,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 
-/** Three daily allowance widgets; the large version also shows week/month spending. */
+/** Home widgets and the transparent lock-screen variant share the daily summary. */
 public class SummaryWidget extends AppWidgetProvider {
     static void refresh(Context context) {
         AppWidgetManager manager=AppWidgetManager.getInstance(context);
@@ -22,6 +22,8 @@ public class SummaryWidget extends AppWidgetProvider {
         if(small.length>0)new SummaryWidget().onUpdate(context,manager,small);
         int[] large=manager.getAppWidgetIds(new ComponentName(context,LargeSummaryWidget.class));
         if(large.length>0)new SummaryWidget().onUpdate(context,manager,large);
+        int[] lock=manager.getAppWidgetIds(new ComponentName(context,LockSummaryWidget.class));
+        if(lock.length>0)new LockSummaryWidget().onUpdate(context,manager,lock);
     }
 
     @Override public void onReceive(Context context,Intent intent) {

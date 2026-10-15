@@ -1,0 +1,37 @@
+# Claude audit triage — 15 October 2026
+
+Reviewed against baseline `53b46822146b8a034262b9ad4c5fbece277411e9` and the pending transparent-widget change. This records verification and proposed scope; it does not implement audit fixes or approve publication. No real financial data was read or changed.
+
+The widget files observed by Claude were this chat's owner-authorized work, already documented as a narrow freeze exception. They are not unexplained edits to revert. Claude intentionally excluded them from the audit, so its widget-provider count does not describe the final workspace.
+
+## Before publication: correctness and privacy
+
+1. **Merge relationships — highest priority, confirmed by source.** `ExpenseDb.mergeEntries` moves capture evidence, then archives/deletes the removed transaction. It does not remap `reimbursements.income_id/expense_id`, fee parents or recurring origins. Automatic cross-channel repair excludes user-edited transactions, but reimbursement linking does not set that flag. A deleted reimbursement endpoint makes `reimbursementOffsets` ignore the link, changing both spending and inflow. The abbreviated-SMS confirmation separately remaps recurring origins, so the defect must be evaluated per caller. Prefer a central transactional relationship-preservation rule with explicit conflict handling; excluding linked rows only from one repair loop would leave other merge callers exposed. Acceptance: synthetic linked purchase/income, later matching bank SMS, preserved effective amounts, fees, commitments and evidence; conflicting links must not disappear silently. Android runtime reproduction is still pending.
+
+2. **Historical import count — confirmed by source.** `SmsImportActivity` subtracts two `transactions().size()` values; `transactions()` is capped at 500. This is an incorrect success count, not proof that the import lost rows. Use an uncapped count or a clearly defined insertion tally. Test crossing 500, already-above-500, duplicates and rollback; distinguish processed messages from new ledger rows.
+
+3. **Arabic sterling — reproduced locally.** A synthetic JVM probe with `تم خصم 100 جنيه استرليني من حسابك لدى TEST` returned `10000 EGP`; the equivalent `GBP 100.00` returned `10000 GBP`. The amount-before-currency pattern lacks the longer Arabic sterling token, and the other pattern places generic `جنيه` before it. Correct both alternatives and test both word orders without changing EGP behavior. Existing historical rows would need a separate evidence-preserving review, not an automatic rescan in this task.
+
+4. **Date-only timestamps — confirmed, design required.** Text dates such as `14OCT26` receive noon; numeric dates from a different receipt day and CSV dates also use noon. Reimbursement candidates and confirmation compare timestamps. Do not infer missing time solely from a timestamp equaling noon: a genuine noon transaction would be mislabelled. Define date precision/time provenance and a consistent eligibility rule across preview and confirmation before implementing a fix. Keep receipt time distinct from bank-confirmed event time.
+
+5. **Capture-notification privacy and CSV — confirmed gaps.** `CaptureNotifier` constructs an amount/merchant title without consulting `widget_settings.hide_amounts` or setting an explicit public notification version. This conflicts with the daily-summary/widget hiding behavior. `MainActivity.csvCell` only quotes/escapes text and does not neutralize spreadsheet formulas. Protect untrusted text columns while retaining numeric amount semantics, and test spreadsheet viewing plus app re-import. A single apostrophe is not a universal Excel round-trip guarantee; choose/document the export contract and verify it. See [OWASP CSV Injection](https://owasp.org/www-community/attacks/CSV_Injection).
+
+## Validation and maintenance work
+
+6. **Scaling and refresh — credible risks, no measured failure.** Repair rules contain nested candidate scans; import holds a batch transaction and repairs the selected time span afterward. SMS handling performs database work synchronously and has no durable retry after its exception handler. Refresh can recompute multiple summaries. Benchmark synthetic 1k/10k/50k histories on an emulator/device, including concurrent capture and correctness. The audit's 100-million/2.5-billion estimates are not measurements or universal operation counts: row types, candidates and time distribution matter. Do not choose a batch size, index, ANR verdict or arbitrary two-second release gate without evidence.
+
+7. **Migration safety — real test gap, overstated recovery claim.** Database version is 20; upgrade code calls current helpers and lacks a dedicated migration regression suite. Freeze a synthetic v20 schema/data fixture and require upgrade tests for future schema changes. The assertion that a failed upgrade necessarily requires clearing data is incorrect: `SQLiteOpenHelper.onUpgrade` runs in a transaction and rolls database changes back on an exception. A corrective update may recover opening; rollback does not protect external side effects or successful-but-wrong migrations. Disabled backup is a separate recovery-policy issue. See [Android SQLiteOpenHelper](https://developer.android.com/reference/android/database/sqlite/SQLiteOpenHelper#onUpgrade(android.database.sqlite.SQLiteDatabase,%20int,%20int)).
+
+8. **Effective amounts — qualify the duplication claim.** `ExpenseDb.effectiveAmount` already centralizes the formula. What repeats is loading reimbursement offsets and aggregating transactions in different consumers. A shared read projection/snapshot could reduce drift and repeated work later. Gross CSV amounts versus net spending are a data-contract choice, not automatically a calculation bug; a CSV export is not a complete backup of links and evidence.
+
+9. **Unknown bank formats — limitation confirmed, manual recovery not guaranteed.** A completely unrecognized message can yield no transaction in live capture. `SmsPreview.parse` also returns null if it recognizes no transaction, balance or commitment, so manual historical import does not necessarily expose every unknown message either. Never claim universal bank coverage. A review mechanism requires explicit future product scope and privacy/retention decisions; it is not included in this widget change.
+
+## Validation evidence and next scope
+
+- Existing JVM suite: 401 checks across 14 suites passed again during this continuation. The sterling probe above is additional diagnostic evidence, not a passing regression for the defect.
+- Transparent widget: debug/instrumentation APK compilation and lint passed, with 0 errors and 66 warnings. Compilation is not runtime validation of its new Android test.
+- This continuation could not start the ADB daemon. No emulator instrumentation, large-history benchmark, migration recovery test or real-device rescan was performed.
+- The owner's screenshot validates the pictured Samsung/LockStar arrangement only, not other hosts, notification loads or background refresh.
+- Recommended first implementation scope: preserve merge relationships, correct import counts and sterling parsing, align notification privacy, protect CSV text and resolve time provenance, each with targeted synthetic regressions. Then run migration and performance checks. Defer broad activity/database extraction, new dependencies and additional features.
+
+All items above remain open at this checkpoint. Estimates in the external audit are planning guesses, not delivery commitments.

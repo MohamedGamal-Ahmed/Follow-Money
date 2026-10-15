@@ -38,6 +38,7 @@ docs/*
 !docs/GITHUB_SETUP.md
 !docs/GOOGLE_PLAY_RELEASE.md
 !docs/RELEASE_FREEZE_2026-10-14.md
+!docs/CLAUDE_AUDIT_TRIAGE_2026-10-15.md
 !docs/CLOSED_TESTING_PLAN.md
 !docs/NEXT_STEPS_2026-10-13.md
 !docs/screenshots/

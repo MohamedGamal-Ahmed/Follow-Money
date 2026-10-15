@@ -46,6 +46,10 @@ The native picker is a bottom-aligned dialog with selectable cards, checked-stat
 
 `MonthlySummaryReceiver` uses an inexact local first-of-month alarm from 09:00 and catches up on activity resume, date/time changes and reboot. It stores the start, latest notified and latest seen months in local preferences. Notifications contain no amounts or merchants, require system permission/channel availability and recorded activity, and deep-link to the completed month. Reading hides the home entry while retaining the Analytics report. This scheduling does not promise delivery while Android force-stops or restricts the app.
 
+## Widgets
+
+`LockSummaryWidget` is a separate transparent, compact provider for compatible widget hosts. It reads `DailySummary`, the selected widget currency and the existing hide-amounts preference; it has no independent financial calculations or persistent settings. `SummaryWidget.refresh()` includes its installed instances in existing refresh paths. It displays only an exact two-decimal remaining/overage value and caption, clears values and accessibility text on unavailability, and opens the app through a normal immutable PendingIntent. The host owns placement, padding and the notification region. The three existing home widget layouts retain their presentation.
+
 ## Validation
 
 Standalone JVM tests cover parser, time/budget, money-flow, repair and insight rules. Android instrumentation covers SQLite reconciliation, feature integration and widgets using synthetic data. `tools/run-checks.ps1` is the shared entry point for local checks and CI; Android instrumentation is optional and emulator-only. `tools/check-repo.py` checks documentation links, support form field consistency, pinned CI actions and excluded private artifacts.
