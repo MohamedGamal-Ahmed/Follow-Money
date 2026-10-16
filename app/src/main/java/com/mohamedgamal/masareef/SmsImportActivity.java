@@ -27,7 +27,7 @@ public final class SmsImportActivity extends Activity {
         android.database.sqlite.SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
         try {
             long before=db.transactionCount();
-            for(SmsPreview row:selected)db.addSms(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe);
+            for(SmsPreview row:selected)db.addHistoricalSms(row);
             long added=db.transactionCount()-before;
             sql.setTransactionSuccessful();return added;
         }finally {sql.endTransaction();}
@@ -112,7 +112,7 @@ public final class SmsImportActivity extends Activity {
             if("scan".equals(session.phase)){
                 page.addView(text(session.reviewBeforeImport?"هنعرض الرسائل للمراجعة قبل الحفظ.":"هنستورد الرسائل المالية تلقائيًا بعد الفحص. الرسائل المكررة لن تُسجل مرتين، والمستبعدة يدويًا تظل مستبعدة.",14));
                 footer.addView(button("إيقاف الفحص",()->{session.cancelScan();show();}));
-            }else page.addView(text("جارٍ الحفظ؛ انتظر اكتمال الاستيراد. العمليات المرفوضة لا تُسجل كمصروف، والإلغاء لا يطابق عملية بالتخمين.",14));
+            }else page.addView(text("جارٍ الحفظ؛ انتظر اكتمال الاستيراد. العمليات المرفوضة ليست مصروفًا، والإلغاءات القديمة تحتاج تأكيدك قبل تغيير التحويل الأصلي.",14));
         }else if("ready".equals(session.phase)||"details".equals(session.phase)){
             boolean reviewing="ready".equals(session.phase);
             page.addView(text(reviewing?"المراجعة اختيارية. المحدد فقط سيُستورد؛ الإلغاء غير المؤكد يظل بحاجة لمراجعة.":"تفاصيل الرسائل التي فحصناها. الرسائل المرفوضة أو المستقبلية ليست مصروفات، والمستبعدة يدويًا لا تُعاد إضافتها.",13));
@@ -134,6 +134,12 @@ public final class SmsImportActivity extends Activity {
             page.addView(text("تمت معالجة "+session.processed+" رسالة مالية. صافي التغيّر في عدد العمليات: "+session.added+".",16));
             page.addView(text("المكررات لا تُسجل مرتين. الرصيد والتذكيرات ليست مصروفات جديدة؛ إلغاء التحويل لا يلغي المشتريات الأصلية.",14));
             if(session.skipped>0)page.addView(text(session.skipped+" رسالة لم تُستورد تلقائيًا: رفض/صيغة مستقبلية، استبعاد سابق أو إلغاء تحديد. تقدر تشوفها في التفاصيل.",14));
+            if(!session.pending.isEmpty()){
+                page.addView(text(session.pending.size()+" رسالة إلغاء قديمة تحتاج تأكيدك؛ التحويلات الأصلية لم تتغير بسببها.",15));
+                for(CaptureEvents.Event event:session.pending)page.addView(button("مراجعة الإلغاء · "+(event.amount==null?"المبلغ غير مؤكد":MainActivity.money(event.amount,event.currency)),()->{
+                    startActivity(new Intent(this,MainActivity.class).putExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT,event.id).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP));finish();
+                }));
+            }
             page.addView(button("تفاصيل الرسائل",()->{session.phase="details";pageNumber=0;show();}));
             Button open=button("عرض العمليات",this::openTransactions);primary(open);footer.addView(open);
             footer.addView(button("استيراد فترة أخرى",()->{session.items.clear();session.phase="idle";pageNumber=0;show();}));
@@ -146,7 +152,7 @@ public final class SmsImportActivity extends Activity {
         startActivity(new Intent(this,MainActivity.class).putExtra("open_transactions",true).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP));setResult(RESULT_OK);finish();
     }
     private void choosePeriod(){
-        page.addView(text("اختار المدة وهنستورد رسائل البنك مباشرة. هنحفظ العمليات المدعومة ونحدّث الأرصدة والتذكيرات، من غير تكرار. الإلغاء غير المؤكد هتراجعه في العمليات.",15));
+        page.addView(text("اختار المدة وهنستورد رسائل البنك مباشرة. هنحفظ العمليات المدعومة ونحدّث الأرصدة والتذكيرات، من غير تكرار. إلغاء التحويل في الرسائل القديمة هتراجعه وتؤكده في العمليات قبل تغيير أي تحويل.",15));
         page.addView(button("آخر 30 يوم",()->scan(LocalDate.now().minusDays(29))));
         page.addView(button("آخر 90 يوم",()->scan(LocalDate.now().minusDays(89))));
         Button all=button("كل الرسائل",()->scan(null));primary(all);page.addView(all);
@@ -180,7 +186,7 @@ public final class SmsImportActivity extends Activity {
             GradientDrawable bg=new GradientDrawable();bg.setColor(surface);bg.setCornerRadius(dp(16));box.setBackground(bg);
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2);bp.bottomMargin=dp(8);rows.addView(box,bp);
             CheckBox check=new CheckBox(this);check.setText(r.title+(!r.currency.isEmpty()?" · "+MainActivity.money(r.amountMinor,r.currency):""));
-            check.setTypeface(font);check.setTextColor(INK);check.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));check.setChecked(r.selected);check.setEnabled(r.captureStatus!=2);
+            check.setTypeface(font);check.setTextColor(INK);check.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));check.setChecked(r.selected);check.setEnabled(r.captureStatus==0);
             check.setOnCheckedChangeListener((b,checked)->{r.selected=checked;updateSelection();});
             LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
             if("ready".equals(session.phase))heading.addView(check,new LinearLayout.LayoutParams(0,-2,1));
@@ -200,7 +206,7 @@ public final class SmsImportActivity extends Activity {
                     .format(DateTimeFormatter.ofPattern(dateOnly?"d MMM yyyy":"d MMM yyyy · h:mm a",new Locale("ar")))+(dateOnly?" · تاريخ فقط":"");
             if(r.isTransaction()&&r.balanceIncluded)detail+="\nيشمل أيضًا تحديث الرصيد من نفس الرسالة";
             if(r.isTransaction()&&r.commitmentIncluded)detail+="\nيشمل أيضًا تحديث/اقتراح التزام";
-            if(r.captureStatus==1)detail+="\nمسجلة سابقًا · اختيارها قد يحدث مصدرها؛ التصحيح اليدوي محفوظ";
+            if(r.captureStatus==1)detail+="\nمسجلة سابقًا · لن نعيد تطبيقها؛ التصحيح اليدوي محفوظ";
             if(r.captureStatus==2)detail+="\nمستبعدة سابقًا · لن تُعاد إضافتها";
             if("correction".equals(r.kind))detail+=CaptureNotice.parse(r.sender,r.body)==null?"\nلم تُحسب كمصروف":"\nإلغاء تحويل · المطابقة الآمنة فقط؛ غير المؤكد يحتاج مراجعة";
             if("details".equals(session.phase))detail+=r.selected?"\nتمت المعالجة":"\nلم تُستورد";
@@ -252,6 +258,8 @@ public final class SmsImportActivity extends Activity {
         volatile int total,scanned,processed,skipped;
         boolean reviewBeforeImport;
         volatile long added;
+        long rangeStart,rangeEnd;
+        volatile List<CaptureEvents.Event> pending=java.util.Collections.emptyList();
         volatile boolean cancelled;
         private volatile SmsImportActivity listener;
         private volatile int generation;
@@ -267,7 +275,7 @@ public final class SmsImportActivity extends Activity {
             cancelled=false;final int token=++generation;items.clear();total=0;scanned=0;processed=0;skipped=0;added=0;phase="scan";
             startLabel=start==null?"كل الرسائل":start.toString();
             long since=start==null?0:start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-            long until=System.currentTimeMillis();
+            long until=System.currentTimeMillis();rangeStart=since;rangeEnd=Long.MAX_VALUE;pending=java.util.Collections.emptyList();
             new Thread(()->{
                 List<SmsPreview> candidates=new ArrayList<>();
                 // A receipt timestamp can equal another SMS's sent timestamp. Never treat that key as a legacy alias.
@@ -295,7 +303,7 @@ public final class SmsImportActivity extends Activity {
             if(!"ready".equals(phase))return;
             List<SmsPreview> selected=new ArrayList<>();for(SmsPreview r:items)if(r.selected&&r.captureStatus!=2)selected.add(r);
             skipped=items.size()-selected.size();
-            if(selected.isEmpty()){processed=0;added=0;mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
+            if(selected.isEmpty()){processed=0;added=0;try(ExpenseDb read=new ExpenseDb(app)){pending=new CaptureEvents(read).pendingHistory(rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
             new Thread(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
                     // Do not run a global transfer repair here: unselected history must stay untouched.
@@ -306,7 +314,7 @@ public final class SmsImportActivity extends Activity {
                     long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
                     for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}
                     writeDb.repairBetween(first-86_400_000L,last+86_400_000L);
-                    added=writeDb.transactionCount()-before;sql.setTransactionSuccessful();
+                    added=writeDb.transactionCount()-before;pending=new CaptureEvents(writeDb).pendingHistory(rangeStart,rangeEnd);sql.setTransactionSuccessful();
                     }finally{sql.endTransaction();}
                     mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
                     phase="done";

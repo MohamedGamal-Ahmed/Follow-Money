@@ -320,7 +320,7 @@ public final class ReconciliationTest extends Instrumentation {
         writable.execSQL("DROP TABLE reimbursements");writable.execSQL("DROP TABLE dismissed_patterns");writable.execSQL("DROP TABLE repair_log");
         writable.execSQL("ALTER TABLE transactions DROP COLUMN time_precision");
         writable.setVersion(17);db.close();db=new ExpenseDb(context);
-        assertEquals(22,db.getReadableDatabase().getVersion());assertEquals(2,db.paymentSources().size());
+        assertEquals(23,db.getReadableDatabase().getVersion());assertEquals(2,db.paymentSources().size());
         assertNull(db.transactionById(tx).timePrecision);
         assertEquals(1500,db.transactionById(tx).amountMinor);assertEquals(key,db.sourceEvidence(tx).get(0).body);
         assertEquals(724001,db.currentBalance(card,"EGP").amountMinor);assertNull(db.paymentSource(card).parentSourceId);

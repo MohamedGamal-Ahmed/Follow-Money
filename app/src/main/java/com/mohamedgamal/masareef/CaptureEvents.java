@@ -13,24 +13,37 @@ final class CaptureEvents {
     private final ExpenseDb db;
     CaptureEvents(ExpenseDb db){this.db=db;}
     static void create(SQLiteDatabase sql){
-        sql.execSQL("CREATE TABLE IF NOT EXISTS capture_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_key TEXT NOT NULL UNIQUE,message_hash TEXT,status TEXT NOT NULL,amount_minor INTEGER,currency TEXT,title TEXT NOT NULL,received_at INTEGER NOT NULL,archive_id INTEGER,original_transaction_id INTEGER,sender TEXT,source TEXT,encrypted_body TEXT)");
+        sql.execSQL("CREATE TABLE IF NOT EXISTS capture_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_key TEXT NOT NULL UNIQUE,message_hash TEXT,status TEXT NOT NULL,amount_minor INTEGER,currency TEXT,title TEXT NOT NULL,received_at INTEGER NOT NULL,archive_id INTEGER,original_transaction_id INTEGER,sender TEXT,source TEXT,encrypted_body TEXT,display_at INTEGER)");
         sql.execSQL("CREATE INDEX IF NOT EXISTS capture_event_time ON capture_events(received_at DESC)");
-        // Existing archives remain intact, including their original encrypted evidence. No cancellation SMS is invented.
         try(Cursor c=sql.rawQuery("SELECT id,original_id,archived_at,payload FROM transaction_archive WHERE reason='bank confirmed cancellation'",null)){
-            while(c.moveToNext())try{
-                JSONObject p=new JSONObject(c.getString(3));if(!p.isNull("fee_parent_id")&&p.has("fee_parent_id"))continue;
+            while(c.moveToNext()){
                 ContentValues v=new ContentValues();v.put("event_key","legacy:"+c.getLong(0));v.put("status","cancelled");
-                v.put("amount_minor",p.getLong("amount_minor"));v.put("currency",p.getString("currency"));v.put("title",p.optString("merchant","تحويل"));
-                v.put("received_at",c.getLong(2));v.put("archive_id",c.getLong(0));v.put("original_transaction_id",c.getLong(1));v.put("source","أرشيف سابق");
+                v.put("title","إلغاء محفوظ · تفاصيل الأرشيف غير متاحة");v.put("received_at",c.getLong(2));v.put("display_at",c.getLong(2));
+                v.put("archive_id",c.getLong(0));v.put("original_transaction_id",c.getLong(1));v.put("source","أرشيف سابق");
+                try{
+                    JSONObject payload=new JSONObject(c.getString(3));if(payload.has("fee_parent_id")&&!payload.isNull("fee_parent_id"))continue;
+                    long amount=payload.getLong("amount_minor");String currency=payload.getString("currency");
+                    v.put("amount_minor",amount);v.put("currency",currency);v.put("title",payload.optString("merchant","تحويل"));
+                    ExpenseDb.Transaction original=Event.archivedTransaction(c.getString(3));if(original!=null)v.put("display_at",original.when);
+                }catch(org.json.JSONException invalid){/* Keep an explicit unavailable event and the exact original archive. */}
                 sql.insertWithOnConflict("capture_events",null,v,SQLiteDatabase.CONFLICT_IGNORE);
-            }catch(org.json.JSONException invalid){throw new IllegalStateException("Unreadable cancellation archive",invalid);}
+            }
         }
+        ensureTimeline(sql);
+    }
+    static void ensureTimeline(SQLiteDatabase sql){
+        boolean column=false;try(Cursor c=sql.rawQuery("PRAGMA table_info(capture_events)",null)){while(c.moveToNext())if("display_at".equals(c.getString(1)))column=true;}
+        if(!column)sql.execSQL("ALTER TABLE capture_events ADD COLUMN display_at INTEGER");
+        try(Cursor c=sql.rawQuery("SELECT e.id,e.received_at,a.payload FROM capture_events e LEFT JOIN transaction_archive a ON a.id=e.archive_id WHERE e.display_at IS NULL",null)){
+            while(c.moveToNext()){ExpenseDb.Transaction original=Event.archivedTransaction(c.getString(2));ContentValues v=new ContentValues();v.put("display_at",original==null?c.getLong(1):original.when);sql.update("capture_events",v,"id=?",new String[]{Long.toString(c.getLong(0))});}
+        }
+        sql.execSQL("CREATE INDEX IF NOT EXISTS capture_event_display ON capture_events(display_at DESC,id DESC)");
     }
     static final class Event {
-        final long id,when;final Long archiveId,originalId,amount;final String status,currency,title,sender,source,body;final ExpenseDb.Transaction original;
-        Event(Cursor c){id=c.getLong(0);status=c.getString(1);amount=c.isNull(2)?null:c.getLong(2);currency=c.getString(3);title=c.getString(4);when=c.getLong(5);archiveId=c.isNull(6)?null:c.getLong(6);originalId=c.isNull(7)?null:c.getLong(7);sender=c.getString(8);source=c.getString(9);body=c.getString(10);original=c.getColumnCount()>11?archivedTransaction(c.getString(11)):null;}
+        final long id,when,displayAt;final Long archiveId,originalId,amount;final String status,currency,title,sender,source,body;final ExpenseDb.Transaction original;
+        Event(Cursor c){id=c.getLong(0);status=c.getString(1);amount=c.isNull(2)?null:c.getLong(2);currency=c.getString(3);title=c.getString(4);when=c.getLong(5);archiveId=c.isNull(6)?null:c.getLong(6);originalId=c.isNull(7)?null:c.getLong(7);sender=c.getString(8);source=c.getString(9);body=c.getString(10);original=c.getColumnCount()>11?archivedTransaction(c.getString(11)):null;displayAt=c.getColumnCount()>12&&!c.isNull(12)?c.getLong(12):original==null?when:original.when;}
         boolean cancelled(){return "cancelled".equals(status);}
-        long displayWhen(){return original==null?when:original.when;}
+        long displayWhen(){return displayAt;}
         private static ExpenseDb.Transaction archivedTransaction(String payload){
             if(payload==null)return null;
             try{
@@ -41,14 +54,17 @@ final class CaptureEvents {
         private static Long nullableId(JSONObject p,String key)throws org.json.JSONException{return p.isNull(key)||!p.has(key)?null:p.getLong(key);}
     }
     private static final String COLUMNS="id,status,amount_minor,currency,title,received_at,archive_id,original_transaction_id,sender,source,encrypted_body";
-    private static final String HISTORY="SELECT e."+COLUMNS.replace(",",",e.")+",a.payload FROM capture_events e LEFT JOIN transaction_archive a ON a.id=e.archive_id";
+    private static final String HISTORY="SELECT e."+COLUMNS.replace(",",",e.")+",a.payload,e.display_at FROM capture_events e LEFT JOIN transaction_archive a ON a.id=e.archive_id";
     Event byId(long id){try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" WHERE e.id=?",new String[]{Long.toString(id)})){return c.moveToFirst()?new Event(c):null;}}
     /** Filter on the archived operation date, including cancellations received in a later month. */
     List<Event> timelineBetween(long start,long end){
         List<Event> rows=new ArrayList<>();
-        try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" ORDER BY e.received_at DESC,e.id DESC",null)){
-            while(c.moveToNext()){Event event=new Event(c);if(event.displayWhen()>=start&&event.displayWhen()<end)rows.add(event);}
+        try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" WHERE e.display_at>=? AND e.display_at<? ORDER BY e.display_at DESC,e.id DESC",new String[]{Long.toString(start),Long.toString(end)})){
+            while(c.moveToNext())rows.add(new Event(c));
         }return rows;
+    }
+    List<Event> pendingHistory(long start,long end){
+        List<Event> rows=new ArrayList<>();try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" WHERE e.status='needs_confirmation' AND e.received_at>=? AND e.received_at<=? ORDER BY e.received_at DESC,e.id DESC",new String[]{Long.toString(start),Long.toString(end)})){while(c.moveToNext())rows.add(new Event(c));}return rows;
     }
     List<Event> between(long start,long end){List<Event> rows=new ArrayList<>();try(Cursor c=db.getReadableDatabase().rawQuery("SELECT "+COLUMNS+" FROM capture_events WHERE received_at>=? AND received_at<? ORDER BY received_at DESC,id DESC LIMIT 100",new String[]{Long.toString(start),Long.toString(end)})){while(c.moveToNext())rows.add(new Event(c));}return rows;}
     private Long source(String sender,String last4){
@@ -75,11 +91,12 @@ final class CaptureEvents {
         }
         return ids;
     }
-    Event record(String sender,String source,String body,long when,String key,CaptureNotice notice){
+    Event record(String sender,String source,String body,long when,String key,CaptureNotice notice){return record(sender,source,body,when,key,notice,true);}
+    Event record(String sender,String source,String body,long when,String key,CaptureNotice notice,boolean automatic){
         String hash=CaptureIdentity.normalized(sender,body);
         SQLiteDatabase sql=db.getWritableDatabase();
         try(Cursor c=sql.rawQuery("SELECT id FROM capture_events WHERE event_key=?",new String[]{key})){if(c.moveToFirst())return null;}
-        ContentValues v=new ContentValues();v.put("event_key",key);v.put("message_hash",hash);v.put("status","needs_review");v.put("title","إلغاء تحويل");v.put("received_at",when);v.put("sender",sender);v.put("source",source);v.put("encrypted_body",EvidenceVault.encrypt(body));
+        ContentValues v=new ContentValues();v.put("event_key",key);v.put("message_hash",hash);v.put("status",automatic?"needs_review":"needs_confirmation");v.put("title","إلغاء تحويل");v.put("received_at",when);v.put("display_at",when);v.put("sender",sender);v.put("source",source);v.put("encrypted_body",EvidenceVault.encrypt(body));
         if(v.getAsString("encrypted_body")==null)throw new IllegalStateException("Cancellation evidence could not be encrypted");
         if(notice.payment!=null){v.put("amount_minor",notice.payment.amountMinor);v.put("currency",notice.payment.currency);}
         // A repeated source copy may arrive with another receipt timestamp. Do not suppress a real second debit.
@@ -88,7 +105,7 @@ final class CaptureEvents {
                 Event prior=byId(c.getLong(0));if(!prior.cancelled()||candidates(newTemporary(v)).isEmpty())return null;
             }
         }
-        long id=sql.insertOrThrow("capture_events",null,v);Event event=byId(id);resolve(event);return byId(id);
+        long id=sql.insertOrThrow("capture_events",null,v);Event event=byId(id);if(automatic)resolve(event);return byId(id);
     }
     private Event newTemporary(ContentValues v){
         android.database.MatrixCursor c=new android.database.MatrixCursor(COLUMNS.split(","));
@@ -119,7 +136,7 @@ final class CaptureEvents {
         db.archiveEntry(id,"bank confirmed cancellation",true);
         long archive;
         try(Cursor c=sql.rawQuery("SELECT id FROM transaction_archive WHERE original_id=? AND reason='bank confirmed cancellation' ORDER BY id DESC LIMIT 1",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalStateException("Cancellation archive missing");archive=c.getLong(0);}
-        ContentValues v=new ContentValues();v.put("status","cancelled");if(original!=null)v.put("title",original.merchant);v.put("archive_id",archive);v.put("original_transaction_id",id);sql.update("capture_events",v,"id=?",new String[]{Long.toString(event.id)});
+        ContentValues v=new ContentValues();v.put("status","cancelled");if(original!=null)v.put("title",original.merchant);v.put("archive_id",archive);v.put("original_transaction_id",id);if(original!=null)v.put("display_at",original.when);sql.update("capture_events",v,"id=?",new String[]{Long.toString(event.id)});
     }
     Event reconcilePending(long transactionId){
         Event resolved=null;
@@ -134,7 +151,7 @@ final class CaptureEvents {
             if(c.moveToFirst())try{JSONArray list=new JSONObject(c.getString(0)).optJSONArray("evidence");if(list!=null)for(int i=0;i<list.length();i++){
                 JSONObject p=list.getJSONObject(i);EvidenceVault.Read body=EvidenceVault.read(p.isNull("encrypted_body")?null:p.optString("encrypted_body"));
                 rows.add(new ExpenseDb.SourceEvidence(p.optString("source"),p.optString("sender"),p.optLong("received_at"),body.body,body.failed));
-            }}catch(org.json.JSONException error){throw new IllegalStateException(error);}
+            }}catch(org.json.JSONException error){rows.add(new ExpenseDb.SourceEvidence("أرشيف سابق","",event.when,null,true));}
         }
         if(rows.isEmpty()&&event.body!=null){EvidenceVault.Read body=EvidenceVault.read(event.body);rows.add(new ExpenseDb.SourceEvidence(event.source,event.sender,event.when,body.body,body.failed));}
         return rows;

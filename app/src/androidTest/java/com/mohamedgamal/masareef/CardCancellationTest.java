@@ -74,8 +74,47 @@ final class CardCancellationTest {
         SmsPreview excluded=SmsPreview.parse("BANK","Card purchase at QA EXCLUDED EGP 99",time);excluded.captureStatus=2;
         java.util.List<SmsPreview> rows=java.util.Arrays.asList(debit,cancellation,decline,excluded);SmsPreview.selectForImport(rows);
         java.util.List<SmsPreview> selected=new java.util.ArrayList<>();for(SmsPreview row:rows)if(row.selected)selected.add(row);
-        eq(2,selected.size());eq(0,SmsImportActivity.applySelected(db,selected));eq(0,db.transactionCount());ok(event().cancelled());eq(2,new CaptureEvents(db).evidence(event()).size());
-        eq(0,SmsImportActivity.applySelected(db,selected));eq(1,scalar("SELECT COUNT(*) FROM capture_events"));
+        eq(2,selected.size());eq(1,SmsImportActivity.applySelected(db,selected));eq(1,db.transactionCount());ok(!event().cancelled());ok("needs_confirmation".equals(event().status));eq(1,new CaptureEvents(db).pendingHistory(time-86_400_000L,time+86_400_000L).size());
+        eq(0,SmsImportActivity.applySelected(db,selected));eq(1,scalar("SELECT COUNT(*) FROM capture_events"));eq(1,db.transactionCount());
+        CaptureEvents store=new CaptureEvents(db);ExpenseDb.Transaction original=store.choices(event()).get(0);store.confirm(event().id,original.id,store.identity(original.id));eq(0,db.transactionCount());ok(event().cancelled());eq(2,store.evidence(event()).size());
+    }
+    public void testHistoricalCancellationCannotAutoResolveWhenDebitArrivesLater(){
+        SmsPreview cancellation=SmsPreview.parse("BANK",cancel(),time+3000),debit=SmsPreview.parse("BANK",debit(),time);
+        eq(1,SmsImportActivity.applySelected(db,java.util.Arrays.asList(cancellation,debit)));eq(1,db.transactionCount());ok("needs_confirmation".equals(event().status));
+        ok(!db.addSms("BANK",debit(),time));eq(1,db.transactionCount());ok(!event().cancelled());
+    }
+    public void testHistoricalBalanceReceiptPreventsReapplication(){
+        SmsPreview balance=SmsPreview.parse("BANK","Your card **1111 available balance EGP 1000",time);ok(balance!=null);
+        eq(0,SmsImportActivity.applySelected(db,java.util.Collections.singletonList(balance)));eq(1,scalar("SELECT COUNT(*) FROM sms_import_receipts"));eq(1,db.smsCaptureStatus(balance.sender,balance.body,balance.receivedAt,balance.captureAt));
+        db.getWritableDatabase().execSQL("UPDATE balance_snapshots SET balance_minor=77700");
+        eq(0,SmsImportActivity.applySelected(db,java.util.Collections.singletonList(balance)));eq(77700,scalar("SELECT balance_minor FROM balance_snapshots LIMIT 1"));db.clearAllData();eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
+    }
+    public void testSkippedMessageClearsCancellationStateBeforeNotification(){
+        ok(db.addSms("BANK",debit(),time));ok(db.addSms("BANK",cancel(),time+3000));ok(db.lastCaptureEvent()!=null);
+        ok(!db.addSms("BANK","Your OTP is 123456 for payment EGP 227",time+4000));ok(db.lastCaptureEvent()==null);
+        ok(!db.addSms("BANK",null,time+5000));ok(db.lastCaptureEvent()==null);
+    }
+    public void testTransferFeeRejectionExplainsWhyAndPreservesBothRows(){
+        long from=account(),card=card(),payment=add(time,22700,"QA PAYMENT","تحويلات",from,"expense"),fee=add(time,550,"QA TRANSFER FEE","رسوم تحويل",from,"expense");
+        db.getWritableDatabase().execSQL("UPDATE transactions SET fee_parent_id=? WHERE id=?",new Object[]{payment,fee});
+        try{new CardSettlements(db).preview(payment,from,card,java.util.Collections.emptyMap());throw new AssertionError("Fee repayment accepted");}catch(IllegalArgumentException error){ok(error.getMessage().contains("رسوم تحويل"));}
+        eq(2,db.transactionCount());eq(550,db.transferFee(payment));ok(!new CardSettlements(db).isSettlement(payment));
+    }
+    public void testCorruptV21ArchivesDoNotBlockUpgradeOrLoseRawData(){
+        ok(db.addSms("BANK",debit(),time));db.archiveEntry(db.lastCaptured().id,"bank confirmed cancellation",true);
+        db.getWritableDatabase().execSQL("UPDATE transaction_archive SET payload='{broken JSON'");db.close();
+        try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(file.getPath(),null,SQLiteDatabase.OPEN_READWRITE)){sql.execSQL("DROP TABLE capture_events");sql.execSQL("DROP TABLE sms_import_receipts");sql.execSQL("DROP TABLE card_settlements");sql.execSQL("DROP TABLE card_settlement_allocations");sql.setVersion(21);}
+        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(1,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(event().cancelled());ok(event().amount==null);ok(event().original==null);ok(new CaptureEvents(db).evidence(event()).get(0).body==null);
+        try(Cursor c=db.getReadableDatabase().rawQuery("SELECT payload FROM transaction_archive",null)){ok(c.moveToFirst());ok("{broken JSON".equals(c.getString(0)));}
+    }
+    public void testV22TimelineUpgradeBackfillsDateAndUsesIndex(){
+        ok(db.addSms("BANK",debit(),time));ok(db.addSms("BANK",cancel(),time+3000));long original=event().displayWhen();db.close();
+        try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(file.getPath(),null,SQLiteDatabase.OPEN_READWRITE)){
+            sql.execSQL("CREATE TABLE old_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_key TEXT NOT NULL UNIQUE,message_hash TEXT,status TEXT NOT NULL,amount_minor INTEGER,currency TEXT,title TEXT NOT NULL,received_at INTEGER NOT NULL,archive_id INTEGER,original_transaction_id INTEGER,sender TEXT,source TEXT,encrypted_body TEXT)");
+            sql.execSQL("INSERT INTO old_events SELECT id,event_key,message_hash,status,amount_minor,currency,title,received_at,archive_id,original_transaction_id,sender,source,encrypted_body FROM capture_events");sql.execSQL("DROP TABLE capture_events");sql.execSQL("ALTER TABLE old_events RENAME TO capture_events");sql.execSQL("DROP TABLE sms_import_receipts");sql.setVersion(22);
+        }
+        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(original,event().displayWhen());eq(1,new CaptureEvents(db).timelineBetween(original,original+1).size());
+        try(Cursor c=db.getReadableDatabase().rawQuery("EXPLAIN QUERY PLAN SELECT id FROM capture_events WHERE display_at>=? AND display_at<? ORDER BY display_at DESC,id DESC",new String[]{Long.toString(original),Long.toString(original+1)})){ok(c.moveToFirst());ok(c.getString(3).contains("capture_event_display"));}
     }
     public void testOutOfOrderCancellationSettlesWhenEarlierDebitArrives(){
         ok(db.addSms("BANK",cancel(),time+3000));ok(!event().cancelled());ok(db.addSms("BANK",debit(),time));ok(event().cancelled());eq(0,db.transactionCount());eq(2,new CaptureEvents(db).evidence(event()).size());ok(db.lastCaptured()==null);
@@ -159,7 +198,7 @@ final class CardCancellationTest {
     public void testLegacyCancellationMigrationKeepsArchiveAndDistinguishesMissingProof(){
         ok(db.addSms("BANK",debit(),time));long id=db.lastCaptured().id;db.archiveEntry(id,"bank confirmed cancellation",true);long archives=scalar("SELECT COUNT(*) FROM transaction_archive");db.close();
         try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(file.getPath(),null,SQLiteDatabase.OPEN_READWRITE)){sql.execSQL("DROP TABLE capture_events");sql.execSQL("DROP TABLE card_settlements");sql.execSQL("DROP TABLE card_settlement_allocations");sql.setVersion(21);}
-        db=new ExpenseDb(context);eq(22,db.getWritableDatabase().getVersion());eq(archives,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(event().cancelled());ok(event().body==null);eq(1,new CaptureEvents(db).evidence(event()).size());
+        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(archives,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(event().cancelled());ok(event().body==null);eq(1,new CaptureEvents(db).evidence(event()).size());
         db.close();db=new ExpenseDb(context);eq(1,scalar("SELECT COUNT(*) FROM capture_events"));eq(0,db.transactionCount());
     }
     public void testContactlessLastUseWarningIsOnePurchaseAndDeclineIsZero(){

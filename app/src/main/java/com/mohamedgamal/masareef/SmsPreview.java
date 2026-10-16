@@ -66,7 +66,7 @@ final class SmsPreview {
     }
     /** Explicit cancellation uses the same conservative matcher as live capture; declines/future notices stay out. */
     static void selectForImport(java.util.List<SmsPreview> rows){
-        for(SmsPreview row:rows)row.selected=row.captureStatus!=2&&(!"correction".equals(row.kind)||CaptureNotice.parse(row.sender,row.body)!=null);
+        for(SmsPreview row:rows)row.selected=row.captureStatus==0&&(!"correction".equals(row.kind)||CaptureNotice.parse(row.sender,row.body)!=null);
     }
     static void selectAll(java.util.List<SmsPreview> rows, boolean onlyNew) {
         for(SmsPreview row:rows)row.selected=row.captureStatus!=2&&(!onlyNew||row.captureStatus==0)&&!"correction".equals(row.kind);

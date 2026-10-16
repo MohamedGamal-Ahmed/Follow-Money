@@ -24,7 +24,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     };
 
     public ExpenseDb(Context context) {
-        super(context, "masareef.db", null, 22);
+        super(context, "masareef.db", null, 23);
     }
 
     @Override public void onCreate(SQLiteDatabase db) {
@@ -62,7 +62,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         createRepairTables(db);
         createReimbursements(db);
         db.execSQL("ALTER TABLE recurring ADD COLUMN last_paid_due TEXT");
-        CardSettlements.create(db);CaptureEvents.create(db);
+        CardSettlements.create(db);CaptureEvents.create(db);createImportReceipts(db);
     }
 
     /** v20: an incoming payment that returns money spent on someone else's behalf, linked to that purchase. */
@@ -189,6 +189,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         if(oldVersion<21)db.execSQL("ALTER TABLE transactions ADD COLUMN time_precision TEXT CHECK(time_precision IN ('exact','date_only'))");
         if(oldVersion<22){CardSettlements.create(db);CaptureEvents.create(db);}
+        if(oldVersion<23){CaptureEvents.ensureTimeline(db);createImportReceipts(db);}
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
@@ -232,6 +233,15 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 "PRIMARY KEY(plan_id,category))");
     }
 
+    private static void createImportReceipts(SQLiteDatabase sql){sql.execSQL("CREATE TABLE IF NOT EXISTS sms_import_receipts(unique_key TEXT PRIMARY KEY)");}
+    /** Historical cancellation is evidence for explicit review; it must not archive a debit unattended. */
+    boolean addHistoricalSms(SmsPreview row){
+        lastCaptureEvent=null;lastCapturedId=-1;
+        if(smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe)!=0)return false;
+        boolean added=addAutomaticCapture(row.sender,row.sender,row.body,row.captureAt,"SMS",row.receiptKeySafe?row.receivedAt:row.captureAt,false);
+        ContentValues receipt=new ContentValues();receipt.put("unique_key",sha256(row.sender+"\n"+row.captureAt+"\n"+row.body));getWritableDatabase().insertWithOnConflict("sms_import_receipts",null,receipt,SQLiteDatabase.CONFLICT_IGNORE);
+        return added;
+    }
     public boolean addSms(String sender, String body, long when) {
         return addAutomatic(sender, sender, body, when, "SMS");
     }
@@ -280,6 +290,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 "SELECT 1 FROM excluded_messages WHERE unique_key IN (?,?)", new String[]{key,legacyKey})) {
             if (c.moveToFirst()) return 2;
         }
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM sms_import_receipts WHERE unique_key IN (?,?) UNION ALL SELECT 1 FROM capture_events WHERE event_key IN (?,?) AND source='SMS' LIMIT 1",new String[]{key,legacyKey,key,legacyKey})){if(c.moveToFirst())return 1;}
         return 0;
     }
 
@@ -306,6 +317,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public Transaction lastCaptured() { return lastCapturedId < 0 ? null : transactionById(lastCapturedId); }
 
     private boolean addAutomaticCapture(String sourceKey, String label, String body, long receivedAt, String channel, long legacyReceivedAt) {
+        return addAutomaticCapture(sourceKey,label,body,receivedAt,channel,legacyReceivedAt,true);
+    }
+    private boolean addAutomaticCapture(String sourceKey,String label,String body,long receivedAt,String channel,long legacyReceivedAt,boolean automaticCancellation){
         lastCaptureEvent=null;lastCapturedId=-1;
         if (body == null || ExpenseParser.isVerificationMessage(body)) return false;
         SQLiteDatabase writable = getWritableDatabase();
@@ -327,7 +341,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if (ExpenseParser.isUnsuccessful(body) || CaptureNotice.parse(label,body)!=null) {
                 markRejectedCaptureForReview(hash, eventAt);
                 CaptureNotice notice=CaptureNotice.parse(label,body);
-                if(notice!=null)lastCaptureEvent=new CaptureEvents(this).record(label,channel,body,receivedAt,key,notice);
+                if(notice!=null)lastCaptureEvent=new CaptureEvents(this).record(label,channel,body,receivedAt,key,notice,automaticCancellation);
                 boolean cancelled=lastCaptureEvent!=null;
                 writable.setTransactionSuccessful();
                 return cancelled;
@@ -385,7 +399,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 if (added && !CaptureNotice.cardRepayment(body) && "expense".equals(direction) && !linkTransferToCommitment(existing))
                     advanceRecurring(parsed.merchant, parsed.amountMinor, parsed.currency, receivedAt);
             }
-            if(existing>=0){CaptureEvents.Event resolved=new CaptureEvents(this).reconcilePending(existing);if(resolved!=null)lastCaptureEvent=resolved;}
+            if(automaticCancellation&&existing>=0){CaptureEvents.Event resolved=new CaptureEvents(this).reconcilePending(existing);if(resolved!=null)lastCaptureEvent=resolved;}
             writable.setTransactionSuccessful(); return added;
         } finally { writable.endTransaction(); }
     }
@@ -1154,7 +1168,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             for (String table : new String[]{"transactions", "excluded_messages", "recurring", "source_aliases", "payment_sources",
                     "budgets", "balance_snapshots", "merchant_rules", "budget_plan_categories", "budget_plans",
                     "assets", "debts", "own_handles", "capture_evidence", "transaction_archive", "commitment_suggestions", "commitment_observations",
-                    "reimbursements", "dismissed_patterns", "repair_log", "capture_events", "card_settlement_allocations", "card_settlements"}) db.delete(table, null, null);
+                    "reimbursements", "dismissed_patterns", "repair_log", "sms_import_receipts", "capture_events", "card_settlement_allocations", "card_settlements"}) db.delete(table, null, null);
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }
     }

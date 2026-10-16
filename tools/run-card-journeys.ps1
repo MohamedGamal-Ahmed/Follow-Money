@@ -37,6 +37,9 @@ allprojects { p ->
     try{
         & $adb -s $Device emu sms send QAIMPORT 'Card purchase at QA IMPORT EGP 15.00 using card **8877. Available balance EGP 985.00'
         if($LASTEXITCODE -ne 0){throw 'Synthetic inbox fixture failed'}
+        # Historical cancellation fixture: import must keep it pending for explicit confirmation.
+        & $adb -s $Device emu sms send QAIMPORT 'Transfer of EGP 227.00 from account **3333 has been cancelled'
+        if($LASTEXITCODE -ne 0){throw 'Synthetic cancellation fixture failed'}
         Start-Sleep -Seconds 2
     }finally{& $adb -s $Device shell run-as $appId pm enable $receiver}
     $modes = if ($UiOnly) { @('menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large','sms_ui_light','sms_ui_dark','sms_ui_large') } else { @('base','phase','checks','regressions','card','menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large','sms_ui_light','sms_ui_dark','sms_ui_large','journey') }

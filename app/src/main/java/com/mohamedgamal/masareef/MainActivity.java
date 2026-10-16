@@ -2931,7 +2931,8 @@ public final class MainActivity extends Activity {
     }
     private void showCaptureEvent(CaptureEvents.Event event){
         String message=event.cancelled()?"المحاولة ملغاة ومش محسوبة في الإجماليات. إلغاء السداد لا يلغي المشتريات الأصلية أو رسومها.":"لم نجد عملية واحدة مؤكدة لنربطها برسالة الإلغاء. راجع المصدر والعمليات؛ لن نحذف عملية بالتخمين.";
-        if(event.body==null)message+="\nهذا إلغاء محفوظ من إصدار سابق؛ رسالة الإلغاء نفسها لم تكن محفوظة. وقت العرض هو وقت الأرشفة.";
+        if("needs_confirmation".equals(event.status))message="دي رسالة إلغاء قديمة من الاستيراد. التحويل الأصلي لم يتغير؛ راجع رسالة البنك واختر المطابقة ثم أكد الإلغاء بنفسك.";
+        if(event.body==null)message+=event.original==null?"\nتفاصيل الأرشيف أو الرسالة غير متاحة للقراءة؛ الأصل المحفوظ لم يتغير. وقت العرض هو وقت الأرشفة.":"\nهذا إلغاء محفوظ من إصدار سابق؛ رسالة الإلغاء نفسها لم تكن محفوظة. وقت العرض هو وقت الأرشفة.";
         AlertDialog.Builder dialog=new ChoiceDialogBuilder().setTitle(event.cancelled()?"محاولة ملغاة":"إلغاء يحتاج مراجعة").setMessage(message)
                 .setPositiveButton("عرض المصدر المحفوظ",(d,w)->showOriginalMessages(new CaptureEvents(db).evidence(event))).setNegativeButton("إغلاق",null);
         if(!new CaptureEvents(db).choices(event).isEmpty())dialog.setNeutralButton("مراجعة المطابقة",(d,w)->reviewCancellationMatch(event));dialog.show();
@@ -2970,12 +2971,12 @@ public final class MainActivity extends Activity {
         android.app.Dialog sheet=new android.app.Dialog(this);sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         LinearLayout content=form();content.setPadding(dp(18),dp(10),dp(18),dp(12));content.setBackground(rounded(SURFACE,26));
         View handle=new View(this);handle.setBackground(rounded(BORDER,99));LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(dp(42),dp(4));hp.gravity=Gravity.CENTER_HORIZONTAL;hp.bottomMargin=dp(12);content.addView(handle,hp);
-        LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);heading.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);TextView headingText=label(title,20,INK,true);headingText.setTextDirection(View.TEXT_DIRECTION_RTL);headingText.setMaxLines(3);heading.addView(headingText,new LinearLayout.LayoutParams(0,-2,1));heading.addView(iconButton(R.drawable.ic_close,"إغلاق",sheet::dismiss),new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(heading);
+        LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);heading.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);TextView headingText=label(title,20,INK,true);headingText.setTextDirection(View.TEXT_DIRECTION_RTL);headingText.setMaxLines(3);heading.addView(headingText,new LinearLayout.LayoutParams(0,-2,1));heading.addView(iconButton(R.drawable.ic_close,"إغلاق",sheet::cancel),new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(heading);
         ScrollView scroller=scrollForm(body);scroller.setVerticalScrollBarEnabled(false);content.addView(scroller,new LinearLayout.LayoutParams(-1,0,1));
         Button proceed=new Button(this);proceed.setTag("financial_journey_primary");proceed.setText(primary);proceed.setTypeface(BOLD);proceed.setTextColor(dark?0xff0d1f1a:Color.WHITE);proceed.setBackground(rounded(dark?ACCENT:BRAND,14));proceed.setAllCaps(false);proceed.setMinHeight(dp(52));
         LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2);pp.topMargin=dp(12);content.addView(proceed,pp);proceed.setOnClickListener(v->accept.accept(sheet));
         if(secondary!=null){Button previous=new Button(this);previous.setText(secondary);previous.setTypeface(BOLD);previous.setTextColor(INK);previous.setBackground(outlined(SURFACE,BORDER,14));previous.setAllCaps(false);previous.setMinHeight(dp(48));LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2);bp.topMargin=dp(8);content.addView(previous,bp);previous.setOnClickListener(v->back.accept(sheet));}
-        showJourneyWindow(sheet,content,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f));return sheet;
+        showJourneyWindow(sheet,content,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f));sheet.setCanceledOnTouchOutside(false);return sheet;
     }
     private void showJourneyWindow(android.app.Dialog sheet,LinearLayout content,int height){
         sheet.setContentView(content);sheet.setCanceledOnTouchOutside(true);android.view.Window window=sheet.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
@@ -3004,6 +3005,7 @@ public final class MainActivity extends Activity {
         };draw[0].run();
     }
     private void cardRepaymentDialog(ExpenseDb.Transaction item){
+        long fee=db.transferFee(item.id);if(fee>0){new ChoiceDialogBuilder().setTitle("السداد عليه رسوم تحويل").setMessage("الربط غير متاح حاليًا للتحويل المرتبط برسوم مقدارها "+money(fee,item.currency)+". أصل التحويل ورسومه محفوظين؛ راجعهم من تفاصيل العملية. لن نحول الرسوم لسداد أو نسجلها مرتين.").setPositiveButton("فهمت",null).show();return;}
         LinearLayout content=form();journeyAmountCard(content,"قيمة السداد",money(item.amountMinor,item.currency),"اختار حساب الخصم وبطاقة الائتمان الخاصة بك");
         content.addView(label("المشتريات تفضل محسوبة في يومها. تأكيد السداد يحوّل الخصم إلى تحويل بين حساباتك.",14,MUTED,false));
         List<ExpenseDb.PaymentSource> accounts=new ArrayList<>(),cards=new ArrayList<>();

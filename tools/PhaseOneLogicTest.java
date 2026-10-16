@@ -74,8 +74,11 @@ public final class PhaseOneLogicTest {
         SmsPreview future=SmsPreview.parse("BANK","سيتم خصم مبلغ 70 جنيه غدا",when);
         equal(true,cancellation!=null);equal(true,decline!=null);equal(true,future!=null);
         SmsPreview.selectForImport(java.util.Arrays.asList(fresh,old,excluded,cancellation,decline,future));
-        equal(true,fresh.selected);equal(true,old.selected);equal(false,excluded.selected);
+        equal(true,fresh.selected);equal(false,old.selected);equal(false,excluded.selected);
         equal(true,cancellation.selected);equal(false,decline.selected);equal(false,future.selected);
+        // Same text as the emulator inbox fixture in run-card-journeys.ps1.
+        SmsPreview fixture=SmsPreview.parse("QAIMPORT","Transfer of EGP 227.00 from account **3333 has been cancelled",when);equal(true,fixture!=null&&"correction".equals(fixture.kind));
+        SmsPreview.selectForImport(java.util.Collections.singletonList(fixture));equal(true,fixture.selected);
 
         SmsParts parts=new SmsParts();
         parts.add("Banque Misr",when,"شكرًا لاستخدامك بطاقة بنك مصر ***5555، تم الآن خصم 255.01 EGPعند ES");

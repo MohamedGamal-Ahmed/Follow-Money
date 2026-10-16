@@ -192,7 +192,7 @@ final class AuditRegressionTest {
             old.execSQL("INSERT INTO reimbursements VALUES(2,1,4000)");
             old.execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,received_at,encrypted_body) VALUES('qa-evidence',1,'SMS',2000,'opaque-legacy-evidence')");
         }
-        db=new ExpenseDb(context);eq(22,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
+        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
         eq(4000,db.reimbursedOf(1));eq(6000,ExpenseDb.effectiveAmount(db.transactionById(1),db.reimbursementOffsets()));
         ok(db.transactionById(1).timePrecision==null&&db.transactionById(2).timePrecision==null);
         eq(1,scalar("SELECT user_edited FROM transactions WHERE id=2"));

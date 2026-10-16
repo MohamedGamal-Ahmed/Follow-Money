@@ -64,7 +64,8 @@ final class CardSettlements {
                 ||!("transfer".equals(payment.kind)||"expense".equals(payment.kind)&&"تحويلات".equals(payment.category)))throw new IllegalArgumentException("Select a live outgoing payment and your credit card");
         if(payment.destinationSourceId!=null&&payment.destinationSourceId!=card)throw new IllegalArgumentException("Existing destination differs from this card");
         if(payment.paymentSourceId!=null&&db.accountId(payment.paymentSourceId)!=db.accountId(from))throw new IllegalArgumentException("Source differs from the bank debit");
-        if(db.reimbursedExpense(paymentId)!=null||db.reimbursedOf(paymentId)>0||db.transferFee(paymentId)>0)throw new IllegalArgumentException("Review related records before settling the card");
+        if(db.transferFee(paymentId)>0)throw new IllegalArgumentException("السداد ده مرتبط برسوم تحويل. الربط غير متاح حاليًا للحفاظ على الرسوم؛ راجع أصل التحويل ورسومه من تفاصيل العملية.");
+        if(db.reimbursedExpense(paymentId)!=null||db.reimbursedOf(paymentId)>0)throw new IllegalArgumentException("Review related records before settling the card");
         LinkedHashMap<Long,Long> allocations=new LinkedHashMap<>();long total=0;StringBuilder signature=new StringBuilder(snapshot(paymentId).toString()).append('|').append(sourceFingerprint(origin)).append('|').append(sourceFingerprint(destination));
         for(Map.Entry<Long,Long> entry:new java.util.TreeMap<>(selections).entrySet()){
             ExpenseDb.Transaction purchase=db.transactionById(entry.getKey());long amount=entry.getValue()==null?0:entry.getValue();

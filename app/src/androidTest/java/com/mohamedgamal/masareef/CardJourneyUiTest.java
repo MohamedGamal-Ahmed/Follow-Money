@@ -63,6 +63,16 @@ final class CardJourneyUiTest {
         android.graphics.Bitmap bitmap=runner.getUiAutomation().takeScreenshot();if(bitmap==null)throw new AssertionError("No screenshot");
         try(FileOutputStream out=new FileOutputStream(new File(captures,name+".png"))){ok(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{bitmap.recycle();}
     }
+    private void editAllocation(String text){
+        for(AccessibilityNodeInfo node:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText("226.60"))if("android.widget.EditText".contentEquals(node.getClassName())){
+            Bundle args=new Bundle();args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,text);if(!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args))throw new AssertionError("Cannot edit allocation");idle();return;
+        }throw new AssertionError("Missing allocation editor");
+    }
+    private void tapOutsideSheet(){
+        android.util.DisplayMetrics size=runner.getTargetContext().getResources().getDisplayMetrics();long now=android.os.SystemClock.uptimeMillis();float x=size.widthPixels/2f,y=size.heightPixels*.15f;
+        android.view.MotionEvent down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,x,y,0),up=android.view.MotionEvent.obtain(now,now+80,android.view.MotionEvent.ACTION_UP,x,y,0);
+        try{runner.getUiAutomation().injectInputEvent(down,true);runner.getUiAutomation().injectInputEvent(up,true);}finally{down.recycle();up.recycle();}idle();
+    }
     private boolean enabled(String text){for(AccessibilityNodeInfo node:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText(text))if(node.getText()!=null&&plain(node.getText()).equals(text))return node.isEnabled();throw new AssertionError("Missing button "+text);}
     private void clickContaining(String text){
         for(AccessibilityNodeInfo node:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText(text)){
@@ -87,7 +97,11 @@ final class CardJourneyUiTest {
             main(()->{((ExpenseDb)get("db")).close();set("db",db);set("introVisible",false);set("selectedTab",6);set("selectedMonth",LocalDate.now().withDayOfMonth(1));invoke("render",new Class<?>[0]);});
             main(()->invoke("cardRepaymentDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(payment)));ok(has("اختيار حسابات السداد"));ok(has("حساب الخصم"));ok(has("بطاقة الائتمان"));ok(purchaseCheckedByContains("1111"));ok(!purchaseCheckedByContains("2222"));ok(!enabled("اختيار المشتريات"));screen("01-accounts");
             clickContaining("2222");ok(enabled("اختيار المشتريات"));click("اختيار المشتريات");ok(has("ربط المشتريات بالسداد"));ok(has("226.60"));ok(!store.isSettlement(payment));screen("02-purchases");
-            clickContaining("QA SERVICE");click("مراجعة");ok(has("مراجعة سداد البطاقة"));ok(has("0.40"));ok(!store.isSettlement(payment));screen("03-review");
+            clickContaining("QA SERVICE");editAllocation("220.00");tapOutsideSheet();ok(has("ربط المشتريات بالسداد"));ok(has("220.00"));screen("02b-outside-kept");
+            // Restore the full allocation and verify that X has exactly the review Back behavior.
+            for(AccessibilityNodeInfo node:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText("220.00"))if("android.widget.EditText".contentEquals(node.getClassName())){Bundle args=new Bundle();args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"226.60");ok(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args));}idle();
+            click("مراجعة");clickContaining("إغلاق");ok(has("ربط المشتريات بالسداد"));ok(purchaseCheckedByContains("QA SERVICE"));ok(has("226.60"));screen("02c-x-back");
+            click("مراجعة");ok(has("مراجعة سداد البطاقة"));ok(has("0.40"));ok(!store.isSettlement(payment));screen("03-review");
             click("رجوع للاختيار");ok(has("ربط المشتريات بالسداد"));ok(purchaseCheckedByContains("QA SERVICE"));click("مراجعة");click("تأكيد السداد");ok(has("تفاصيل سداد البطاقة"));ok(store.isSettlement(payment));ok(has("0.40"));screen("04-result");
             click("التراجع عن الربط");ok(has("التراجع عن سداد البطاقة؟"));click("تراجع");ok(!store.isSettlement(payment));ok("expense".equals(db.transactionById(payment).kind));
             main(()->invoke("statementFeeDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(purchase)));ok(has("رسوم كشف البطاقة"));ok(has("قيمة الرسوم"));screen("05-fee");click("إلغاء");
@@ -99,6 +113,10 @@ final class CardJourneyUiTest {
             main(()->{invoke("resetTransactionFilters",new Class<?>[0]);invoke("render",new Class<?>[0]);});
             main(()->invoke("showCaptureEvent",new Class<?>[]{CaptureEvents.Event.class},event));ok(has("محاولة ملغاة"));screen("07-canceled");click("عرض المصدر المحفوظ");ok(has("تم الغاء"));ok(has("تم تحويل"));screen("08-evidence");click("إغلاق");
             CaptureNotifier.buildEvent(target,event).contentIntent.send();awaitText("محاولة ملغاة");ok(has("محاولة ملغاة"));ok((Integer)get("selectedTab")==6);click("إغلاق");
+            // A transfer-fee fixture, distinct from the already tested purchase fee.
+            db.addManualEntry(t,150,"EGP","QA TRANSFER FEE","رسوم تحويل",from,"expense",null,null);long transferFee=db.latestInserted().id;
+            db.getWritableDatabase().execSQL("UPDATE transactions SET fee_parent_id=? WHERE id=?",new Object[]{payment,transferFee});
+            main(()->invoke("cardRepaymentDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(payment)));ok(has("السداد عليه رسوم تحويل"));ok(has("1.50"));ok(!store.isSettlement(payment));screen("09-transfer-fee");click("فهمت");
             result.putString("stream","Card journey UI checks passed: "+checked+"; failed: 0; dark="+dark+"\nCaptures: "+captures+"\n");
         }catch(Throwable error){status=0;try{screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Card journey UI FAILED: "+trace+"\n");}
         finally{try{if(activity!=null)main(()->{if(originalConfiguration!=null)activity.getResources().updateConfiguration(originalConfiguration,activity.getResources().getDisplayMetrics());activity.finish();});if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){status=0;result.putString("stream",result.getString("stream","")+"cleanup failed: "+error);}runner.finish(status,result);}
