@@ -29,6 +29,7 @@ final class AuditRegressionTest {
     private long at(LocalDate day,int hour){return day.atTime(hour,0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();}
     private void eq(long expected,long actual){if(expected!=actual)throw new AssertionError(expected+" != "+actual);}
     private void ok(boolean value){if(!value)throw new AssertionError("expected true");}
+    private void ok(boolean value,String detail){if(!value)throw new AssertionError(detail);}
     private void setup(){
         Context target=runner.getTargetContext();file=new File(target.getCacheDir(),"audit-regression.db");SQLiteDatabase.deleteDatabase(file);
         context=new ContextWrapper(target){
@@ -61,6 +62,10 @@ final class AuditRegressionTest {
         return db.latestInserted().id;
     }
     private long scalar(String sql){try(Cursor cursor=db.getReadableDatabase().rawQuery(sql,null)){ok(cursor.moveToFirst());return cursor.getLong(0);}}
+    private String archivePayload(long originalId){
+        try(Cursor cursor=db.getReadableDatabase().rawQuery("SELECT payload FROM transaction_archive WHERE original_id=?",
+                new String[]{Long.toString(originalId)})){ok(cursor.moveToFirst());return cursor.getString(0);}
+    }
 
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
@@ -206,7 +211,7 @@ final class AuditRegressionTest {
         try{db.getWritableDatabase().execSQL("UPDATE transactions SET time_precision='guessed' WHERE id=?",new Object[]{id});
             throw new AssertionError("Invalid precision accepted");}catch(android.database.sqlite.SQLiteConstraintException expected){}
     }
-    public void testArchiveEntryRemovesFeeChildrenAndReimbursementLinks(){
+    public void testArchiveEntryArchivesFeeChildAndRecordsRemovedReimbursement(){
         long t=at(LocalDate.now(),10),buy=manual(t,10000,"expense"),back=manual(t+1000,4000,"income"),fee=manual(t,200,"expense");
         db.getWritableDatabase().execSQL("UPDATE transactions SET fee_parent_id=? WHERE id=?",new Object[]{buy,fee});
         db.linkReimbursement(back,buy);
@@ -214,8 +219,27 @@ final class AuditRegressionTest {
         eq(1,scalar("SELECT COUNT(*) FROM transactions WHERE fee_parent_id="+buy));
         db.archiveEntry(buy,"qa archive",true);
         ok(db.transactionById(buy)==null);
+        ok(db.transactionById(fee)==null);
+        ok(db.transactionById(back)!=null);
         eq(0,scalar("SELECT COUNT(*) FROM reimbursements"));
         eq(0,scalar("SELECT COUNT(*) FROM transactions WHERE fee_parent_id="+buy));
+        eq(2,scalar("SELECT COUNT(*) FROM transaction_archive WHERE reason='qa archive'"));
+        eq(1,scalar("SELECT COUNT(*) FROM transaction_archive WHERE original_id="+buy));
+        eq(1,scalar("SELECT COUNT(*) FROM transaction_archive WHERE original_id="+fee));
+        String payload=archivePayload(buy);
+        ok(payload.contains("\"removed_reimbursements\""),payload);
+        ok(payload.contains("\"expense_id\":"+buy)&&payload.contains("\"income_id\":"+back),payload);
+        ok(payload.contains("\"amount_minor\":4000"),payload);
+    }
+    /** The archive and the reimbursement record survive a reload of the same database file. */
+    public void testArchivedFeeChildAndReimbursementRecordPersist(){
+        long t=at(LocalDate.now(),10),buy=manual(t,10000,"expense"),back=manual(t+1000,4000,"income"),fee=manual(t,200,"expense");
+        db.getWritableDatabase().execSQL("UPDATE transactions SET fee_parent_id=? WHERE id=?",new Object[]{buy,fee});
+        db.linkReimbursement(back,buy);
+        db.archiveEntry(buy,"qa archive",false);
+        db.close();db=new ExpenseDb(context);
+        eq(2,scalar("SELECT COUNT(*) FROM transaction_archive WHERE reason='qa archive'"));
+        ok(archivePayload(buy).contains("\"amount_minor\":4000"));
     }
     public void testArchivePromotionsSkipsReimbursementLinkedRows(){
         long t=at(LocalDate.now(),10);

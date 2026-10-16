@@ -488,6 +488,14 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         boolean own=!writable.inTransaction();
         if(own) writable.beginTransaction();
         try {
+            // Bank-fee children share the parent's life. They are archived with it, never hard-deleted,
+            // so the archive keeps the whole story in the same transaction.
+            java.util.List<Long> fees=new java.util.ArrayList<>();
+            try(Cursor c=writable.rawQuery("SELECT id FROM transactions WHERE fee_parent_id=? ORDER BY id",
+                    new String[]{Long.toString(id)})) {
+                while(c.moveToNext()) fees.add(c.getLong(0));
+            }
+            for(long fee:fees) archiveRow(writable,fee,reason,exclude);
             archiveRow(writable,id,reason,exclude);
             if(own) writable.setTransactionSuccessful();
         } finally {
@@ -501,6 +509,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             org.json.JSONObject payload=new org.json.JSONObject();
             try {
                 for (int i=0;i<c.getColumnCount();i++) payload.put(c.getColumnName(i),c.isNull(i)?org.json.JSONObject.NULL:c.getString(i));
+                // The row's live reimbursement links disappear with it; keep them in the payload for review.
+                payload.put("removed_reimbursements",removedReimbursements(writable,id));
                 if (exclude) {
                     // Keep the (still encrypted) source messages with the archived row, so a correction stays provable.
                     org.json.JSONArray evidence=new org.json.JSONArray();
@@ -527,6 +537,22 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             deleteDependentRows(id);
             writable.delete("transactions","id=?",new String[]{Long.toString(id)});
         }
+    }
+
+    /** The reimbursement links that vanish with the row, captured before deleteDependentRows removes them. */
+    private static org.json.JSONArray removedReimbursements(SQLiteDatabase writable,long id) {
+        org.json.JSONArray rows=new org.json.JSONArray();
+        try(Cursor c=writable.rawQuery("SELECT income_id,expense_id,amount_minor FROM reimbursements WHERE income_id=? OR expense_id=? ORDER BY income_id",
+                new String[]{Long.toString(id),Long.toString(id)})) {
+            while(c.moveToNext()) {
+                org.json.JSONObject row=new org.json.JSONObject();
+                try {
+                    row.put("income_id",c.getLong(0)); row.put("expense_id",c.getLong(1)); row.put("amount_minor",c.getLong(2));
+                } catch(org.json.JSONException error) { throw new IllegalStateException(error); }
+                rows.put(row);
+            }
+        }
+        return rows;
     }
 
     private boolean mergeEntries(long keep,long remove,String reason) {
