@@ -28,6 +28,16 @@ public final class AuditStructureTest {
                 "refresh() must not normalize (render() calls it, so it would loop)");
         check(body(daily, "@Override public void onReceive(Context context,Intent intent)").contains("normalizeEarlyPayments"),
                 "the daily receiver must normalize off the main thread");
+        check(body(main, "private long optionalMinor(String raw)").contains("manualAmountMisread"),
+                "the shared optional-amount helper must reject an ambiguous dot too");
+        int guards = 0, inputs = 0;
+        for (String line : main.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.contains("rejectMisreadAmount(") && !trimmed.startsWith("private")) guards++;
+            if (trimmed.contains("parseMinor(ExpenseParser.normalizeDigits(")) inputs++;
+        }
+        check(guards == inputs && inputs >= 13,
+                "every manual amount input must re-check an ambiguous dot (guards " + guards + " vs inputs " + inputs + ")");
         System.out.println("Source structure checks passed: " + checked);
     }
 

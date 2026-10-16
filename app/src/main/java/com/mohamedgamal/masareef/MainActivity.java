@@ -465,6 +465,7 @@ public final class MainActivity extends Activity {
         Spinner currency = spinner("العملة", CURRENCIES, form);
         new AlertDialog.Builder(this).setTitle("رصيد " + db.sourceLabel(db.accountId(source.id))).setView(form)
                 .setPositiveButton("حفظ", (dialog, which) -> {
+                    if (rejectMisreadAmount(amount)) return;
                     long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                     if (minor < 0) { toast("راجع مبلغ الرصيد"); return; }
                     db.putManualBalance(db.accountId(source.id), currency.getSelectedItem().toString(), minor, System.currentTimeMillis());
@@ -798,6 +799,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(existing == null ? "أصل جديد" : "تحديث الأصل").setView(form)
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            if (rejectMisreadAmount(value)) return;
             long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(value.getText().toString()));
             if (minor < 0 || name.getText().toString().trim().isEmpty()) { toast("راجع اسم الأصل وقيمته"); return; }
             db.putAsset(existing == null ? null : existing.id, name.getText().toString(),
@@ -839,6 +841,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
+                if (rejectMisreadAmount(amount)) return;
                 long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                 String dueText = dateValue(due) == null ? "" : dateValue(due).toString();
                 if (minor <= 0 || name.getText().toString().trim().isEmpty()) throw new IllegalArgumentException();
@@ -856,6 +859,7 @@ public final class MainActivity extends Activity {
         amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         new AlertDialog.Builder(this).setTitle("سداد " + debt.name).setView(form)
                 .setPositiveButton("حفظ", (dialog, which) -> {
+                    if (rejectMisreadAmount(amount)) return;
                     long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                     if (minor <= 0) { toast("راجع المبلغ"); return; }
                     db.payDebt(debt.id, minor); render();
@@ -929,6 +933,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     try {
+                        if (rejectMisreadAmount(amount)) return;
                         long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                         LocalDate start = java.util.Objects.requireNonNull(dateValue(anchor));
                         int days = Integer.parseInt(ExpenseParser.normalizeDigits(duration.getText().toString().trim()));
@@ -1164,6 +1169,7 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                if (rejectMisreadAmount(amount)) return;
                 long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                 if (minor <= 0 || merchant.getText().toString().trim().isEmpty()) {
                     toast("راجع الجهة والمبلغ");
@@ -1279,6 +1285,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("عملية جديدة").setView(scrollForm(form))
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            if (rejectMisreadAmount(amount)) return;
             long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
             String name = merchant.getText().toString().trim();
             if (minor <= 0 || name.isEmpty()) {
@@ -1320,6 +1327,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("سجل حصتي", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
+                if (rejectMisreadAmount(total)) return;
                 long amount = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(total.getText().toString()));
                 int count = Integer.parseInt(ExpenseParser.normalizeDigits(people.getText().toString().trim()));
                 if (amount <= 0 || count < 2 || merchant.getText().toString().trim().isEmpty()) throw new IllegalArgumentException();
@@ -2838,6 +2846,7 @@ public final class MainActivity extends Activity {
                 Long source=selectedSource(from,accounts),destination=selectedSource(to,accounts);
                 if(source==null || destination==null) {toast("حدد حسابي التحويل");return;}
                 List<Long> receipts=new ArrayList<>();for(int i=0;i<checks.size();i++) if(checks.get(i).isChecked()) receipts.add(candidates.get(i).id);
+                if(rejectMisreadAmount(principal)||rejectMisreadAmount(fee))return;
                 db.reconcileOwnTransfer(item.id,ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(principal.getText().toString())),
                         ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(fee.getText().toString())),source,destination,receipts);
                 dialog.dismiss();selectedTransaction=db.transactionById(item.id);render();
@@ -3673,6 +3682,7 @@ public final class MainActivity extends Activity {
         paintKind[0].run();
 
         save.setOnClickListener(v -> {
+            if (rejectMisreadAmount(amount)) return;
             String merchant = name.getText().toString().trim();
             long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
             if (merchant.isEmpty() || minor <= 0) { toast("اكتب اسم الجهة والمبلغ"); return; }
@@ -3739,6 +3749,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("حوّلها لالتزام شهري").setView(form).setPositiveButton("حفظ الالتزام",null).setNegativeButton("إلغاء",null).create();
         dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             try {
+                if(rejectMisreadAmount(amount))return;
                 String merchant=name.getText().toString().trim();long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                 LocalDate due=java.util.Objects.requireNonNull(dateValue(date));
                 if(merchant.isEmpty()||minor<=0||due.isBefore(LocalDate.now()))throw new IllegalArgumentException();
@@ -3940,6 +3951,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("حفظ",null).setNegativeButton("إلغاء",null).setNeutralButton("حذف الحد اليومي",null).create();
         dialog.setOnShowListener(d->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             try {String daily=amount.getText().toString().trim(),monthly=salaryAmount.getText().toString().trim(),code=currency.getSelectedItem().toString();
+                if(rejectMisreadAmount(daily)||rejectMisreadAmount(monthly))return;
                 long limit=optionalMinor(daily),salaryValue=optionalMinor(monthly);int day=selectedSalaryDay(salary.getSelectedItemPosition());
                 LocalDate start=java.util.Objects.requireNonNull(dateValue(starts));
                 if(!daily.isEmpty())DailySummary.save(this,new DailyAllowance.Plan(code,limit,start,day));else DailySummary.remove(this,code);
@@ -3956,7 +3968,9 @@ public final class MainActivity extends Activity {
     private int selectedSalaryDay(int selection){return selection==1?DailyAllowance.MONTH_END:selection>1?selection-1:0;}
     private int salarySelection(int day){return day==DailyAllowance.MONTH_END?1:day>0?day+1:0;}
     private void decimalInput(EditText view){view.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);}
-    private long optionalMinor(String raw){if(raw.isBlank())return 0;long value=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(raw));if(value<=0)throw new IllegalArgumentException("Invalid amount");return value;}
+    private boolean rejectMisreadAmount(String raw){if(!ExpenseParser.manualAmountMisread(raw))return false;toast("راجع المبلغ");return true;}
+    private boolean rejectMisreadAmount(EditText field){return rejectMisreadAmount(field.getText().toString());}
+    private long optionalMinor(String raw){if(raw.isBlank())return 0;if(ExpenseParser.manualAmountMisread(raw))throw new IllegalArgumentException("Ambiguous amount");long value=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(raw));if(value<=0)throw new IllegalArgumentException("Invalid amount");return value;}
     private void bindIntro(EditText input,java.util.function.Consumer<String> update) {
         input.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence text,int start,int count,int after){}
             public void afterTextChanged(Editable text){}public void onTextChanged(CharSequence text,int start,int before,int count){update.accept(text.toString());}});
@@ -4012,7 +4026,7 @@ public final class MainActivity extends Activity {
         payday.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> parent){}public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){introPayDay=selectedSalaryDay(position);}});
         form.addView(label("آخر الشهر حسب 28/29/30/31 يوم. الراتب للتخطيط؛ لا نضيفه كدخل. الحد اليومي ثابت ولا يترحّل.",12,MUTED,false));
         TextView begin=label("حفظ وابدأ",17,LIME,true);begin.setGravity(Gravity.CENTER);begin.setPadding(dp(16),dp(14),dp(16),dp(14));begin.setBackground(rounded(BRAND,16));
-        begin.setOnClickListener(v->{try{long limit=optionalMinor(introDaily),monthly=optionalMinor(introSalary);String currency=CURRENCIES[introCurrency];
+        begin.setOnClickListener(v->{try{if(rejectMisreadAmount(introDaily)||rejectMisreadAmount(introSalary))return;long limit=optionalMinor(introDaily),monthly=optionalMinor(introSalary);String currency=CURRENCIES[introCurrency];
             if(limit>0)DailySummary.save(this,new DailyAllowance.Plan(currency,limit,LocalDate.now(),introPayDay));
             DailySummary.saveSalary(this,currency,monthly,introPayDay);getPreferences(MODE_PRIVATE).edit().putString("profile_name",introName.trim()).apply();
             getSharedPreferences("widget_settings",MODE_PRIVATE).edit().putString("currency",currency).apply();finishIntro(true);

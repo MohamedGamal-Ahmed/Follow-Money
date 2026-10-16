@@ -363,6 +363,22 @@ public final class ExpenseParser {
         }
     }
 
+    /**
+     * True when a hand-typed amount is ambiguous in a way {@link #parseMinor(String)} would
+     * silently absorb: a dot as the last separator with three or more digits after it, such as
+     * {@code 1.500} or {@code 12.345}. A thousands dot that is followed by a decimal part
+     * ({@code 1.500,00}) stays valid. Bank SMS parsing is deliberately left untouched.
+     */
+    static boolean manualAmountMisread(String raw) {
+        if (raw == null) return false;
+        String text = normalizeDigits(raw).replaceAll("\\s+", "").replaceAll("[.,]+$", "");
+        int dot = text.lastIndexOf('.');
+        if (dot < 0 || dot < text.lastIndexOf(',')) return false;
+        if (text.length() - dot - 1 < 3) return false;
+        for (int i = dot + 1; i < text.length(); i++) if (!Character.isDigit(text.charAt(i))) return false;
+        return true;
+    }
+
     private static String currency(String raw) {
         String value = raw.toUpperCase(Locale.ROOT);
         if (value.contains("USD") || value.contains("دولار")) return "USD";
