@@ -22,12 +22,16 @@ public final class AuditStructureTest {
         check(body(main, "@Override protected void onResume()").contains("normalizeEarlyPaymentsThenRender()"),
                 "onResume must schedule off-thread normalization");
         String normalize = body(main, "private void normalizeEarlyPaymentsThenRender()");
-        check(normalize.contains("EARLY_PAYMENT_QUEUE.execute("), "normalization must run on a worker thread");
+        check(normalize.contains("CaptureQueue.submit("), "normalization must run on the one capture worker");
         check(normalize.contains("runOnUiThread"), "normalization must return to the UI thread to re-render");
+        check(!main.contains("EARLY_PAYMENT_QUEUE") && !daily.contains("NORMALIZE_QUEUE"),
+                "no extra writer thread may be created beside the capture worker");
         check(!body(daily, "static void refresh(Context context)").contains("normalizeEarlyPayments"),
                 "refresh() must not normalize (render() calls it, so it would loop)");
         check(body(daily, "@Override public void onReceive(Context context,Intent intent)").contains("normalizeEarlyPayments"),
                 "the daily receiver must normalize off the main thread");
+        check(body(daily, "@Override public void onReceive(Context context,Intent intent)").contains("CaptureQueue.submit("),
+                "the daily receiver must normalize on the capture worker");
         check(body(main, "private long optionalMinor(String raw)").contains("manualAmountMisread"),
                 "the shared optional-amount helper must reject an ambiguous dot too");
         int guards = 0, inputs = 0;

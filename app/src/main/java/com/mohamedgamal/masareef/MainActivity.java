@@ -146,12 +146,6 @@ public final class MainActivity extends Activity {
     private final Map<String,Integer> scrollPositions=new LinkedHashMap<>();
     private ScrollView pageScroll;
     private String renderedPageKey;
-    private static final java.util.concurrent.ExecutorService EARLY_PAYMENT_QUEUE =
-            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
-                Thread thread = new Thread(runnable, "early-payment-normalize");
-                thread.setDaemon(true);
-                return thread;
-            });
     private final java.util.concurrent.atomic.AtomicBoolean normalizingEarlyPayments = new java.util.concurrent.atomic.AtomicBoolean();
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -1824,14 +1818,21 @@ public final class MainActivity extends Activity {
         return amount + " " + currency;
     }
 
+    /**
+     * Early-payment normalization is a ledger write. Nothing else may run it off the UI thread, so the
+     * activity and the daily receiver both hand it to the single capture worker that serialises captures.
+     */
+    static int normalizeEarlyPaymentsOnWorker(ExpenseDb db) {
+        try { return db.normalizeEarlyPayments(); }
+        catch (RuntimeException ignored) { return 0; }
+    }
+
     /** An installment paid a few days early (30 Sep for 1 Oct) must not stay "overdue": normalize off the UI thread. */
     private void normalizeEarlyPaymentsThenRender() {
         if (!normalizingEarlyPayments.compareAndSet(false, true)) return;
-        EARLY_PAYMENT_QUEUE.execute(() -> {
-            int moved = 0;
-            try { moved = db.normalizeEarlyPayments(); }
-            catch (RuntimeException ignored) { }
-            finally { normalizingEarlyPayments.set(false); }
+        CaptureQueue.submit(() -> {
+            int moved = normalizeEarlyPaymentsOnWorker(db);
+            normalizingEarlyPayments.set(false);
             if (moved <= 0) return;
             runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) render(); });
         });

@@ -242,6 +242,37 @@ final class AuditRegressionTest {
         eq(1,db.normalizeEarlyPayments());
         ok(!MainActivity.dueWord(db.recurringById(id).nextDue).contains("متأخر"));
     }
+    /** Captures and normalization go through one worker, so a write is never lost to a locked database. */
+    public void testCaptureQueueSerialisesCapturesAndOneNormalization(){
+        LocalDate yesterday=LocalDate.now().minusDays(1);
+        long plan=db.putCommitment(null,"قسط QA",500000,"EGP",yesterday,"monthly","installment",12,1,1,"قسط QA",null);
+        ContentValues paid=new ContentValues();paid.put("last_paid_date",yesterday.minusDays(1).toString());
+        db.getWritableDatabase().update("recurring",paid,"id=?",new String[]{Long.toString(plan)});
+        final int captures=4;
+        final java.util.List<Throwable> errors=java.util.Collections.synchronizedList(new java.util.ArrayList<Throwable>());
+        final java.util.concurrent.CountDownLatch done=new java.util.concurrent.CountDownLatch(captures+1);
+        final long day=at(LocalDate.now(),9);
+        for(int index=0;index<captures;index++){
+            final int value=index;
+            CaptureQueue.submit(()->{
+                try(ExpenseDb capture=new ExpenseDb(context)){
+                    capture.addSms("BANK","Card purchase EGP "+(value+11)+" at QA SHOP "+value,day+value*1000L);
+                }catch(Throwable error){errors.add(error);}
+                finally{done.countDown();}
+            });
+        }
+        CaptureQueue.submit(()->{
+            try(ExpenseDb normalization=new ExpenseDb(context)){MainActivity.normalizeEarlyPaymentsOnWorker(normalization);}
+            catch(Throwable error){errors.add(error);}
+            finally{done.countDown();}
+        });
+        try{ok(done.await(30,java.util.concurrent.TimeUnit.SECONDS));}catch(InterruptedException interrupted){throw new AssertionError(interrupted);}
+        if(!errors.isEmpty())throw new AssertionError(errors.get(0));
+        eq(captures,db.transactionCount());
+        eq(captures,db.transactions().size());
+        ok(!MainActivity.dueWord(db.recurringById(plan).nextDue).contains("متأخر"));
+        eq(0,db.normalizeEarlyPayments());
+    }
     public void testCaptureQueueRunsWorkInOrderOnOneBackgroundThread(){
         final java.util.List<String> threads=java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
         final java.util.List<Integer> order=java.util.Collections.synchronizedList(new java.util.ArrayList<Integer>());
