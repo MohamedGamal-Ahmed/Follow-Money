@@ -577,18 +577,19 @@ public final class MainActivity extends Activity {
         });
                 break;
             case "alerts":
-        setting(CaptureNotifier.enabled(this) ? "إشعار فوري بكل عملية: شغال" : "إشعار فوري بكل عملية: متوقف", () -> {
-            boolean enable = !CaptureNotifier.enabled(this);
+        notificationSetting("إشعار فوري بكل عملية", "عند تسجيل عملية جديدة أو إلغائها", CaptureNotifier.enabled(this), "captured_transactions", enable -> {
             CaptureNotifier.setEnabled(this, enable);
             if (enable) askNotificationPermission();
             render();
         });
-        setting("تذكير يومي بالمصاريف", this::toggleDailyReminder);
+        notificationSetting("تذكير يومي بالمصاريف", "ملخص مصروف اليوم والميزانية", getSharedPreferences("reminder_settings", MODE_PRIVATE).getBoolean("daily_enabled", false), "daily_summary", this::setDailyReminder);
         boolean monthlyEnabled=MonthlySummaryReceiver.settings(this).getBoolean("enabled",true);
-        setting(monthlyEnabled?"تنبيه ملخص الشهر: شغال":"تنبيه ملخص الشهر: متوقف",()->{
-            MonthlySummaryReceiver.settings(this).edit().putBoolean("enabled",!monthlyEnabled).apply();
-            if(!monthlyEnabled)askNotificationPermission();MonthlySummaryReceiver.refresh(this);render();
+        notificationSetting("تنبيه ملخص الشهر", "أول الشهر من 9 صباحًا", monthlyEnabled, MonthlySummaryReceiver.CHANNEL, enable -> {
+            MonthlySummaryReceiver.settings(this).edit().putBoolean("enabled",enable).apply();
+            if(enable)askNotificationPermission();MonthlySummaryReceiver.refresh(this);render();
         });
+        setting("إعدادات إشعارات الجهاز", () -> startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())));
         note("تنبيه واحد أول الشهر من 9 صباحًا؛ ممكن يتأخر بسبب البطارية أو إغلاق الجهاز. الملخص يفضل متاح في التحليلات.");
                 break;
             case "data":
@@ -1074,11 +1075,14 @@ public final class MainActivity extends Activity {
         return "\"" + value.replace("\"", "\"\"") + "\"";
     }
 
-    private void toggleDailyReminder() {
+    private void setDailyReminder(boolean enable) {
         SharedPreferences prefs = getSharedPreferences("reminder_settings", MODE_PRIVATE);
-        boolean enable = !prefs.getBoolean("daily_enabled", false);
         prefs.edit().putBoolean("daily_enabled", enable).apply();
         if (enable) askNotificationPermission();
+        else {
+            NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (manager != null) manager.cancel(DailySummaryNotifier.ID);
+        }
         toast(enable ? "التذكير اليومي اتفعل" : "التذكير اليومي اتوقف");
         render();
     }
@@ -1451,6 +1455,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {
         super.onRequestPermissionsResult(requestCode, permissions, grants);
+        if (requestCode == NOTIFICATION_REQUEST && selectedTab == 5 && "alerts".equals(settingsSection)) render();
         if (requestCode == SMS_REQUEST) {
             if (checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
                 importSms();
@@ -2540,15 +2545,12 @@ public final class MainActivity extends Activity {
         page.addView(chipScroll, chipParams);
 
         List<ExpenseDb.Transaction> month = transactionPeriod==null ? db.transactionsForMonth(selectedMonth) : db.transactionsBetween(transactionPeriod[0],transactionPeriod[1]);
-        ExpenseDb.Transaction firstUncategorized = null;
         int uncategorized = 0;
         for (ExpenseDb.Transaction item : month)
             if ("expense".equals(item.kind) && "غير مصنف".equals(item.category)) {
                 uncategorized++;
-                if (firstUncategorized == null) firstUncategorized = item;
             }
-        if (firstUncategorized != null) {
-            ExpenseDb.Transaction review = firstUncategorized;
+        if (uncategorized > 0) {
             LinearLayout banner = new LinearLayout(this); banner.setGravity(Gravity.CENTER_VERTICAL);
             banner.setPadding(dp(14), dp(12), dp(14), dp(12));
             banner.setBackground(rounded(dark ? 0x33d9a21b : 0xfffff6db, 16));
@@ -2556,8 +2558,13 @@ public final class MainActivity extends Activity {
             banner.addView(tintedIcon(R.drawable.ic_cat_other, ink), new LinearLayout.LayoutParams(dp(20), dp(20)));
             LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, -2, 1); textParams.setMarginStart(dp(10));
             banner.addView(label(uncategorized == 1 ? "عملية محتاجة تصنيف" : uncategorized + " عمليات محتاجة تصنيف", 13, ink, false), textParams);
-            banner.addView(label("راجع", 13, ink, true));
-            banner.setOnClickListener(v -> editTransactionDialog(review));
+            banner.addView(label("عرض الكل", 13, ink, true));
+            banner.setOnClickListener(v -> {
+                transactionCategoryFilter = "غير مصنف"; transactionKindFilter = "expense";
+                transactionBucketFilter = ""; transactionCurrencyFilter = ""; transactionSourceFilter = null;
+                transactionExcludeTransfers = false; transactionSearch = ""; searchOpen = false;
+                bulkMode = false; bulkSelected.clear(); render();
+            });
             LinearLayout.LayoutParams bannerParams = new LinearLayout.LayoutParams(-1, -2); bannerParams.topMargin = dp(12);
             page.addView(banner, bannerParams);
         }
@@ -2914,6 +2921,8 @@ public final class MainActivity extends Activity {
                 &&(text.isEmpty()||(tx.merchant+" "+tx.category+" "+money(tx.amountMinor,tx.currency)).toLowerCase(Locale.ROOT).contains(text));
     }
     private boolean matchesCaptureFilters(CaptureEvents.Event event,String text){
+        // Canceled attempts are audit history, not active expenses awaiting classification.
+        if ("غير مصنف".equals(transactionCategoryFilter)) return false;
         if(event.original!=null){
             String query=text.replace("ملغاة", "").trim();return matchesTransactionFilters(event.original,query);
         }
@@ -3655,22 +3664,38 @@ public final class MainActivity extends Activity {
                 cell.addView(centered(label(Integer.toString(number),14,today?LIME:INK,!due.isEmpty()||today)));
                 cell.addView(centered(label(due.isEmpty()?"":due.size()+" •",10,today?LIME:ACCENT,true)));
                 cell.setContentDescription(date+" · "+due.size()+" التزامات");
-                cell.setOnClickListener(v -> {
-                    LinearLayout list=form();
-                    if(due.isEmpty()) list.addView(label("مفيش التزامات مؤكدة في اليوم ده",14,MUTED,false));
-                    for(ExpenseDb.Recurring item:due) {
-                        TextView payment=label(item.merchant+" · "+money(item.amountMinor,item.currency),14,INK,true);
-                        payment.setPadding(0,dp(12),0,dp(12));list.addView(payment);
-                        payment.setOnClickListener(view -> {selectedCommitmentId=item.id;selectedTab=11;render();});
-                    }
-                    new ChoiceDialogBuilder().setTitle(date.format(DateTimeFormatter.ofPattern("EEEE d MMMM",new Locale("ar"))))
-                            .setView(list).setPositiveButton("إغلاق",null).show();
-                });
+                cell.setOnClickListener(v -> showCommitmentsOn(date, due));
             }
             LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(0,dp(52),1);params.setMargins(dp(2),dp(2),dp(2),dp(2));
             row.addView(cell,params);
         }
         box.addView(label("اضغط يوم لعرض التزاماته · المقترحات تحتاج تأكيدًا قبل دخول الكالندر",11,MUTED,false));
+    }
+
+    private void showCommitmentsOn(LocalDate date, List<ExpenseDb.Recurring> due) {
+        LinearLayout list = form();
+        AlertDialog dialog = new ChoiceDialogBuilder()
+                .setTitle(date.format(DateTimeFormatter.ofPattern("EEEE d MMMM", new Locale("ar"))))
+                .setView(scrollForm(list)).setPositiveButton("إغلاق", null).create();
+        if (due.isEmpty()) list.addView(label("مفيش التزامات مؤكدة في اليوم ده", 14, MUTED, false));
+        for (ExpenseDb.Recurring item : due) {
+            LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(12), dp(14), dp(12), dp(14));
+            row.setBackground(outlined(SURFACE, BORDER, 14));
+            LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
+            copy.addView(label(item.merchant, 15, INK, true));
+            copy.addView(label(money(item.amountMinor, item.currency), 13, MUTED, false));
+            copy.addView(label("عرض التفاصيل", 13, ACCENT, true));
+            row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(tintedIcon(R.drawable.ic_chevron_forward, ACCENT), new LinearLayout.LayoutParams(dp(22), dp(22)));
+            row.setContentDescription("عرض تفاصيل " + item.merchant);
+            row.setOnClickListener(view -> {
+                dialog.dismiss(); selectedCommitmentId = item.id; selectedTab = 11; render();
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(8);
+            list.addView(row, params);
+        }
+        dialog.show();
     }
 
     private void commitmentRow(LinearLayout container, ExpenseDb.Recurring item) {
@@ -4969,6 +4994,43 @@ public final class MainActivity extends Activity {
             });
         }
         return nav;
+    }
+
+    private String notificationStatus(boolean enabled, String channelId) {
+        if (!enabled) return "متوقف";
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null || !manager.areNotificationsEnabled() || Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            return "مفعّل بالتطبيق · موقوف من إعدادات الجهاز";
+        android.app.NotificationChannel channel = manager.getNotificationChannel(channelId);
+        if (channel != null && channel.getImportance() == NotificationManager.IMPORTANCE_NONE)
+            return "مفعّل بالتطبيق · موقوف من إعدادات نوع الإشعار";
+        return "شغال";
+    }
+
+    private void notificationSetting(String title, String detail, boolean enabled, String channel,
+                                     java.util.function.Consumer<Boolean> change) {
+        if (settingsGroup == null) settingsGroup = listCard(page); else divider(settingsGroup);
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); row.setPadding(0, dp(12), 0, dp(12));
+        ImageView icon = tintedIcon(R.drawable.ic_bell, ACCENT);
+        icon.setPadding(dp(7), dp(7), dp(7), dp(7)); icon.setBackground(rounded(ACCENT_PALE, 10));
+        row.addView(icon, new LinearLayout.LayoutParams(dp(34), dp(34)));
+        LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(label(title, 14, INK, true));
+        String status = notificationStatus(enabled, channel);
+        copy.addView(label(status, 12, "شغال".equals(status) ? INCOME : MUTED, false));
+        copy.addView(label(detail, 12, MUTED, false));
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1);
+        copyParams.setMarginStart(dp(12)); copyParams.setMarginEnd(dp(10)); row.addView(copy, copyParams);
+        android.widget.Switch toggle = new android.widget.Switch(this);
+        toggle.setChecked(enabled); toggle.setShowText(false); toggle.setMinHeight(dp(48));
+        toggle.setContentDescription(title);
+        int[][] states = {new int[]{android.R.attr.state_checked}, new int[]{}};
+        toggle.setTrackTintList(new ColorStateList(states, new int[]{primaryFill(), BORDER}));
+        toggle.setThumbTintList(new ColorStateList(states, new int[]{onPrimary(), MUTED}));
+        toggle.setOnCheckedChangeListener((button, checked) -> change.accept(checked));
+        row.addView(toggle); row.setOnClickListener(view -> toggle.toggle()); settingsGroup.addView(row);
     }
 
     private void setting(String name, Runnable action) {
