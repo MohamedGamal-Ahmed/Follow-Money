@@ -102,6 +102,15 @@ public final class AuditStructureTest {
                 "drawing a widget must stay read-only");
         check(body(widget, "static void refresh(Context context)").contains("onUpdate("),
                 "refresh() must keep rendering every installed widget");
+        try (java.util.stream.Stream<Path> sources = Files.walk(Path.of("app/src/main/java"))) {
+            for (Path source : (Iterable<Path>) sources.filter(p -> p.toString().endsWith(".java"))::iterator) {
+                String code = Files.readString(source);
+                check(!java.util.regex.Pattern.compile("new\\s+(?:android\\.widget\\.)?Spinner\\s*\\(").matcher(code).find(),
+                        "App selectors must use the themed shared component: " + source);
+                check(!code.contains("simple_spinner_dropdown_item"),
+                        "Native dropdown rows must not bypass the app theme: " + source);
+            }
+        }
         System.out.println("Source structure checks passed: " + checked);
     }
 

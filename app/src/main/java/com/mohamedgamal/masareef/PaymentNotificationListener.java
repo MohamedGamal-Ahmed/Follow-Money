@@ -61,6 +61,7 @@ public final class PaymentNotificationListener extends NotificationListenerServi
                         CommitmentHint.completedPlanKey(label, body) != null)
                     SmsReceiver.notifyDataChanged(context);
                 else DailyRefreshReceiver.refresh(context);
+                if(System.currentTimeMillis()-item.getPostTime()<10*60*1000)CaptureNotifier.notifyEvent(context,db.lastCaptureEvent());
                 if (added) {
                     ExpenseDb.Transaction after = db.lastCaptured();
                     // Notifications already on screen when access is granted are old; only announce new ones.
