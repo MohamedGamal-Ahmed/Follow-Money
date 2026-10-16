@@ -49,6 +49,11 @@ public final class AuditStructureTest {
                 "the daily receiver must normalize off the main thread");
         check(body(daily, "@Override public void onReceive(Context context,Intent intent)").contains("CaptureQueue.submit("),
                 "the daily receiver must normalize on the capture worker");
+        String sms = read("app/src/main/java/com/mohamedgamal/masareef/SmsReceiver.java");
+        String receive = body(sms, "public void onReceive(Context context, Intent intent)");
+        int failed = receive.indexOf("catch (RuntimeException error)");
+        check(failed >= 0 && receive.indexOf("DailyRefreshReceiver.refresh(app)", failed) > failed,
+                "a failed capture must still refresh the summaries on the worker");
         check(body(main, "private long optionalMinor(String raw)").contains("manualAmountMisread"),
                 "the shared optional-amount helper must reject an ambiguous dot too");
         int guards = 0, inputs = 0;

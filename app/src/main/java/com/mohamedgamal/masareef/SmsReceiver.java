@@ -30,10 +30,15 @@ public final class SmsReceiver extends BroadcastReceiver {
         final PendingResult pending = goAsync();
         final Context app = context.getApplicationContext();
         CaptureQueue.submit(() -> {
-            try { captureNow(app, parts); }
+            boolean refreshed = false;
+            try { captureNow(app, parts); refreshed = true; }
             catch (RuntimeException error) {
                 android.util.Log.e("FollowMoney", "SMS skipped: " + error.getClass().getSimpleName());
-            } finally { pending.finish(); }
+            } finally {
+                // captureNow() refreshes the summaries itself; a failed capture must not lose that refresh.
+                if (!refreshed) DailyRefreshReceiver.refresh(app);
+                pending.finish();
+            }
         });
     }
 
