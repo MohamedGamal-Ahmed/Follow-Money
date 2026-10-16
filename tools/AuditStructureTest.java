@@ -49,6 +49,9 @@ public final class AuditStructureTest {
                 "the daily receiver must normalize off the main thread");
         check(body(daily, "@Override public void onReceive(Context context,Intent intent)").contains("CaptureQueue.submit("),
                 "the daily receiver must normalize on the capture worker");
+        String dailyReceive = body(daily, "@Override public void onReceive(Context context,Intent intent)");
+        check(dailyReceive.indexOf("CaptureQueue.submit(") < dailyReceive.indexOf("ACTION_DATA_CHANGED"),
+                "ACTION_DATA_CHANGED must be sent after the worker's normalization, not before it");
         String sms = read("app/src/main/java/com/mohamedgamal/masareef/SmsReceiver.java");
         String receive = body(sms, "public void onReceive(Context context, Intent intent)");
         int failed = receive.indexOf("catch (RuntimeException error)");
