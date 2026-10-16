@@ -578,6 +578,21 @@ final class AuditRegressionTest {
             return value;
         }catch(Exception error){throw new AssertionError(error);}
     }
+    public void testIncomeCaptureRedrawsWithoutChangedExpenseSuggestions(){
+        new LedgerRefreshRegressionTest(runner,context,db).check("income",false,false);
+    }
+    public void testBalanceOnlyBroadcastRedrawsWithoutChangedExpenseSuggestions(){
+        new LedgerRefreshRegressionTest(runner,context,db).check("balance",false,false);
+    }
+    public void testCommitmentOnlyBroadcastRedrawsWithoutChangedExpenseSuggestions(){
+        new LedgerRefreshRegressionTest(runner,context,db).check("commitment",false,false);
+    }
+    public void testFinancialBroadcastDuringSnapshotStillRedraws(){
+        new LedgerRefreshRegressionTest(runner,context,db).check("income",false,true);
+    }
+    public void testIncomeBroadcastKeepsTheCommitmentEditorDraft(){
+        new LedgerRefreshRegressionTest(runner,context,db).check("income",true,false);
+    }
     private int archivePromotions(){
         try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions",ExpenseDb.RepairReport.class);
             method.setAccessible(true);return (Integer)method.invoke(db,new ExpenseDb.RepairReport());}

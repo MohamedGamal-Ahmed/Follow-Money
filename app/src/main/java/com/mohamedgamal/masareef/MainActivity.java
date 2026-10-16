@@ -151,6 +151,8 @@ public final class MainActivity extends Activity {
     private List<ExpenseDb.Transaction> recurringCandidateRows = new ArrayList<>();
     private final java.util.concurrent.atomic.AtomicBoolean refreshingLedger = new java.util.concurrent.atomic.AtomicBoolean();
     private boolean ledgerRefreshPending;
+    /** A financial broadcast needs a redraw even when the expense-only suggestion cache is unchanged. */
+    private boolean ledgerRedrawPending;
     /**
      * Generation counter, bumped by every local ledger edit. A snapshot read under an older generation is
      * discarded instead of applied, so a redraw can never re-advertise a row the user just deleted.
@@ -160,6 +162,7 @@ public final class MainActivity extends Activity {
     private Long ledgerChanges;
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
+            ledgerRedrawPending = true;
             boolean visible = selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15;
             refreshLedger(visible);
         }
@@ -1937,13 +1940,16 @@ public final class MainActivity extends Activity {
                     refreshLedger(true);
                     return;
                 }
-                boolean changed = ready.normalized > 0 || cacheDiffers(ready);
+                boolean changed = ledgerRedrawPending || ready.normalized > 0 || cacheDiffers(ready);
                 recurringCandidates = ready.candidates;
                 recurringCandidateRows = ready.rows;
                 ledgerChanges = ready.changes;
                 // Never rebuild the screen while the user is typing in it; the cache is already current, so the
                 // next render (leaving the editor, opening a page) shows the settled data.
-                if (rerender && changed && canRedrawNow()) render();
+                if (rerender && changed && canRedrawNow()) {
+                    ledgerRedrawPending = false;
+                    render();
+                }
                 if (repeat) refreshLedger(true);
             });
         });
