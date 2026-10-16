@@ -56,6 +56,10 @@ final class AuditRegressionTest {
         ok(db.addManualEntry(when,amount,"EGP","QA "+kind,"income".equals(kind)?"دخل":"تسوق",null,kind,null,null));
         return db.latestInserted().id;
     }
+    private long entry(long when,long amount,String merchant){
+        ok(db.addManualEntry(when,amount,"EGP",merchant,"تسوق",null,"expense",null,null));
+        return db.latestInserted().id;
+    }
     private long scalar(String sql){try(Cursor cursor=db.getReadableDatabase().rawQuery(sql,null)){ok(cursor.moveToFirst());return cursor.getLong(0);}}
 
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
@@ -286,6 +290,21 @@ final class AuditRegressionTest {
         ok(!db.transactions().stream().anyMatch(item->item.id==newer));
         Set<Long> ids=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
         ok(ids.contains(newer));
+    }
+    /** F-07 on the page level: the suggestion card for a merchant older than the newest 500 rows must exist. */
+    public void testCommitmentSuggestionSurvivesBeyondTheNewestFiveHundredRows(){
+        long base=at(LocalDate.now().minusDays(62),10);
+        entry(base,12000,"QA X");
+        long newer=entry(base+30L*86400000,12000,"QA X");
+        for(int i=0;i<510;i++) entry(base+31L*86400000+i*60000L,3000,"QA FILLER "+i%7);
+        eq(512,db.transactionCount());
+        eq(500,db.transactions().size());
+        ok(!db.transactions().stream().anyMatch(item->item.id==newer));
+        List<ExpenseDb.Transaction> rows=db.recurringCandidateTransactions();
+        Set<Long> ids=MainActivity.recurringCandidateIds(rows,db.recurring());
+        List<ExpenseDb.Transaction> suggestions=MainActivity.recurringSuggestions(ids,rows);
+        ok(ids.contains(newer));
+        ok(suggestions.stream().anyMatch(item->item.id==newer&&"QA X".equals(item.merchant)));
     }
     public void testUnreadableEvidenceIsReportedAndNeverArchivesARow(){
         long t=at(LocalDate.now(),10),buy=manual(t,10000,"expense");

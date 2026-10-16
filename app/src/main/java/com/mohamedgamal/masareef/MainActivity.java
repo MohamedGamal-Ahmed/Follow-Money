@@ -1385,6 +1385,22 @@ public final class MainActivity extends Activity {
         return ids;
     }
 
+    /**
+     * The «لقينا خصم متكرر» cards: newest candidate row per merchant, at most three different merchants.
+     * The rows come from the twelve-month candidate scan, never from the capped page list, so a payment
+     * older than the newest 500 rows still produces its suggestion.
+     */
+    static List<ExpenseDb.Transaction> recurringSuggestions(Set<Long> candidates, List<ExpenseDb.Transaction> rows) {
+        List<ExpenseDb.Transaction> result = new ArrayList<>();
+        Set<String> suggested = new HashSet<>();
+        for (ExpenseDb.Transaction item : rows) {
+            if (!candidates.contains(item.id) || !suggested.add(item.merchant.toLowerCase(Locale.ROOT))) continue;
+            if (result.size() == 3) break;
+            result.add(item);
+        }
+        return result;
+    }
+
     private void requestSmsImport() {
         if (checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) importSms();
         else smsDisclosure(null);
@@ -3065,12 +3081,11 @@ public final class MainActivity extends Activity {
         if (shown == 0) empty(all.isEmpty() ? "سجّل أول التزام" : "مفيش التزامات في النوع ده",
                 "أقساط فاليو أو ترو أو البنك، واشتراكات زي كلود وجوجل ون، وفواتير الموبايل. هنفكّرك قبل الميعاد بيوم.");
 
-        List<ExpenseDb.Transaction> transactions = db.transactions();
-        Set<Long> candidates = recurringCandidateIds(db.recurringCandidateTransactions(), db.recurring());
-        Set<String> suggested = new HashSet<>();
-        for (ExpenseDb.Transaction item : transactions) {
-            if (!candidates.contains(item.id) || !suggested.add(item.merchant.toLowerCase(Locale.ROOT))) continue;
-            if (suggested.size() > 2) break;
+        // F-07: read the suggestions from the twelve-month candidate scan, not from the capped 500-row page list,
+        // so a payment older than the newest 500 rows still produces its suggestion.
+        List<ExpenseDb.Transaction> candidateRows = db.recurringCandidateTransactions();
+        Set<Long> candidates = recurringCandidateIds(candidateRows, db.recurring());
+        for (ExpenseDb.Transaction item : recurringSuggestions(candidates, candidateRows)) {
             LinearLayout suggestion = new LinearLayout(this); suggestion.setGravity(Gravity.CENTER_VERTICAL);
             suggestion.setPadding(dp(14), dp(12), dp(14), dp(12));
             suggestion.setBackground(outlined(dark ? 0x2212a06e : 0xffeaf7df, dark ? 0x5512a06e : 0xffcdebb4, 18));
