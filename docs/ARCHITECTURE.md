@@ -63,3 +63,11 @@ The native picker is a bottom-aligned dialog with selectable cards, checked-stat
 ## Validation
 
 Standalone JVM tests cover parser, time/budget, money-flow, repair and insight rules. Android instrumentation covers SQLite reconciliation, feature integration and widgets using synthetic data. `tools/run-checks.ps1` is the shared entry point for local checks and CI; Android instrumentation is optional and emulator-only. `tools/check-repo.py` checks documentation links, support form field consistency, pinned CI actions and excluded private artifacts.
+
+## Cancellation history and credit-card repayments (in progress)
+
+Owner-approved scope, 16 October 2026: preserve cancelled transfer attempts with their original and cancellation evidence, show an explicit state and corrected notification, and keep failed attempts outside financial totals. Matching must remain conservative; ambiguous or out-of-order cancellations need review instead of deleting a guessed payment. Existing cancellation archives must remain readable.
+
+A separate select -> review -> confirm -> result/undo journey will record a credit-card repayment as movement from an own account to the selected credit card. Optional allocations link the repayment to existing card purchases without creating another consumption expense. Confirmed statement fees are separate purchase-related records, with a user-supplied description; no inferred tax, exchange rate, or rounding fee. Any remainder stays explicitly unallocated.
+
+Synthetic acceptance scenario: purchase 220.00, separately confirmed statement fee 6.60, repayment 227.00, remainder 0.40; cancellation reverses the attempted repayment without changing the original purchase. Last-contactless warnings and actual declines must stay distinct. Tests and UI captures use disposable emulators only. No physical-device repair/rescan, signing, release APK replacement, new dependency, permission, or network feature is authorized by this implementation scope.
