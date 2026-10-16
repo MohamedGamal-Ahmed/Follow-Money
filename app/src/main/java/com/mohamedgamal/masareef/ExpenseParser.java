@@ -23,7 +23,7 @@ public final class ExpenseParser {
             "(?i)(credited|deposit(?:ed)?|received|refund(?:ed)?|cashback|" +
             "تم\\s*(?:ايداع|إيداع|استلام|اضافة|إضافة|رد)|وارد|استرداد)");
     private static final Pattern NOT_COMPLETED = Pattern.compile(
-            "(?i)(declined|failed|unsuccessful|cancel(?:led|ed|lation)?|تم\\s*(?:الغاء|إلغاء)|" +
+            "(?i)(declined|failed|unsuccessful|reversed|تم\\s*رفض(?:ها)?|رفضت|cancel(?:led|ed|lation)?|تم\\s*(?:الغاء|إلغاء)|" +
                     "لم\\s*(?:يتم|تتم)|غير\\s*ناجح|مرفوض|فشل|تعذر)");
     private static final Pattern FUTURE_PAYMENT = Pattern.compile(
             "(?i)(\\bwill\\s+(?:be\\s+)?(?:processed|paid|debited|charged|deducted|transferred)|" +
@@ -48,6 +48,11 @@ public final class ExpenseParser {
             "(?i)(?:card|visa|بطاقة|فيزا)[^\\n]{0,35}?(?:\\*{2,}|x{2,}|ending\\s+)(\\d{4})");
     private static final Pattern ACCOUNT_LAST_FOUR = Pattern.compile(
             "(?i)(?:account|acct|a/c|حساب)[^\\n]{0,35}?(?:\\*{2,}|x{2,}|ending\\s+|رقم\\s+)(\\d{3,4})(?!\\d)");
+    static String debitAccountLast4(String body){
+        if(body==null)return null;String normalized=normalizeDigits(body);
+        Matcher account=ACCOUNT_LAST_FOUR.matcher(normalized);if(account.find())return account.group(1);
+        Matcher masked=MASKED_ACCOUNT_TAIL.matcher(normalized);return masked.find()?masked.group(1):null;
+    }
     private static final Pattern MASKED_ACCOUNT_TAIL = Pattern.compile(
             "(?i)(?:from|من)\\s+\\d{2,4}-\\d{2,4}(?:\\*{2,}|x{2,})-(\\d{3,4})(?!\\d)");
     private static final Pattern IPN_RECEIVING_ACCOUNT = Pattern.compile(
