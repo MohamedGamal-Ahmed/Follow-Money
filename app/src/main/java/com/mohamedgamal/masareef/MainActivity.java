@@ -146,10 +146,15 @@ public final class MainActivity extends Activity {
     private final Map<String,Integer> scrollPositions=new LinkedHashMap<>();
     private ScrollView pageScroll;
     private String renderedPageKey;
-    private final java.util.concurrent.atomic.AtomicBoolean normalizingEarlyPayments = new java.util.concurrent.atomic.AtomicBoolean();
+    /** Suggestion source for the commitment screens. render() only reads it; the capture worker recomputes it. */
+    private Set<Long> recurringCandidates = new HashSet<>();
+    private List<ExpenseDb.Transaction> recurringCandidateRows = new ArrayList<>();
+    private final java.util.concurrent.atomic.AtomicBoolean refreshingLedger = new java.util.concurrent.atomic.AtomicBoolean();
+    private boolean ledgerRefreshPending;
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            if (selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15) render();
+            boolean visible = selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15;
+            refreshLedger(visible);
         }
     };
 
@@ -206,7 +211,7 @@ public final class MainActivity extends Activity {
         ReminderReceiver.schedule(this);
         MonthlySummaryReceiver.initialize(this,java.time.YearMonth.now());MonthlySummaryReceiver.schedule(this);
         render();
-        normalizeEarlyPaymentsThenRender();
+        refreshLedger(true);
         refreshMerchantCatalog();
         runRepair(false);
         if (state == null && !direct) playOpening(false);
@@ -226,7 +231,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (db != null) {render();normalizeEarlyPaymentsThenRender();MonthlySummaryReceiver.refresh(this);}
+        if (db != null) {render();refreshLedger(true);MonthlySummaryReceiver.refresh(this);}
         if (db != null && !introVisible && hasNotificationAccess()) {
             SharedPreferences settings = getSharedPreferences("notification_settings", MODE_PRIVATE);
             if (!settings.getBoolean("source_picker_shown", false) &&
@@ -1827,14 +1832,44 @@ public final class MainActivity extends Activity {
         catch (RuntimeException ignored) { return 0; }
     }
 
-    /** An installment paid a few days early (30 Sep for 1 Oct) must not stay "overdue": normalize off the UI thread. */
-    private void normalizeEarlyPaymentsThenRender() {
-        if (!normalizingEarlyPayments.compareAndSet(false, true)) return;
+    /** What the commitment screens need from the ledger, read once on the capture worker. */
+    static final class LedgerSnapshot {
+        final Set<Long> candidates;
+        final List<ExpenseDb.Transaction> rows;
+        LedgerSnapshot(Set<Long> candidates, List<ExpenseDb.Transaction> rows) {
+            this.candidates = candidates; this.rows = rows;
+        }
+    }
+
+    /**
+     * One capture-worker pass: settle early payments, then read the twelve-month candidate scan. This is the
+     * only place the suggestion query runs, so no render ever spans a year of expenses on the UI thread.
+     */
+    static LedgerSnapshot readLedgerSnapshot(ExpenseDb db) {
+        normalizeEarlyPaymentsOnWorker(db);
+        List<ExpenseDb.Transaction> rows = db.recurringCandidateTransactions();
+        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring()), rows);
+    }
+
+    /**
+     * An installment paid a few days early (30 Sep for 1 Oct) must not stay "overdue", and the commitment
+     * suggestions must be current. Both go through the capture worker; the page only reads the cache.
+     */
+    private void refreshLedger(final boolean rerender) {
+        if (!refreshingLedger.compareAndSet(false, true)) { ledgerRefreshPending = ledgerRefreshPending || rerender; return; }
         CaptureQueue.submit(() -> {
-            int moved = normalizeEarlyPaymentsOnWorker(db);
-            normalizingEarlyPayments.set(false);
-            if (moved <= 0) return;
-            runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) render(); });
+            LedgerSnapshot snapshot = null;
+            try { snapshot = readLedgerSnapshot(db); }
+            catch (RuntimeException ignored) { }
+            final LedgerSnapshot ready = snapshot;
+            runOnUiThread(() -> {
+                boolean repeat = ledgerRefreshPending;
+                ledgerRefreshPending = false;
+                refreshingLedger.set(false);
+                if (ready != null) { recurringCandidates = ready.candidates; recurringCandidateRows = ready.rows; }
+                if (rerender && !isFinishing() && !isDestroyed()) render();
+                if (repeat) refreshLedger(true);
+            });
         });
     }
 
@@ -2041,7 +2076,7 @@ public final class MainActivity extends Activity {
         List<ExpenseDb.Transaction> all = db.transactions();
         if (all.isEmpty()) empty("لسه مفيش عمليات", "ابدأ بإضافة مصروف أو استيراد رسائل البنك");
         else {
-            Set<Long> candidates = recurringCandidateIds(db.recurringCandidateTransactions(), db.recurring());
+            Set<Long> candidates = recurringCandidates;
             LinearLayout list = listCard(page);
             for (int i = 0; i < Math.min(5, all.size()); i++) transactionRow(list, all.get(i), candidates.contains(all.get(i).id));
         }
@@ -2304,7 +2339,7 @@ public final class MainActivity extends Activity {
         LinearLayout results = new LinearLayout(this);
         results.setOrientation(LinearLayout.VERTICAL);
         page.addView(results);
-        Set<Long> candidates = recurringCandidateIds(db.recurringCandidateTransactions(), db.recurring());
+        Set<Long> candidates = recurringCandidates;
         Map<Long, Long> dayOffsets = db.reimbursementOffsets();
         Runnable refresh = () -> {
             results.removeAllViews();bulkChecks.clear();Set<Long> visible=new HashSet<>();
@@ -3083,10 +3118,8 @@ public final class MainActivity extends Activity {
                 "أقساط فاليو أو ترو أو البنك، واشتراكات زي كلود وجوجل ون، وفواتير الموبايل. هنفكّرك قبل الميعاد بيوم.");
 
         // F-07: read the suggestions from the twelve-month candidate scan, not from the capped 500-row page list,
-        // so a payment older than the newest 500 rows still produces its suggestion.
-        List<ExpenseDb.Transaction> candidateRows = db.recurringCandidateTransactions();
-        Set<Long> candidates = recurringCandidateIds(candidateRows, db.recurring());
-        for (ExpenseDb.Transaction item : recurringSuggestions(candidates, candidateRows)) {
+        // so a payment older than the newest 500 rows still produces its suggestion. Both come from the cache.
+        for (ExpenseDb.Transaction item : recurringSuggestions(recurringCandidates, recurringCandidateRows)) {
             LinearLayout suggestion = new LinearLayout(this); suggestion.setGravity(Gravity.CENTER_VERTICAL);
             suggestion.setPadding(dp(14), dp(12), dp(14), dp(12));
             suggestion.setBackground(outlined(dark ? 0x2212a06e : 0xffeaf7df, dark ? 0x5512a06e : 0xffcdebb4, 18));
@@ -4118,6 +4151,7 @@ public final class MainActivity extends Activity {
                     if (id == -1) toast("الالتزام ده متسجل بالفعل");
                     askNotificationPermission();
                     render();
+                    refreshLedger(true); // the new commitment removes its merchant from the suggestions
                 }).setNegativeButton("إلغاء", null).show();
     }
 

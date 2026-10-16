@@ -17,15 +17,32 @@ public final class AuditStructureTest {
         String daily = read("app/src/main/java/com/mohamedgamal/masareef/DailyRefreshReceiver.java");
         check(!body(main, "private void render()").contains("normalizeEarlyPayments"),
                 "render() must not normalize (it writes to the ledger)");
-        check(body(main, "@Override protected void onCreate(Bundle state)").contains("normalizeEarlyPaymentsThenRender()"),
-                "onCreate must schedule off-thread normalization");
-        check(body(main, "@Override protected void onResume()").contains("normalizeEarlyPaymentsThenRender()"),
-                "onResume must schedule off-thread normalization");
-        String normalize = body(main, "private void normalizeEarlyPaymentsThenRender()");
-        check(normalize.contains("CaptureQueue.submit("), "normalization must run on the one capture worker");
-        check(normalize.contains("runOnUiThread"), "normalization must return to the UI thread to re-render");
+        check(body(main, "@Override protected void onCreate(Bundle state)").contains("refreshLedger(true)"),
+                "onCreate must schedule the off-thread ledger pass");
+        check(body(main, "@Override protected void onResume()").contains("refreshLedger(true)"),
+                "onResume must schedule the off-thread ledger pass");
+        String normalize = body(main, "private void refreshLedger(final boolean rerender)");
+        check(normalize.contains("CaptureQueue.submit("), "the ledger pass must run on the one capture worker");
+        check(normalize.contains("runOnUiThread"), "the ledger pass must return to the UI thread to re-render");
+        check(normalize.contains("isFinishing()") && normalize.contains("isDestroyed()"),
+                "the re-render must keep the finishing/destroyed guard");
         check(!main.contains("EARLY_PAYMENT_QUEUE") && !daily.contains("NORMALIZE_QUEUE"),
                 "no extra writer thread may be created beside the capture worker");
+        check(body(main, "private void recurringScreen()").contains("recurringCandidates"),
+                "the commitment page must read the cached suggestion set");
+        check(!body(main, "private void render()").contains("recurringCandidateTransactions"),
+                "render() must not run the twelve-month candidate query");
+        for (String page : new String[]{"private void homeScreen()", "private void sourcesScreen()",
+                "private void transactionsScreen()", "private void transactionDetailsScreen(ExpenseDb.Transaction item)",
+                "private void recurringScreen()", "private void commitmentDetailsScreen()",
+                "private void commitmentEditorScreen()", "private void insightsScreen()",
+                "private void settingsScreen()", "private void merchantRulesScreen()", "private void assetsScreen()",
+                "private void debtsScreen()", "private void monthlyReportScreen()", "private void flowAccountScreen()",
+                "private void introScreen()", "private void introProfileScreen()"})
+            check(!body(main, page).contains("recurringCandidateTransactions"),
+                    page + " must read the cached suggestion set");
+        check(body(main, "static LedgerSnapshot readLedgerSnapshot(ExpenseDb db)").contains("recurringCandidateTransactions"),
+                "the twelve-month candidate scan must stay on the capture worker");
         check(!body(daily, "static void refresh(Context context)").contains("normalizeEarlyPayments"),
                 "refresh() must not normalize (render() calls it, so it would loop)");
         check(body(daily, "@Override public void onReceive(Context context,Intent intent)").contains("normalizeEarlyPayments"),
