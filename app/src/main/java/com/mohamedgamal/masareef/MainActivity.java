@@ -146,6 +146,13 @@ public final class MainActivity extends Activity {
     private final Map<String,Integer> scrollPositions=new LinkedHashMap<>();
     private ScrollView pageScroll;
     private String renderedPageKey;
+    private static final java.util.concurrent.ExecutorService EARLY_PAYMENT_QUEUE =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "early-payment-normalize");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private final java.util.concurrent.atomic.AtomicBoolean normalizingEarlyPayments = new java.util.concurrent.atomic.AtomicBoolean();
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15) render();
@@ -205,6 +212,7 @@ public final class MainActivity extends Activity {
         ReminderReceiver.schedule(this);
         MonthlySummaryReceiver.initialize(this,java.time.YearMonth.now());MonthlySummaryReceiver.schedule(this);
         render();
+        normalizeEarlyPaymentsThenRender();
         refreshMerchantCatalog();
         runRepair(false);
         if (state == null && !direct) playOpening(false);
@@ -224,7 +232,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (db != null) {render();MonthlySummaryReceiver.refresh(this);}
+        if (db != null) {render();normalizeEarlyPaymentsThenRender();MonthlySummaryReceiver.refresh(this);}
         if (db != null && !introVisible && hasNotificationAccess()) {
             SharedPreferences settings = getSharedPreferences("notification_settings", MODE_PRIVATE);
             if (!settings.getBoolean("source_picker_shown", false) &&
@@ -1783,12 +1791,23 @@ public final class MainActivity extends Activity {
         return amount + " " + currency;
     }
 
+    /** An installment paid a few days early (30 Sep for 1 Oct) must not stay "overdue": normalize off the UI thread. */
+    private void normalizeEarlyPaymentsThenRender() {
+        if (!normalizingEarlyPayments.compareAndSet(false, true)) return;
+        EARLY_PAYMENT_QUEUE.execute(() -> {
+            int moved = 0;
+            try { moved = db.normalizeEarlyPayments(); }
+            catch (RuntimeException ignored) { }
+            finally { normalizingEarlyPayments.set(false); }
+            if (moved <= 0) return;
+            runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) render(); });
+        });
+    }
+
     private void render() {
         savePageScroll();
         DailyPointsStore.observeToday(this);
         settingsGroup = null;
-        // An installment paid a few days early (30 Sep for 1 Oct) must not stay "overdue".
-        try { db.normalizeEarlyPayments(); } catch (RuntimeException ignored) { }
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
@@ -4192,7 +4211,7 @@ public final class MainActivity extends Activity {
         return sign + money(item.amountMinor, item.currency);
     }
 
-    private String dueWord(LocalDate due) {
+    static String dueWord(LocalDate due) {
         long days = ChronoUnit.DAYS.between(LocalDate.now(), due);
         if (days == 0) return "النهارده";
         if (days == 1) return "بكرة";

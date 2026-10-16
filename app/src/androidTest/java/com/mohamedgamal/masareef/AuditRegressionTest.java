@@ -227,6 +227,15 @@ final class AuditRegressionTest {
         ok(db.transactionById(plain)==null);
         eq(1,scalar("SELECT COUNT(*) FROM reimbursements"));
     }
+    public void testEarlyPaymentDueLabelIsNotOverdueAfterNormalization(){
+        LocalDate yesterday=LocalDate.now().minusDays(1);
+        long id=db.putCommitment(null,"قسط الشقة",506000,"EGP",yesterday,"monthly","installment",12,1,1,"قسط الشقة",null);
+        ContentValues paid=new ContentValues();paid.put("last_paid_date",yesterday.minusDays(1).toString());
+        db.getWritableDatabase().update("recurring",paid,"id=?",new String[]{Long.toString(id)});
+        ok(MainActivity.dueWord(db.recurringById(id).nextDue).contains("متأخر"));
+        eq(1,db.normalizeEarlyPayments());
+        ok(!MainActivity.dueWord(db.recurringById(id).nextDue).contains("متأخر"));
+    }
     private int archivePromotions(){
         try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions");method.setAccessible(true);return (Integer)method.invoke(db);}
         catch(Exception error){throw new RuntimeException(error);}

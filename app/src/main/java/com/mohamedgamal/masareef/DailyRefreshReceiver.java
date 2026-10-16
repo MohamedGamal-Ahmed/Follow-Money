@@ -28,8 +28,22 @@ public final class DailyRefreshReceiver extends BroadcastReceiver {
         DailyPointsStore.observeToday(context);
         SummaryWidget.refresh(context);DailySummaryNotifier.refresh(context);MonthlySummaryReceiver.refresh(context);schedule(context);
     }
+    private static final java.util.concurrent.ExecutorService NORMALIZE_QUEUE =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "early-payment-normalize");
+                thread.setDaemon(true);
+                return thread;
+            });
     @Override public void onReceive(Context context,Intent intent) {
         refresh(context);
+        // Normalization writes; the receiver runs on the main thread, so hand it to a worker and keep the broadcast alive.
+        final PendingResult pending = goAsync();
+        final Context app = context.getApplicationContext();
+        NORMALIZE_QUEUE.execute(() -> {
+            try (ExpenseDb db = new ExpenseDb(app)) { db.normalizeEarlyPayments(); }
+            catch (RuntimeException ignored) { }
+            finally { pending.finish(); }
+        });
         String action=intent.getAction();
         if(Intent.ACTION_TIME_CHANGED.equals(action)||Intent.ACTION_TIMEZONE_CHANGED.equals(action))ReminderReceiver.schedule(context);
         context.sendBroadcast(new Intent(SmsReceiver.ACTION_DATA_CHANGED).setPackage(context.getPackageName()));
