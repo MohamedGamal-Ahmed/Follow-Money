@@ -1913,7 +1913,7 @@ public final class MainActivity extends Activity {
         if (text.contains("رسائل") || text.contains("المصدر")) return R.drawable.ic_message;
         if (text.contains("رصيد") || text.contains("أرصدة") || text.contains("ملخص")) return R.drawable.ic_nav_insights;
         if (text.contains("تسمية") || text.contains("تعديل") || text.contains("تحديث")) return R.drawable.ic_edit;
-        if (text.contains("كارت") || text.contains("بطاقة") || text.contains("حساب")) return R.drawable.ic_card_chip;
+        if (text.contains("كارت") || text.contains("بطاقة") || text.contains("حساب")) return R.drawable.ic_cat_transfer;
         if (text.contains("إضافة") || text.contains("يدوي")) return R.drawable.ic_plus;
         return R.drawable.ic_chevron_forward;
     }
