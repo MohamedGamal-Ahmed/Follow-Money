@@ -146,9 +146,25 @@ public final class MainActivity extends Activity {
     private final Map<String,Integer> scrollPositions=new LinkedHashMap<>();
     private ScrollView pageScroll;
     private String renderedPageKey;
+    /** Suggestion source for the commitment screens. render() only reads it; the capture worker recomputes it. */
+    private Set<Long> recurringCandidates = new HashSet<>();
+    private List<ExpenseDb.Transaction> recurringCandidateRows = new ArrayList<>();
+    private final java.util.concurrent.atomic.AtomicBoolean refreshingLedger = new java.util.concurrent.atomic.AtomicBoolean();
+    private boolean ledgerRefreshPending;
+    /** A financial broadcast needs a redraw even when the expense-only suggestion cache is unchanged. */
+    private boolean ledgerRedrawPending;
+    /**
+     * Generation counter, bumped by every local ledger edit. A snapshot read under an older generation is
+     * discarded instead of applied, so a redraw can never re-advertise a row the user just deleted.
+     */
+    private final java.util.concurrent.atomic.AtomicLong ledgerVersion = new java.util.concurrent.atomic.AtomicLong();
+    /** The change counter the applied snapshot was read at; render() reloads once the ledger moves past it. */
+    private Long ledgerChanges;
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            if (selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15) render();
+            ledgerRedrawPending = true;
+            boolean visible = selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15;
+            refreshLedger(visible);
         }
     };
 
@@ -205,6 +221,7 @@ public final class MainActivity extends Activity {
         ReminderReceiver.schedule(this);
         MonthlySummaryReceiver.initialize(this,java.time.YearMonth.now());MonthlySummaryReceiver.schedule(this);
         render();
+        refreshLedger(true);
         refreshMerchantCatalog();
         runRepair(false);
         if (state == null && !direct) playOpening(false);
@@ -224,7 +241,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (db != null) {render();MonthlySummaryReceiver.refresh(this);}
+        if (db != null) {render();refreshLedger(true);MonthlySummaryReceiver.refresh(this);}
         if (db != null && !introVisible && hasNotificationAccess()) {
             SharedPreferences settings = getSharedPreferences("notification_settings", MODE_PRIVATE);
             if (!settings.getBoolean("source_picker_shown", false) &&
@@ -457,6 +474,7 @@ public final class MainActivity extends Activity {
         Spinner currency = spinner("العملة", CURRENCIES, form);
         new AlertDialog.Builder(this).setTitle("رصيد " + db.sourceLabel(db.accountId(source.id))).setView(form)
                 .setPositiveButton("حفظ", (dialog, which) -> {
+                    if (rejectMisreadAmount(amount)) return;
                     long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                     if (minor < 0) { toast("راجع مبلغ الرصيد"); return; }
                     db.putManualBalance(db.accountId(source.id), currency.getSelectedItem().toString(), minor, System.currentTimeMillis());
@@ -790,6 +808,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(existing == null ? "أصل جديد" : "تحديث الأصل").setView(form)
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            if (rejectMisreadAmount(value)) return;
             long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(value.getText().toString()));
             if (minor < 0 || name.getText().toString().trim().isEmpty()) { toast("راجع اسم الأصل وقيمته"); return; }
             db.putAsset(existing == null ? null : existing.id, name.getText().toString(),
@@ -831,6 +850,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
+                if (rejectMisreadAmount(amount)) return;
                 long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                 String dueText = dateValue(due) == null ? "" : dateValue(due).toString();
                 if (minor <= 0 || name.getText().toString().trim().isEmpty()) throw new IllegalArgumentException();
@@ -848,6 +868,7 @@ public final class MainActivity extends Activity {
         amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         new AlertDialog.Builder(this).setTitle("سداد " + debt.name).setView(form)
                 .setPositiveButton("حفظ", (dialog, which) -> {
+                    if (rejectMisreadAmount(amount)) return;
                     long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                     if (minor <= 0) { toast("راجع المبلغ"); return; }
                     db.payDebt(debt.id, minor); render();
@@ -921,6 +942,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     try {
+                        if (rejectMisreadAmount(amount)) return;
                         long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                         LocalDate start = java.util.Objects.requireNonNull(dateValue(anchor));
                         int days = Integer.parseInt(ExpenseParser.normalizeDigits(duration.getText().toString().trim()));
@@ -1156,6 +1178,7 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                if (rejectMisreadAmount(amount)) return;
                 long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                 if (minor <= 0 || merchant.getText().toString().trim().isEmpty()) {
                     toast("راجع الجهة والمبلغ");
@@ -1271,6 +1294,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("عملية جديدة").setView(scrollForm(form))
                 .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            if (rejectMisreadAmount(amount)) return;
             long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
             String name = merchant.getText().toString().trim();
             if (minor <= 0 || name.isEmpty()) {
@@ -1312,6 +1336,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("سجل حصتي", null).setNegativeButton("إلغاء", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
+                if (rejectMisreadAmount(total)) return;
                 long amount = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(total.getText().toString()));
                 int count = Integer.parseInt(ExpenseParser.normalizeDigits(people.getText().toString().trim()));
                 if (amount <= 0 || count < 2 || merchant.getText().toString().trim().isEmpty()) throw new IllegalArgumentException();
@@ -1332,32 +1357,57 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
-    private Set<Long> detectRecurringCandidates(List<ExpenseDb.Transaction> items) {
+    /**
+     * Ids of expenses that look like a monthly commitment: another payment to the same merchant in the
+     * same currency about a month earlier. Grouped by merchant so each list is scanned once, not per row.
+     */
+    static Set<Long> recurringCandidateIds(List<ExpenseDb.Transaction> items, List<ExpenseDb.Recurring> confirmed) {
         Set<Long> ids = new HashSet<>();
-        List<ExpenseDb.Recurring> confirmed = db.recurring();
-        for (int i = 0; i < items.size(); i++) {
-            ExpenseDb.Transaction recent = items.get(i);
-            if (!"expense".equals(recent.kind) || ExpenseParser.genericMerchant(recent.merchant) ||
-                    "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
-            boolean already = false;
-            for (ExpenseDb.Recurring r : confirmed)
-                if (r.merchant.equalsIgnoreCase(recent.merchant) && r.currency.equals(recent.currency)) already = true;
-            if (already) continue;
-            LocalDate current = Instant.ofEpochMilli(recent.when).atZone(ZoneId.systemDefault()).toLocalDate();
-            for (int j = i + 1; j < items.size(); j++) {
-                ExpenseDb.Transaction older = items.get(j);
-                if (!"expense".equals(older.kind)) continue;
-                if (!recent.merchant.equalsIgnoreCase(older.merchant) || !recent.currency.equals(older.currency)) continue;
-                LocalDate previous = Instant.ofEpochMilli(older.when).atZone(ZoneId.systemDefault()).toLocalDate();
-                long days = ChronoUnit.DAYS.between(previous, current);
-                long difference = Math.abs(recent.amountMinor - older.amountMinor);
-                if (days >= 25 && days <= 35 && ("فواتير".equals(recent.category) || "أقساط".equals(recent.category) || difference <= Math.max(100, recent.amountMinor / 20))) {
-                    ids.add(recent.id);
-                    break;
+        Set<String> confirmedKeys = new HashSet<>();
+        for (ExpenseDb.Recurring r : confirmed)
+            if (r.merchant != null) confirmedKeys.add(r.merchant.toLowerCase(Locale.ROOT) + "\n" + r.currency);
+        Map<String, List<ExpenseDb.Transaction>> groups = new LinkedHashMap<>();
+        for (ExpenseDb.Transaction item : items) {
+            if (!"expense".equals(item.kind)) continue;
+            groups.computeIfAbsent(item.merchant.toLowerCase(Locale.ROOT) + "\n" + item.currency, key -> new ArrayList<>()).add(item);
+        }
+        for (List<ExpenseDb.Transaction> group : groups.values()) {
+            group.sort((first, second) -> Long.compare(second.when, first.when));
+            for (int i = 0; i < group.size(); i++) {
+                ExpenseDb.Transaction recent = group.get(i);
+                if (ExpenseParser.genericMerchant(recent.merchant) || confirmedKeys.contains(recent.merchant.toLowerCase(Locale.ROOT) + "\n" + recent.currency) ||
+                        "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
+                LocalDate current = Instant.ofEpochMilli(recent.when).atZone(ZoneId.systemDefault()).toLocalDate();
+                for (int j = i + 1; j < group.size(); j++) {
+                    ExpenseDb.Transaction older = group.get(j);
+                    long days = ChronoUnit.DAYS.between(Instant.ofEpochMilli(older.when).atZone(ZoneId.systemDefault()).toLocalDate(), current);
+                    if (days > 35) break; // newest first: everything further along is even older
+                    if (days < 25) continue;
+                    long difference = Math.abs(recent.amountMinor - older.amountMinor);
+                    if ("فواتير".equals(recent.category) || "أقساط".equals(recent.category) || difference <= Math.max(100, recent.amountMinor / 20)) {
+                        ids.add(recent.id);
+                        break;
+                    }
                 }
             }
         }
         return ids;
+    }
+
+    /**
+     * The «لقينا خصم متكرر» cards: newest candidate row per merchant, at most three different merchants.
+     * The rows come from the twelve-month candidate scan, never from the capped page list, so a payment
+     * older than the newest 500 rows still produces its suggestion.
+     */
+    static List<ExpenseDb.Transaction> recurringSuggestions(Set<Long> candidates, List<ExpenseDb.Transaction> rows) {
+        List<ExpenseDb.Transaction> result = new ArrayList<>();
+        Set<String> suggested = new HashSet<>();
+        for (ExpenseDb.Transaction item : rows) {
+            if (!candidates.contains(item.id) || !suggested.add(item.merchant.toLowerCase(Locale.ROOT))) continue;
+            if (result.size() == 3) break;
+            result.add(item);
+        }
+        return result;
     }
 
     private void requestSmsImport() {
@@ -1783,12 +1833,139 @@ public final class MainActivity extends Activity {
         return amount + " " + currency;
     }
 
+    /**
+     * Early-payment normalization is a ledger write. Nothing else may run it off the UI thread, so the
+     * activity and the daily receiver both hand it to the single capture worker that serialises captures.
+     */
+    static int normalizeEarlyPaymentsOnWorker(ExpenseDb db) {
+        try { return db.normalizeEarlyPayments(); }
+        catch (RuntimeException ignored) { return 0; }
+    }
+
+    /** What the commitment screens need from the ledger, read once on the capture worker. */
+    static final class LedgerSnapshot {
+        final Set<Long> candidates;
+        final List<ExpenseDb.Transaction> rows;
+        /** The ledger generation this snapshot was read under. */
+        final long version;
+        /** SQLite's change counter after the read, so the next render can tell the ledger moved. */
+        final long changes;
+        /** Installments this pass settled; a non-zero count means the pages must be redrawn. */
+        final int normalized;
+        LedgerSnapshot(Set<Long> candidates, List<ExpenseDb.Transaction> rows, long version, long changes, int normalized) {
+            this.candidates = candidates; this.rows = rows;
+            this.version = version; this.changes = changes; this.normalized = normalized;
+        }
+    }
+
+    /** The commitment editor page. Mid-typing, so a delayed redraw must not rebuild it. */
+    private static final int EDITOR_TAB = 12;
+
+    /**
+     * Whether the screen in front of the user holds unsaved input. Dialogs are separate windows and survive a
+     * redraw, but the editor page and the intro forms are part of this activity's view tree.
+     */
+    static boolean isEditingSurface(int tab, boolean introVisible, boolean focusedInput) {
+        return tab == EDITOR_TAB || introVisible || focusedInput;
+    }
+
+    /** A snapshot read before a local edit landed must be discarded instead of applied. */
+    static boolean ledgerSnapshotIsCurrent(long readVersion, long currentVersion) {
+        return readVersion == currentVersion;
+    }
+
+    /** Any local write bumps SQLite's change counter, so a cached suggestion set can tell that it aged. */
+    static boolean ledgerChanged(long observedChanges, long snapshotChanges) {
+        return observedChanges != snapshotChanges;
+    }
+
+    /** Cheap identity of the applied rows: a different size, id, amount or merchant needs a redraw. */
+    static boolean sameRows(List<ExpenseDb.Transaction> first, List<ExpenseDb.Transaction> second) {
+        if (first.size() != second.size()) return false;
+        for (int index = 0; index < first.size(); index++) {
+            ExpenseDb.Transaction left = first.get(index), right = second.get(index);
+            if (left.id != right.id || left.amountMinor != right.amountMinor
+                    || !left.currency.equals(right.currency) || !left.merchant.equals(right.merchant)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * One capture-worker pass: settle early payments, then read the twelve-month candidate scan. This is the
+     * only place the suggestion query runs, so no render ever spans a year of expenses on the UI thread.
+     */
+    static LedgerSnapshot readLedgerSnapshot(ExpenseDb db, long version) {
+        int normalized = normalizeEarlyPaymentsOnWorker(db);
+        List<ExpenseDb.Transaction> rows = db.recurringCandidateTransactions();
+        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring()), rows, version, db.changes(), normalized);
+    }
+
+    /** A local ledger edit: bump the generation so an in-flight snapshot is rejected, then reload the cache. */
+    private void invalidateLedger() {
+        ledgerVersion.incrementAndGet();
+        refreshLedger(true);
+    }
+
+    /** True when redrawing cannot disturb input the user has not saved yet. */
+    private boolean canRedrawNow() {
+        if (isFinishing() || isDestroyed()) return false;
+        return !isEditingSurface(selectedTab, introVisible, getCurrentFocus() instanceof android.widget.EditText);
+    }
+
+    /** The suggestion data a redraw would show is different from what the page is currently drawn with. */
+    private boolean cacheDiffers(LedgerSnapshot snapshot) {
+        return !snapshot.candidates.equals(recurringCandidates) || !sameRows(snapshot.rows, recurringCandidateRows);
+    }
+
+    /**
+     * An installment paid a few days early (30 Sep for 1 Oct) must not stay "overdue", and the commitment
+     * suggestions must be current. Both go through the capture worker; the page only reads the cache.
+     */
+    private void refreshLedger(final boolean rerender) {
+        if (!refreshingLedger.compareAndSet(false, true)) { ledgerRefreshPending = ledgerRefreshPending || rerender; return; }
+        final long version = ledgerVersion.get();
+        CaptureQueue.submit(() -> {
+            LedgerSnapshot snapshot = null;
+            try { snapshot = readLedgerSnapshot(db, version); }
+            catch (RuntimeException ignored) { }
+            final LedgerSnapshot ready = snapshot;
+            runOnUiThread(() -> {
+                boolean repeat = ledgerRefreshPending;
+                ledgerRefreshPending = false;
+                refreshingLedger.set(false);
+                if (ready == null) { if (repeat) refreshLedger(true); return; }
+                if (!ledgerSnapshotIsCurrent(ready.version, ledgerVersion.get())) {
+                    // A local edit landed while this pass was reading, so its snapshot must not be applied.
+                    ledgerRefreshPending = repeat;
+                    refreshLedger(true);
+                    return;
+                }
+                boolean changed = ledgerRedrawPending || ready.normalized > 0 || cacheDiffers(ready);
+                recurringCandidates = ready.candidates;
+                recurringCandidateRows = ready.rows;
+                ledgerChanges = ready.changes;
+                // Never rebuild the screen while the user is typing in it; the cache is already current, so the
+                // next render (leaving the editor, opening a page) shows the settled data.
+                if (rerender && changed && canRedrawNow()) {
+                    ledgerRedrawPending = false;
+                    render();
+                }
+                if (repeat) refreshLedger(true);
+            });
+        });
+    }
+
     private void render() {
+        // Any local add/edit/delete bumps SQLite's change counter, so the cached suggestions cannot stay stale
+        // behind a page whose only refresh path is this render().
+        if (db != null) {
+            long changes = db.changes();
+            if (ledgerChanges == null) ledgerChanges = changes;
+            else if (ledgerChanged(changes, ledgerChanges)) invalidateLedger();
+        }
         savePageScroll();
         DailyPointsStore.observeToday(this);
         settingsGroup = null;
-        // An installment paid a few days early (30 Sep for 1 Oct) must not stay "overdue".
-        try { db.normalizeEarlyPayments(); } catch (RuntimeException ignored) { }
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
@@ -1988,7 +2165,7 @@ public final class MainActivity extends Activity {
         List<ExpenseDb.Transaction> all = db.transactions();
         if (all.isEmpty()) empty("لسه مفيش عمليات", "ابدأ بإضافة مصروف أو استيراد رسائل البنك");
         else {
-            Set<Long> candidates = detectRecurringCandidates(all);
+            Set<Long> candidates = recurringCandidates;
             LinearLayout list = listCard(page);
             for (int i = 0; i < Math.min(5, all.size()); i++) transactionRow(list, all.get(i), candidates.contains(all.get(i).id));
         }
@@ -2251,7 +2428,7 @@ public final class MainActivity extends Activity {
         LinearLayout results = new LinearLayout(this);
         results.setOrientation(LinearLayout.VERTICAL);
         page.addView(results);
-        Set<Long> candidates = detectRecurringCandidates(db.transactions());
+        Set<Long> candidates = recurringCandidates;
         Map<Long, Long> dayOffsets = db.reimbursementOffsets();
         Runnable refresh = () -> {
             results.removeAllViews();bulkChecks.clear();Set<Long> visible=new HashSet<>();
@@ -2551,6 +2728,12 @@ public final class MainActivity extends Activity {
         page.addView(actions, actionParams);
     }
 
+    /** Evidence this device can no longer open is shown as a notice instead of silently disappearing. */
+    static String originalMessageText(ExpenseDb.SourceEvidence evidence) {
+        if (evidence.body != null) return evidence.body;
+        return "النص الأصلي غير متاح على هذا الجهاز";
+    }
+
     private void showOriginalMessages(List<ExpenseDb.SourceEvidence> messages) {
         LinearLayout content=form();
         if(messages.isEmpty()) content.addView(label("مصدر نصي غير متاح لهذه العملية. الإشعارات القديمة تحتاج إعادة وصول؛ والإدخال اليدوي وCSV ليس لهما رسالة أصلية.",14,MUTED,false));
@@ -2558,7 +2741,7 @@ public final class MainActivity extends Activity {
             content.addView(label(evidence.source+" · "+evidence.sender,13,INK,true));
             content.addView(label(Instant.ofEpochMilli(evidence.receivedAt).atZone(ZoneId.systemDefault())
                     .format(DateTimeFormatter.ofPattern("d MMM yyyy · h:mm a",new Locale("ar"))),12,MUTED,false));
-            TextView body=label(evidence.body==null?"تعذر فتح المصدر المحفوظ":evidence.body,14,INK,false);
+            TextView body=label(originalMessageText(evidence),14,INK,false);
             body.setTextIsSelectable(true);body.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG);
             body.setPadding(0,dp(12),0,dp(16));content.addView(body);
         }
@@ -2804,6 +2987,7 @@ public final class MainActivity extends Activity {
                 Long source=selectedSource(from,accounts),destination=selectedSource(to,accounts);
                 if(source==null || destination==null) {toast("حدد حسابي التحويل");return;}
                 List<Long> receipts=new ArrayList<>();for(int i=0;i<checks.size();i++) if(checks.get(i).isChecked()) receipts.add(candidates.get(i).id);
+                if(rejectMisreadAmount(principal)||rejectMisreadAmount(fee))return;
                 db.reconcileOwnTransfer(item.id,ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(principal.getText().toString())),
                         ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(fee.getText().toString())),source,destination,receipts);
                 dialog.dismiss();selectedTransaction=db.transactionById(item.id);render();
@@ -3022,12 +3206,9 @@ public final class MainActivity extends Activity {
         if (shown == 0) empty(all.isEmpty() ? "سجّل أول التزام" : "مفيش التزامات في النوع ده",
                 "أقساط فاليو أو ترو أو البنك، واشتراكات زي كلود وجوجل ون، وفواتير الموبايل. هنفكّرك قبل الميعاد بيوم.");
 
-        List<ExpenseDb.Transaction> transactions = db.transactions();
-        Set<Long> candidates = detectRecurringCandidates(transactions);
-        Set<String> suggested = new HashSet<>();
-        for (ExpenseDb.Transaction item : transactions) {
-            if (!candidates.contains(item.id) || !suggested.add(item.merchant.toLowerCase(Locale.ROOT))) continue;
-            if (suggested.size() > 2) break;
+        // F-07: read the suggestions from the twelve-month candidate scan, not from the capped 500-row page list,
+        // so a payment older than the newest 500 rows still produces its suggestion. Both come from the cache.
+        for (ExpenseDb.Transaction item : recurringSuggestions(recurringCandidates, recurringCandidateRows)) {
             LinearLayout suggestion = new LinearLayout(this); suggestion.setGravity(Gravity.CENTER_VERTICAL);
             suggestion.setPadding(dp(14), dp(12), dp(14), dp(12));
             suggestion.setBackground(outlined(dark ? 0x2212a06e : 0xffeaf7df, dark ? 0x5512a06e : 0xffcdebb4, 18));
@@ -3639,6 +3820,7 @@ public final class MainActivity extends Activity {
         paintKind[0].run();
 
         save.setOnClickListener(v -> {
+            if (rejectMisreadAmount(amount)) return;
             String merchant = name.getText().toString().trim();
             long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
             if (merchant.isEmpty() || minor <= 0) { toast("اكتب اسم الجهة والمبلغ"); return; }
@@ -3705,6 +3887,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("حوّلها لالتزام شهري").setView(form).setPositiveButton("حفظ الالتزام",null).setNegativeButton("إلغاء",null).create();
         dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             try {
+                if(rejectMisreadAmount(amount))return;
                 String merchant=name.getText().toString().trim();long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
                 LocalDate due=java.util.Objects.requireNonNull(dateValue(date));
                 if(merchant.isEmpty()||minor<=0||due.isBefore(LocalDate.now()))throw new IllegalArgumentException();
@@ -3906,6 +4089,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("حفظ",null).setNegativeButton("إلغاء",null).setNeutralButton("حذف الحد اليومي",null).create();
         dialog.setOnShowListener(d->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             try {String daily=amount.getText().toString().trim(),monthly=salaryAmount.getText().toString().trim(),code=currency.getSelectedItem().toString();
+                if(rejectMisreadAmount(daily)||rejectMisreadAmount(monthly))return;
                 long limit=optionalMinor(daily),salaryValue=optionalMinor(monthly);int day=selectedSalaryDay(salary.getSelectedItemPosition());
                 LocalDate start=java.util.Objects.requireNonNull(dateValue(starts));
                 if(!daily.isEmpty())DailySummary.save(this,new DailyAllowance.Plan(code,limit,start,day));else DailySummary.remove(this,code);
@@ -3922,7 +4106,9 @@ public final class MainActivity extends Activity {
     private int selectedSalaryDay(int selection){return selection==1?DailyAllowance.MONTH_END:selection>1?selection-1:0;}
     private int salarySelection(int day){return day==DailyAllowance.MONTH_END?1:day>0?day+1:0;}
     private void decimalInput(EditText view){view.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);}
-    private long optionalMinor(String raw){if(raw.isBlank())return 0;long value=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(raw));if(value<=0)throw new IllegalArgumentException("Invalid amount");return value;}
+    private boolean rejectMisreadAmount(String raw){if(!ExpenseParser.manualAmountMisread(raw))return false;toast("راجع المبلغ");return true;}
+    private boolean rejectMisreadAmount(EditText field){return rejectMisreadAmount(field.getText().toString());}
+    private long optionalMinor(String raw){if(raw.isBlank())return 0;if(ExpenseParser.manualAmountMisread(raw))throw new IllegalArgumentException("Ambiguous amount");long value=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(raw));if(value<=0)throw new IllegalArgumentException("Invalid amount");return value;}
     private void bindIntro(EditText input,java.util.function.Consumer<String> update) {
         input.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence text,int start,int count,int after){}
             public void afterTextChanged(Editable text){}public void onTextChanged(CharSequence text,int start,int before,int count){update.accept(text.toString());}});
@@ -3978,7 +4164,7 @@ public final class MainActivity extends Activity {
         payday.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> parent){}public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){introPayDay=selectedSalaryDay(position);}});
         form.addView(label("آخر الشهر حسب 28/29/30/31 يوم. الراتب للتخطيط؛ لا نضيفه كدخل. الحد اليومي ثابت ولا يترحّل.",12,MUTED,false));
         TextView begin=label("حفظ وابدأ",17,LIME,true);begin.setGravity(Gravity.CENTER);begin.setPadding(dp(16),dp(14),dp(16),dp(14));begin.setBackground(rounded(BRAND,16));
-        begin.setOnClickListener(v->{try{long limit=optionalMinor(introDaily),monthly=optionalMinor(introSalary);String currency=CURRENCIES[introCurrency];
+        begin.setOnClickListener(v->{try{if(rejectMisreadAmount(introDaily)||rejectMisreadAmount(introSalary))return;long limit=optionalMinor(introDaily),monthly=optionalMinor(introSalary);String currency=CURRENCIES[introCurrency];
             if(limit>0)DailySummary.save(this,new DailyAllowance.Plan(currency,limit,LocalDate.now(),introPayDay));
             DailySummary.saveSalary(this,currency,monthly,introPayDay);getPreferences(MODE_PRIVATE).edit().putString("profile_name",introName.trim()).apply();
             getSharedPreferences("widget_settings",MODE_PRIVATE).edit().putString("currency",currency).apply();finishIntro(true);
@@ -4054,6 +4240,7 @@ public final class MainActivity extends Activity {
                     if (id == -1) toast("الالتزام ده متسجل بالفعل");
                     askNotificationPermission();
                     render();
+                    refreshLedger(true); // the new commitment removes its merchant from the suggestions
                 }).setNegativeButton("إلغاء", null).show();
     }
 
@@ -4192,7 +4379,7 @@ public final class MainActivity extends Activity {
         return sign + money(item.amountMinor, item.currency);
     }
 
-    private String dueWord(LocalDate due) {
+    static String dueWord(LocalDate due) {
         long days = ChronoUnit.DAYS.between(LocalDate.now(), due);
         if (days == 0) return "النهارده";
         if (days == 1) return "بكرة";

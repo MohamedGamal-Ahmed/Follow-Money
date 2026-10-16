@@ -476,13 +476,41 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 new String[]{oldMerchant,Long.toString(oldAmount),currency,account==null?"-1":Long.toString(account)});
     }
 
-    private void archiveEntry(long id,String reason,boolean exclude) {
+    /** A row's live dependents share its life: bank-fee children and reimbursement links must go with it. */
+    private void deleteDependentRows(long id) {
         SQLiteDatabase writable=getWritableDatabase();
+        writable.delete("transactions","fee_parent_id=?",new String[]{Long.toString(id)});
+        writable.delete("reimbursements","income_id=? OR expense_id=?",new String[]{Long.toString(id),Long.toString(id)});
+    }
+
+    void archiveEntry(long id,String reason,boolean exclude) {
+        SQLiteDatabase writable=getWritableDatabase();
+        boolean own=!writable.inTransaction();
+        if(own) writable.beginTransaction();
+        try {
+            // Bank-fee children share the parent's life. They are archived with it, never hard-deleted,
+            // so the archive keeps the whole story in the same transaction.
+            java.util.List<Long> fees=new java.util.ArrayList<>();
+            try(Cursor c=writable.rawQuery("SELECT id FROM transactions WHERE fee_parent_id=? ORDER BY id",
+                    new String[]{Long.toString(id)})) {
+                while(c.moveToNext()) fees.add(c.getLong(0));
+            }
+            for(long fee:fees) archiveRow(writable,fee,reason,exclude);
+            archiveRow(writable,id,reason,exclude);
+            if(own) writable.setTransactionSuccessful();
+        } finally {
+            if(own) writable.endTransaction();
+        }
+    }
+
+    private void archiveRow(SQLiteDatabase writable,long id,String reason,boolean exclude) {
         try (Cursor c=writable.rawQuery("SELECT * FROM transactions WHERE id=?",new String[]{Long.toString(id)})) {
             if (!c.moveToFirst()) return;
             org.json.JSONObject payload=new org.json.JSONObject();
             try {
                 for (int i=0;i<c.getColumnCount();i++) payload.put(c.getColumnName(i),c.isNull(i)?org.json.JSONObject.NULL:c.getString(i));
+                // The row's live reimbursement links disappear with it; keep them in the payload for review.
+                payload.put("removed_reimbursements",removedReimbursements(writable,id));
                 if (exclude) {
                     // Keep the (still encrypted) source messages with the archived row, so a correction stays provable.
                     org.json.JSONArray evidence=new org.json.JSONArray();
@@ -506,8 +534,25 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?",new Object[]{id});
                 writable.delete("capture_evidence","transaction_id=?",new String[]{Long.toString(id)});
             }
+            deleteDependentRows(id);
             writable.delete("transactions","id=?",new String[]{Long.toString(id)});
         }
+    }
+
+    /** The reimbursement links that vanish with the row, captured before deleteDependentRows removes them. */
+    private static org.json.JSONArray removedReimbursements(SQLiteDatabase writable,long id) {
+        org.json.JSONArray rows=new org.json.JSONArray();
+        try(Cursor c=writable.rawQuery("SELECT income_id,expense_id,amount_minor FROM reimbursements WHERE income_id=? OR expense_id=? ORDER BY income_id",
+                new String[]{Long.toString(id),Long.toString(id)})) {
+            while(c.moveToNext()) {
+                org.json.JSONObject row=new org.json.JSONObject();
+                try {
+                    row.put("income_id",c.getLong(0)); row.put("expense_id",c.getLong(1)); row.put("amount_minor",c.getLong(2));
+                } catch(org.json.JSONException error) { throw new IllegalStateException(error); }
+                rows.put(row);
+            }
+        }
+        return rows;
     }
 
     private boolean mergeEntries(long keep,long remove,String reason) {
@@ -580,6 +625,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             while(c.moveToNext()) {
                 long id=c.getLong(0);boolean prefix=false;
                 for(SourceEvidence part:sourceEvidence(id))for(SourceEvidence whole:full) {
+                    if(part.body==null||whole.body==null)continue;
                     if(!"SMS".equals(part.source)||!"SMS".equals(whole.source)||Math.abs(part.receivedAt-whole.receivedAt)>120000)continue;
                     String partBank=SourceIdentity.bank(part.sender),wholeBank=SourceIdentity.bank(whole.sender);
                     if(!java.util.Objects.equals(partBank==null?part.sender:partBank,wholeBank==null?whole.sender:wholeBank))continue;
@@ -619,7 +665,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         Long account=autoSource(sender,parsed.cardLast4,body);
         if (account==null) return false;
         try (Cursor c=getReadableDatabase().rawQuery("SELECT id FROM transactions WHERE kind='expense' AND user_edited=0 " +
-                "AND payment_source_id=? AND amount_minor=? AND currency=? AND received_at BETWEEN ? AND ?",
+                "AND payment_source_id=? AND amount_minor=? AND currency=? AND received_at BETWEEN ? AND ? " +
+                "AND NOT EXISTS (SELECT 1 FROM reimbursements r WHERE r.income_id=transactions.id OR r.expense_id=transactions.id)",
                 new String[]{Long.toString(account),Long.toString(parsed.amountMinor),parsed.currency,
                         Long.toString(receivedAt-120000),Long.toString(receivedAt)})) {
             if (c.getCount()!=1 || !c.moveToFirst()) return false;
@@ -785,17 +832,20 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         try (Cursor c=getReadableDatabase().rawQuery("SELECT source,sender,received_at,encrypted_body FROM capture_evidence " +
                 "WHERE transaction_id=? ORDER BY encrypted_body IS NULL,received_at DESC",new String[]{Long.toString(id)})) {
             while(c.moveToNext()) {
-                String body=EvidenceVault.decrypt(c.getString(3));
-                if(body!=null) rows.add(new SourceEvidence(c.getString(0),c.getString(1),c.getLong(2),body));
+                EvidenceVault.Read body=EvidenceVault.read(c.getString(3));
+                if(body.body!=null || body.failed) rows.add(new SourceEvidence(c.getString(0),c.getString(1),c.getLong(2),body.body,body.failed));
             }
         }
         return rows;
     }
 
     public static final class SourceEvidence {
-        public final String source,sender,body; public final long receivedAt;
+        public final String source,sender,body; public final long receivedAt; public final boolean failed;
         SourceEvidence(String source,String sender,long receivedAt,String body) {
-            this.source=source;this.sender=sender;this.receivedAt=receivedAt;this.body=body;
+            this(source,sender,receivedAt,body,false);
+        }
+        SourceEvidence(String source,String sender,long receivedAt,String body,boolean failed) {
+            this.source=source;this.sender=sender;this.receivedAt=receivedAt;this.body=body;this.failed=failed;
         }
     }
 
@@ -1274,10 +1324,37 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return result;
     }
 
+    /**
+     * Expenses from the last year, newest first: recurring-payment suggestions only compare payments
+     * about a month apart, so they never need the whole ledger.
+     */
+    public List<Transaction> recurringCandidateTransactions() {
+        List<Transaction> result = new ArrayList<>();
+        long since = java.time.LocalDate.now().minusMonths(12).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        try (Cursor cursor = getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
+                "kind='expense' AND occurred_at>=?", new String[]{Long.toString(since)}, null, null, "occurred_at DESC", null)) {
+            while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
+                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
+                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
+                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
+        }
+        return result;
+    }
+
     /** Uncapped ledger count; UI lists intentionally show only the latest 500 rows. */
     public long transactionCount() {
         try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM transactions",null)) {
             c.moveToFirst();return c.getLong(0);
+        }
+    }
+
+    /**
+     * SQLite's per-connection change counter. Every local write bumps it, so a cached suggestion set can
+     * tell that the ledger moved without enumerating each add/edit/delete call site.
+     */
+    long changes() {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT total_changes()",null)) {
+            return c.moveToFirst()?c.getLong(0):-1;
         }
     }
 
@@ -1716,8 +1793,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 values.put("unique_key", cursor.getString(0));
                 writable.insertWithOnConflict("excluded_messages", null, values, SQLiteDatabase.CONFLICT_IGNORE);
             }
-            writable.delete("transactions", "fee_parent_id=?", new String[]{Long.toString(id)});
-            writable.delete("reimbursements", "income_id=? OR expense_id=?", new String[]{Long.toString(id), Long.toString(id)});
+            deleteDependentRows(id);
             writable.delete("transactions", "id=?", new String[]{Long.toString(id)});
             writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?", new Object[]{id});
             writable.delete("capture_evidence", "transaction_id=?", new String[]{Long.toString(id)});
@@ -1789,7 +1865,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             ContentValues values=new ContentValues();values.put("kind","income");values.put("category","دخل");
             values.put("merchant",income.merchant.replaceAll("رقم\\s*مرجعي.*","").trim());
-            for(SourceEvidence evidence:sourceEvidence(keepId)) if("SMS".equals(evidence.source)) {
+            for(SourceEvidence evidence:sourceEvidence(keepId)) if("SMS".equals(evidence.source) && evidence.body!=null) {
                 ExpenseParser.Parsed parsed=ExpenseParser.parseIncome(evidence.sender,evidence.body);
                 if(parsed!=null && parsed.amountMinor==income.amountMinor && parsed.currency.equals(income.currency)) {
                     ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(evidence.body,evidence.receivedAt);
@@ -2179,7 +2255,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public static final int REPAIR_VERSION = 2;
 
     public static final class RepairReport {
-        public int promotions, duplicates, ownTransfers, commitments, recategorized;
+        public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures;
         public long movedMinor, feesMinor;
         public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized > 0; }
     }
@@ -2209,7 +2285,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         RepairReport report=new RepairReport();
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
-            report.promotions=archivePromotions();
+            report.promotions=archivePromotions(report);
             report.recategorized=recategorizeWithCurrentRules();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
@@ -2305,21 +2381,26 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** Re-checks stored source messages: a promotion that was booked by an older parser is archived with its evidence. */
-    private int archivePromotions() {
+    private int archivePromotions(RepairReport report) {
         java.util.Map<Long,Boolean> verdict=new java.util.LinkedHashMap<>();
+        java.util.Set<Long> unreadable=new java.util.HashSet<>();
         try (Cursor c=getReadableDatabase().rawQuery("SELECT e.transaction_id,e.encrypted_body FROM capture_evidence e " +
-                "JOIN transactions t ON t.id=e.transaction_id WHERE t.user_edited=0 AND t.fee_parent_id IS NULL",null)) {
+                "JOIN transactions t ON t.id=e.transaction_id WHERE t.user_edited=0 AND t.fee_parent_id IS NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM reimbursements r WHERE r.income_id=t.id OR r.expense_id=t.id)",null)) {
             while (c.moveToNext()) {
                 long id=c.getLong(0);
-                String body=c.isNull(1)?null:EvidenceVault.decrypt(c.getString(1));
-                // Unknown or unreadable evidence never archives a row.
-                boolean promotion=body!=null && ExpenseParser.isPromotion(body);
+                EvidenceVault.Read body=EvidenceVault.read(c.isNull(1)?null:c.getString(1));
+                // Evidence this device cannot open is reported, never used to delete a row.
+                if(body.failed) unreadable.add(id);
+                boolean promotion=body.body!=null && ExpenseParser.isPromotion(body.body);
                 verdict.put(id,verdict.getOrDefault(id,true) && promotion);
             }
         }
         int archived=0;
-        for (java.util.Map.Entry<Long,Boolean> entry:verdict.entrySet())
+        for (java.util.Map.Entry<Long,Boolean> entry:verdict.entrySet()) {
+            if(unreadable.contains(entry.getKey())) {report.evidenceFailures++;continue;}
             if (entry.getValue()) {archiveEntry(entry.getKey(),"promotional message, not a payment",true);archived++;}
+        }
         return archived;
     }
 
