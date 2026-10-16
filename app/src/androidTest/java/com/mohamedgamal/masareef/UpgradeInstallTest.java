@@ -38,7 +38,7 @@ public final class UpgradeInstallTest extends Instrumentation {
                 result.putString("stream","Seeded schema v20 on installed baseline; rows="+db.transactions().size()+"; snapshot saved privately\n");
             }else if("verify".equals(mode)){
                 JSONObject before=new JSONObject(new String(Files.readAllBytes(expected.toPath()),StandardCharsets.UTF_8));
-                ok(db.getWritableDatabase().getVersion()==21,"Updated APK must migrate to v21");
+                ok(db.getWritableDatabase().getVersion()==22,"Updated APK must migrate to v22");
                 JSONObject after=snapshot();
                 ok(before.toString().equals(after.toString()),"Ledger/evidence/preferences/points changed: "+before+" -> "+after);
                 try(Cursor c=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM transactions WHERE time_precision IS NOT NULL",null)){

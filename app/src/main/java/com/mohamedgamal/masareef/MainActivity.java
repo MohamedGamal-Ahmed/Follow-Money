@@ -183,7 +183,7 @@ public final class MainActivity extends Activity {
         if (!dark && Build.VERSION.SDK_INT >= 27) systemBars |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         getWindow().getDecorView().setSystemUiVisibility(systemBars);
         db = new ExpenseDb(this);
-        boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
+        boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
         introStep=state==null?0:Math.min(3,state.getInt("intro_step",0));
         if(state!=null){introName=state.getString("intro_name","");introDaily=state.getString("intro_daily","");introSalary=state.getString("intro_salary","");introCurrency=state.getInt("intro_currency",0);introPayDay=state.getInt("intro_payday",0);introDraftLoaded=state.getBoolean("intro_loaded",false);}
@@ -227,6 +227,7 @@ public final class MainActivity extends Activity {
         if (state == null && !direct) playOpening(false);
         handleShare(getIntent());
         openTransactionFromIntent(getIntent());
+        openCaptureEventFromIntent(getIntent());
         openWidgetAction(getIntent());
         openMonthlyIntent(getIntent());
         if (!introVisible && state==null && !direct) {
@@ -270,6 +271,7 @@ public final class MainActivity extends Activity {
         setIntent(intent);
         handleShare(intent);
         openTransactionFromIntent(intent);
+        openCaptureEventFromIntent(intent);
         openWidgetAction(intent);
         openMonthlyIntent(intent);
         if(intent.getBooleanExtra("open_transactions",false)){intent.removeExtra("open_transactions");resetTransactionFilters();introVisible=false;selectedTab=6;render();}
@@ -424,10 +426,11 @@ public final class MainActivity extends Activity {
     }
 
     private void mergeSourceDialog(ExpenseDb.PaymentSource keep) {
+        if(new CardSettlements(db).sourceRelated(keep.id)){toast("فك ربط سداد البطاقة قبل دمج الحساب");return;}
         List<ExpenseDb.PaymentSource> options = new ArrayList<>();
         String bank = SourceIdentity.bank(keep.name);
         for (ExpenseDb.PaymentSource source : db.paymentSources())
-            if (source.id != keep.id && bank != null && bank.equals(SourceIdentity.bank(source.name)))
+            if (source.id != keep.id && bank != null && bank.equals(SourceIdentity.bank(source.name))&&!new CardSettlements(db).sourceRelated(source.id))
                 options.add(source);
         if (options.isEmpty()) { toast("مفيش معرفات تانية لنفس البنك"); return; }
         String[] labels = new String[options.size()];
@@ -447,7 +450,7 @@ public final class MainActivity extends Activity {
                                     ". المعاملات والأرصدة هتفضل محفوظة، وآخر رصيد مؤكد زمنيًا هيبقى نقطة البداية.")
                             .setPositiveButton("دمج", (confirm, button) -> {
                                 for (int i = 0; i < options.size(); i++)
-                                    if (checked[i]) db.mergeSources(keep.id, options.get(i).id);
+                                    if (checked[i]){try{db.mergeSources(keep.id, options.get(i).id);}catch(IllegalArgumentException error){toast("فك ربط البطاقات أو سدادها قبل دمج المعرفات");}}
                                 render();
                             }).setNegativeButton("إلغاء", null).show();
                 }).setNegativeButton("إلغاء", null).show();
@@ -1136,6 +1139,7 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmDeleteTransaction(ExpenseDb.Transaction item) {
+        if(new CardSettlements(db).related(item.id)){toast("فك توزيع سداد البطاقة قبل حذف العملية أو رسومها");return;}
         new AlertDialog.Builder(this).setTitle("حذف العملية؟")
                 .setMessage(item.merchant + " · " + money(item.amountMinor, item.currency))
                 .setPositiveButton("حذف", (dialog, which) -> {
@@ -1145,6 +1149,7 @@ public final class MainActivity extends Activity {
     }
 
     private void editTransactionDialog(ExpenseDb.Transaction item) {
+        if(new CardSettlements(db).related(item.id)){toast("فك توزيع سداد البطاقة قبل تعديل العملية أو رسومها");return;}
         LinearLayout form = form();
         Spinner kind = spinner("نوع العملية", new String[]{"مصروف", "دخل", "تحويل"}, form);
         kind.setSelection("income".equals(item.kind) ? 1 : "transfer".equals(item.kind) ? 2 : 0);
@@ -2471,7 +2476,8 @@ public final class MainActivity extends Activity {
             }
             if (dayTotal != null) setDayTotal(dayTotal, net);
             bulkSelected.retainAll(visible);updateBulkCount();
-            if (count == 0) {
+            boolean hasHistory=cancellationHistory(results);
+            if (count == 0&&!hasHistory) {
                 LinearLayout box = card(results);
                 box.setGravity(Gravity.CENTER_HORIZONTAL);
                 box.addView(label("مفيش عمليات تطابق البحث والفلاتر", 14, MUTED, false));
@@ -2678,6 +2684,7 @@ public final class MainActivity extends Activity {
                 destination = source.name + (source.last4 == null ? "" : "  •••• " + source.last4);
         }
         if (destination != null) detailRow(details, "التحويل إلى", label(destination, 14, INDIGO, true));
+        cardPaymentDetails(details,item);
         if ("expense".equals(item.kind)) {
             long repaid = db.reimbursedOf(item.id);
             if (repaid > 0) {
@@ -2734,6 +2741,175 @@ public final class MainActivity extends Activity {
         return "النص الأصلي غير متاح على هذا الجهاز";
     }
 
+    private void openCaptureEventFromIntent(Intent intent){
+        long id=intent==null?-1:intent.getLongExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT,-1);
+        if(id<0)return;intent.removeExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT);
+        CaptureEvents.Event event=new CaptureEvents(db).byId(id);if(event==null)return;
+        selectedTab=6;resetTransactionFilters();selectedMonth=Instant.ofEpochMilli(event.when).atZone(ZoneId.systemDefault()).toLocalDate().withDayOfMonth(1);render();showCaptureEvent(event);
+    }
+    private boolean cancellationHistory(LinearLayout results){
+        // Financial drill-downs show their own ledger rows; history is available on the unfiltered transactions page.
+        if(!transactionKindFilter.isEmpty()||!transactionCategoryFilter.isEmpty()||!transactionBucketFilter.isEmpty()||transactionSourceFilter!=null||transactionExcludeTransfers)return false;
+        LocalDate start=transactionPeriod==null?selectedMonth:transactionPeriod[0],end=transactionPeriod==null?selectedMonth.plusMonths(1):transactionPeriod[1];
+        List<CaptureEvents.Event> events=new CaptureEvents(db).between(start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),end.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli());
+        boolean header=false;
+        for(CaptureEvents.Event event:events){
+            if(!transactionCurrencyFilter.isEmpty()&&!transactionCurrencyFilter.equals(event.currency))continue;
+            String title=event.cancelled()?"ملغاة · محاولة تحويل":"إلغاء يحتاج مراجعة";
+            String amount=event.amount==null?"المبلغ غير مؤكد":money(event.amount,event.currency);
+            if(!transactionSearch.isBlank()&&!(title+amount+event.title).toLowerCase(Locale.ROOT).contains(transactionSearch.trim().toLowerCase(Locale.ROOT)))continue;
+            if(!header){results.addView(label("سجل الإلغاء · خارج الإجماليات",16,INK,true));header=true;}
+            LinearLayout row=card(results);LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
+            heading.addView(label(event.title,14,INK,true),new LinearLayout.LayoutParams(0,-2,1));
+            LinearLayout badge=new LinearLayout(this);badge.setGravity(Gravity.CENTER_VERTICAL);badge.setPadding(dp(10),dp(5),dp(10),dp(5));badge.setBackground(outlined(SURFACE,BORDER,99));
+            ImageView status=tintedIcon(R.drawable.ic_close,event.cancelled()?CORAL:MUTED);badge.addView(status,new LinearLayout.LayoutParams(dp(18),dp(18)));badge.addView(label(event.cancelled()?"ملغاة":"تحتاج مراجعة",12,event.cancelled()?CORAL:MUTED,true));heading.addView(badge);row.addView(heading);
+            row.addView(label(amount,18,MUTED,true));row.addView(label(event.cancelled()?"مش محسوبة في الإجماليات":"العملية الأصلية لم تتغير",12,MUTED,false));row.addView(label("وقت استلام الرسالة: "+sourceDate(event.when),12,MUTED,false));
+            row.addView(label(event.cancelled()?"المحاولة محفوظة؛ المشتريات الأصلية لم تتغير":"لا توجد مطابقة مؤكدة؛ لم نغيّر أي عملية",12,MUTED,false));
+            row.setContentDescription(title+" "+amount+" عرض المصدر");row.setOnClickListener(v->showCaptureEvent(event));
+        }return header;
+    }
+    private void showCaptureEvent(CaptureEvents.Event event){
+        String message=event.cancelled()?"المحاولة ملغاة ومش محسوبة في الإجماليات. إلغاء السداد لا يلغي المشتريات الأصلية أو رسومها.":"لم نجد عملية واحدة مؤكدة لنربطها برسالة الإلغاء. راجع المصدر والعمليات؛ لن نحذف عملية بالتخمين.";
+        if(event.body==null)message+="\nهذا إلغاء محفوظ من إصدار سابق؛ رسالة الإلغاء نفسها لم تكن محفوظة. وقت العرض هو وقت الأرشفة.";
+        AlertDialog.Builder dialog=new AlertDialog.Builder(this).setTitle(event.cancelled()?"محاولة ملغاة":"إلغاء يحتاج مراجعة").setMessage(message)
+                .setPositiveButton("عرض المصدر المحفوظ",(d,w)->showOriginalMessages(new CaptureEvents(db).evidence(event))).setNegativeButton("إغلاق",null);
+        if(!new CaptureEvents(db).choices(event).isEmpty())dialog.setNeutralButton("مراجعة المطابقة",(d,w)->reviewCancellationMatch(event));dialog.show();
+    }
+    private void reviewCancellationMatch(CaptureEvents.Event event){
+        CaptureEvents store=new CaptureEvents(db);List<ExpenseDb.Transaction> choices=store.choices(event);if(choices.isEmpty()){toast("لا توجد مطابقة آمنة الآن؛ راجع الرسالة");return;}
+        String[] names=new String[choices.size()];for(int i=0;i<choices.size();i++){ExpenseDb.Transaction row=choices.get(i);names[i]=row.merchant+" · "+money(row.amountMinor,row.currency)+" · "+sourceDate(row.when)+" · #"+row.id;}
+        new AlertDialog.Builder(this).setTitle("اختار العملية التي ألغيت").setItems(names,(d,w)->{
+            ExpenseDb.Transaction chosen=choices.get(w);String identity=store.identity(chosen.id);
+            new AlertDialog.Builder(this).setTitle("تأكيد مطابقة الإلغاء؟").setMessage(names[w]+"\nهنحفظ العملية مع رسالتي الخصم والإلغاء في الأرشيف ونخرجها من الإجماليات. تأكد من المصدر قبل الاختيار.")
+                    .setPositiveButton("تأكيد الإلغاء",(a,b)->{try{CaptureEvents.Event resolved=store.confirm(event.id,chosen.id,identity);CaptureNotifier.notifyEvent(this,resolved);render();showCaptureEvent(resolved);}catch(IllegalArgumentException error){toast("البيانات اتغيرت؛ راجع المطابقة من جديد");}})
+                    .setNeutralButton("عرض رسالة الخصم",(a,b)->showOriginalMessages(db.sourceEvidence(chosen.id))).setNegativeButton("إلغاء",null).show();
+        }).setNegativeButton("إلغاء",null).show();
+    }
+    private boolean isCreditPurchase(ExpenseDb.Transaction item){
+        if(!"expense".equals(item.kind)||item.paymentSourceId==null)return false;
+        ExpenseDb.PaymentSource source=db.paymentSource(item.paymentSourceId);
+        try(android.database.Cursor c=db.getReadableDatabase().rawQuery("SELECT fee_parent_id FROM transactions WHERE id=?",new String[]{Long.toString(item.id)})){
+            return source!=null&&"بطاقة ائتمان".equals(source.kind)&&c.moveToFirst()&&c.isNull(0);
+        }
+    }
+    private void cardPaymentDetails(LinearLayout details,ExpenseDb.Transaction item){
+        CardSettlements store=new CardSettlements(db);
+        if(store.isSettlement(item.id)){
+            detailRow(details,"سداد البطاقة",label("تحويل بين حساباتك؛ ليس مصروفًا جديدًا",13,INK,true));
+            TextView link=label("الموزّع "+money(store.allocatedBy(item.id),item.currency)+" · غير موزّع "+money(item.amountMinor-store.allocatedBy(item.id),item.currency)+" · التفاصيل / التراجع",13,ACCENT,true);
+            link.setOnClickListener(v->cardSettlementResult(item.id));detailRow(details,"ربط المشتريات",link);
+        }else if(isCreditPurchase(item)){
+            detailRow(details,"سداد مرتبط بالمشتريات",label(money(store.allocated(item.id),item.currency)+" من "+money(store.cost(item.id),item.currency),13,INK,true));
+            TextView fee=label("رسوم كشف البطاقة: "+money(db.transferFee(item.id),item.currency)+" · إضافة رسوم مؤكدة",13,ACCENT,true);
+            fee.setOnClickListener(v->statementFeeDialog(item));detailRow(details,"رسوم البطاقة",fee);
+        }
+    }
+    /** Uses the same bottom-sheet window, typography, surfaces and controls as the reimbursement journey. */
+    private android.app.Dialog financialJourneySheet(String title,LinearLayout body,String primary,java.util.function.Consumer<android.app.Dialog> accept,String secondary,java.util.function.Consumer<android.app.Dialog> back){
+        android.app.Dialog sheet=new android.app.Dialog(this);sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        LinearLayout content=form();content.setPadding(dp(18),dp(10),dp(18),dp(12));content.setBackground(rounded(SURFACE,26));
+        View handle=new View(this);handle.setBackground(rounded(BORDER,99));LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(dp(42),dp(4));hp.gravity=Gravity.CENTER_HORIZONTAL;hp.bottomMargin=dp(12);content.addView(handle,hp);
+        LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);heading.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);TextView headingText=label(title,20,INK,true);headingText.setTextDirection(View.TEXT_DIRECTION_RTL);headingText.setMaxLines(3);heading.addView(headingText,new LinearLayout.LayoutParams(0,-2,1));heading.addView(iconButton(R.drawable.ic_close,"إغلاق",sheet::dismiss),new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(heading);
+        ScrollView scroller=scrollForm(body);scroller.setVerticalScrollBarEnabled(false);content.addView(scroller,new LinearLayout.LayoutParams(-1,0,1));
+        Button proceed=new Button(this);proceed.setTag("financial_journey_primary");proceed.setText(primary);proceed.setTypeface(BOLD);proceed.setTextColor(Color.WHITE);proceed.setBackground(rounded(BRAND,14));proceed.setAllCaps(false);proceed.setMinHeight(dp(52));
+        LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2);pp.topMargin=dp(12);content.addView(proceed,pp);proceed.setOnClickListener(v->accept.accept(sheet));
+        if(secondary!=null){Button previous=new Button(this);previous.setText(secondary);previous.setTypeface(BOLD);previous.setTextColor(INK);previous.setBackground(outlined(SURFACE,BORDER,14));previous.setAllCaps(false);previous.setMinHeight(dp(48));LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2);bp.topMargin=dp(8);content.addView(previous,bp);previous.setOnClickListener(v->back.accept(sheet));}
+        showJourneyWindow(sheet,content,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f));return sheet;
+    }
+    private void showJourneyWindow(android.app.Dialog sheet,LinearLayout content,int height){
+        sheet.setContentView(content);sheet.setCanceledOnTouchOutside(true);android.view.Window window=sheet.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        window.setGravity(Gravity.BOTTOM);window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);window.setDimAmount(0.35f);window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+        window.setNavigationBarColor(SURFACE);window.getDecorView().setPadding(0,0,0,0);sheet.show();window.setLayout(-1,Math.min(height,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f)));
+    }
+    private LinearLayout journeyAmountCard(LinearLayout parent,String title,String value,String caption){
+        LinearLayout box=card(parent);box.setBackground(outlined(ACCENT_PALE,BORDER,18));box.addView(label(title,13,MUTED,false));TextView amount=label(value,28,INK,true);amount.setTextDirection(View.TEXT_DIRECTION_LTR);box.addView(amount);if(caption!=null)box.addView(label(caption,12,MUTED,false));return box;
+    }
+    private void repaymentSourceChoices(LinearLayout parent,String title,List<ExpenseDb.PaymentSource> sources,Long[] selected,int slot,Runnable changed){
+        parent.addView(label(title,15,INK,true));LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);parent.addView(list,new LinearLayout.LayoutParams(-1,-2));
+        Runnable[] draw=new Runnable[1];draw[0]=()->{
+            list.removeAllViews();
+            for(ExpenseDb.PaymentSource source:sources){
+                boolean chosen=selected[slot]!=null&&selected[slot]==source.id;LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(12),dp(12),dp(12),dp(12));row.setMinimumHeight(dp(84));row.setBackground(outlined(chosen?ACCENT_PALE:BACKGROUND,chosen?ACCENT:BORDER,16));row.setSelected(chosen);
+                row.addView(sourceBadge(source,42),new LinearLayout.LayoutParams(dp(42),dp(42)));
+                LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);copy.addView(label(source.displayName==null||source.displayName.isBlank()?source.name:source.displayName,15,INK,true));copy.addView(label(source.kind,12,MUTED,false));
+                TextView digits=label(source.last4==null?"الرقم غير مسجل":"•••• "+source.last4,13,INK,false);digits.setTextDirection(View.TEXT_DIRECTION_LTR);copy.addView(digits);
+                LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.setMarginStart(dp(12));row.addView(copy,cp);
+                FrameLayout check=new FrameLayout(this);check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);View circle=new View(this);circle.setBackground(chosen?rounded(ACCENT,99):outlined(SURFACE,ACCENT,99));check.addView(circle,new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.CENTER));
+                if(chosen){ImageView tick=tintedIcon(R.drawable.ic_check,Color.WHITE);tick.setPadding(dp(4),dp(4),dp(4),dp(4));check.addView(tick,new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.CENTER));}row.addView(check,new LinearLayout.LayoutParams(dp(38),dp(48)));
+                row.setContentDescription("اختيار "+title+" · "+db.sourceLabel(source.id));row.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View host,android.view.accessibility.AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(host,info);info.setClassName(android.widget.RadioButton.class.getName());info.setCheckable(true);info.setChecked(chosen);}});
+                row.setOnClickListener(v->{selected[slot]=source.id;draw[0].run();changed.run();});LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,-2);rp.topMargin=dp(8);rp.bottomMargin=dp(8);list.addView(row,rp);
+            }
+            if(sources.isEmpty())list.addView(label("مفيش وسيلة متاحة. أضف الحساب أو بطاقة الائتمان من شاشة الحسابات أولًا.",13,MUTED,false));
+        };draw[0].run();
+    }
+    private void cardRepaymentDialog(ExpenseDb.Transaction item){
+        LinearLayout content=form();journeyAmountCard(content,"قيمة السداد",money(item.amountMinor,item.currency),"اختار حساب الخصم وبطاقة الائتمان الخاصة بك");
+        content.addView(label("المشتريات تفضل محسوبة في يومها. تأكيد السداد يحوّل الخصم إلى تحويل بين حساباتك.",14,MUTED,false));
+        List<ExpenseDb.PaymentSource> accounts=new ArrayList<>(),cards=new ArrayList<>();
+        for(ExpenseDb.PaymentSource source:db.paymentSources())if(!source.archived){if("حساب".equals(source.kind)||"محفظة".equals(source.kind))accounts.add(source);if("بطاقة ائتمان".equals(source.kind))cards.add(source);}
+        Long[] chosen={null,null};for(ExpenseDb.PaymentSource source:accounts)if(item.paymentSourceId!=null&&db.accountId(item.paymentSourceId)==source.id)chosen[0]=source.id;
+        android.app.Dialog[] current={null};Runnable update=()->{if(current[0]!=null){Button next=current[0].getWindow().getDecorView().findViewWithTag("financial_journey_primary");boolean ready=chosen[0]!=null&&chosen[1]!=null;next.setEnabled(ready);next.setAlpha(ready?1f:0.45f);}};
+        repaymentSourceChoices(content,"حساب الخصم",accounts,chosen,0,update);repaymentSourceChoices(content,"بطاقة الائتمان",cards,chosen,1,update);
+        current[0]=financialJourneySheet("اختيار حسابات السداد",content,"اختيار المشتريات",sheet->{
+            if(chosen[0]==null||chosen[1]==null){toast("حدد الحساب والبطاقة");return;}sheet.dismiss();cardPurchaseSelection(item,chosen[0],chosen[1]);
+        },"إلغاء",android.app.Dialog::dismiss);update.run();
+    }
+    private void cardPurchaseSelection(ExpenseDb.Transaction item,long from,long card){cardPurchaseSelection(item,from,card,java.util.Collections.emptyMap());}
+    private void cardPurchaseSelection(ExpenseDb.Transaction item,long from,long card,Map<Long,Long> previous){
+        CardSettlements store=new CardSettlements(db);LinearLayout content=form();journeyAmountCard(content,"السداد المتاح للتوزيع",money(item.amountMinor,item.currency),"الربط اختياري؛ الباقي يفضل غير موزّع ولن نسجله رسومًا");
+        content.addView(label("اختار المشتريات التي يغطيها هذا السداد وحدد نصيب كل عملية.",14,MUTED,false));
+        long through=item.when;if("date_only".equals(item.timePrecision))through=Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()-1;
+        List<ExpenseDb.Transaction> purchases=store.purchases(card,item.currency,through);List<CheckBox> checks=new ArrayList<>();List<EditText> amounts=new ArrayList<>();
+        for(ExpenseDb.Transaction purchase:purchases){
+            LinearLayout row=card(content);boolean selected=previous.containsKey(purchase.id);row.setBackground(outlined(selected?ACCENT_PALE:BACKGROUND,selected?ACCENT:BORDER,16));
+            CheckBox check=new CheckBox(this);check.setText(UiKit.displayName(purchase.merchant));check.setTypeface(BOLD);check.setTextColor(INK);check.setMinHeight(dp(48));check.setChecked(selected);row.addView(check);checks.add(check);
+            LocalDate day=Instant.ofEpochMilli(purchase.when).atZone(ZoneId.systemDefault()).toLocalDate();row.addView(label(purchase.category+" · "+dayLabel(day)+" · "+transactionTimeLabel(purchase,false),12,MUTED,false));
+            row.addView(label("المتبقي من الشراء ورسومه: "+money(store.cost(purchase.id)-store.allocated(purchase.id),purchase.currency),14,INK,true));
+            EditText amount=input("نصيب العملية من السداد",row);amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);amount.setText(String.format(Locale.ROOT,"%.2f",previous.getOrDefault(purchase.id,store.cost(purchase.id)-store.allocated(purchase.id))/100.0));amount.setEnabled(selected);amounts.add(amount);
+            check.setOnCheckedChangeListener((button,chosen)->{amount.setEnabled(chosen);row.setBackground(outlined(chosen?ACCENT_PALE:BACKGROUND,chosen?ACCENT:BORDER,16));});
+        }
+        if(purchases.isEmpty())content.addView(label("لا توجد مشتريات مفتوحة بنفس العملة على هذه البطاقة قبل السداد. يمكنك اعتماد السداد كله غير موزّع.",13,MUTED,false));
+        financialJourneySheet("١ من ٣ · ربط المشتريات بالسداد",content,"مراجعة",sheet->{try{
+            Map<Long,Long> selected=new LinkedHashMap<>();for(int i=0;i<checks.size();i++)if(checks.get(i).isChecked())selected.put(purchases.get(i).id,optionalMinor(amounts.get(i).getText().toString()));
+            CardSettlements.Preview preview=store.preview(item.id,from,card,selected);sheet.dismiss();confirmCardRepayment(preview);
+        }catch(IllegalArgumentException|ArithmeticException error){toast("راجع الحساب والبطاقة ومبالغ المشتريات؛ قد تكون البيانات اتغيرت");}},"إلغاء",android.app.Dialog::dismiss);
+    }
+    private void confirmCardRepayment(CardSettlements.Preview preview){
+        LinearLayout content=form();String code=preview.payment.currency;journeyAmountCard(content,"قيمة السداد",money(preview.payment.amountMinor,code),"تحويل بين حساباتك؛ المشتريات لا تتسجل مرة ثانية");
+        LinearLayout accounts=card(content);accounts.addView(label("من حساب",12,MUTED,false));accounts.addView(label(db.sourceLabel(preview.from),14,INK,true),new LinearLayout.LayoutParams(-1,-2));divider(accounts);accounts.addView(label("إلى بطاقة",12,MUTED,false));accounts.addView(label(db.sourceLabel(preview.card),14,INK,true),new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout totals=card(content);detailRow(totals,"الموزّع",label(money(preview.allocated,code),16,INK,true));detailRow(totals,"غير موزّع",label(money(preview.remainder,code),16,INK,true));
+        if(preview.remainder>0)totals.addView(label("الجزء ده سداد على البطاقة من غير ربط بمشتريات؛ مش رسوم أو مصروف جديد.",13,MUTED,false));
+        if(!preview.allocations.isEmpty())content.addView(label("المشتريات المختارة",15,INK,true));
+        for(Map.Entry<Long,Long> allocation:preview.allocations.entrySet()){
+            ExpenseDb.Transaction purchase=db.transactionById(allocation.getKey());LinearLayout row=card(content);row.addView(label(purchase==null?"عملية تغيرت":UiKit.displayName(purchase.merchant),16,INK,true));
+            row.addView(label(money(allocation.getValue(),code),20,INK,true));if(purchase!=null)row.addView(label(purchase.category+" · "+dayLabel(Instant.ofEpochMilli(purchase.when).atZone(ZoneId.systemDefault()).toLocalDate()),12,MUTED,false));
+        }
+        content.addView(label("حركة البنك الأصلية محفوظة. لسه محفظناش الربط؛ راجع كشف البنك قبل التأكيد.",13,MUTED,false));
+        android.app.Dialog review=financialJourneySheet("٢ من ٣ · مراجعة سداد البطاقة",content,"تأكيد السداد",sheet->{
+            try{new CardSettlements(db).confirm(preview);sheet.dismiss();selectedTransaction=db.transactionById(preview.payment.id);render();cardSettlementResult(preview.payment.id);}
+            catch(IllegalArgumentException|ArithmeticException error){sheet.dismiss();toast("البيانات اتغيرت؛ راجع الاختيارات من جديد");cardPurchaseSelection(preview.payment,preview.from,preview.card,preview.allocations);}
+        },"رجوع للاختيار",sheet->{sheet.dismiss();cardPurchaseSelection(preview.payment,preview.from,preview.card,preview.allocations);});
+        review.setOnCancelListener(d->cardPurchaseSelection(preview.payment,preview.from,preview.card,preview.allocations));
+    }
+    private void cardSettlementResult(long id){
+        CardSettlements store=new CardSettlements(db);ExpenseDb.Transaction item=db.transactionById(id);if(item==null||!store.isSettlement(id)){toast("السداد لم يعد متاحًا؛ راجع سجل الإلغاء");return;}
+        final android.app.Dialog[] resultSheet={null};
+        LinearLayout content=form();journeyAmountCard(content,"تم تأكيد سداد البطاقة",money(item.amountMinor,item.currency),"تحويل بين حساباتك؛ مش مصروف جديد");
+        LinearLayout totals=card(content);detailRow(totals,"الموزّع",label(money(store.allocatedBy(id),item.currency),16,INK,true));detailRow(totals,"غير موزّع",label(money(item.amountMinor-store.allocatedBy(id),item.currency),16,INK,true));
+        try{org.json.JSONArray allocations=store.history(id).getJSONArray("allocations");for(int i=0;i<allocations.length();i++){org.json.JSONObject row=allocations.getJSONObject(i);ExpenseDb.Transaction purchase=db.transactionById(row.getLong("purchase_id"));TextView link=label((purchase==null?"عملية محذوفة":UiKit.displayName(purchase.merchant))+" · "+money(row.getLong("amount_minor"),item.currency),14,ACCENT,true);LinearLayout box=card(content);box.addView(link);if(purchase!=null)link.setOnClickListener(v->{if(resultSheet[0]!=null)resultSheet[0].dismiss();openRelatedTransaction(purchase);});}}catch(org.json.JSONException error){throw new IllegalStateException(error);}
+        resultSheet[0]=financialJourneySheet("٣ من ٣ · تفاصيل سداد البطاقة",content,"تم",android.app.Dialog::dismiss,"التراجع عن الربط",sheet->new AlertDialog.Builder(this).setTitle("التراجع عن سداد البطاقة؟").setMessage("هنرجّع تصنيف الخصم الأصلي ونفك توزيعه. المشتريات ورسومها محفوظة.")
+                .setPositiveButton("تراجع",(a,b)->{if(store.undo(id)){sheet.dismiss();selectedTransaction=db.transactionById(id);render();toast("اتلغى الربط ورجع الخصم لتصنيفه الأصلي");}else toast("السداد اتغير؛ راجع العملية");}).setNegativeButton("إلغاء",null).show());
+    }
+    private void statementFeeDialog(ExpenseDb.Transaction purchase){
+        LinearLayout content=form();content.addView(label("أدخل فقط رسومًا مؤكدة من كشف البطاقة وبنفس عملة الشراء. هتتسجل كمصروف مرتبط بيوم الشراء وتصنيفه؛ مش رسوم على مبلغ السداد. لا تستخدم فرق السداد كتقدير.",14,MUTED,false));
+        EditText amount=input("قيمة الرسوم · "+purchase.currency,content),description=input("وصف الرسوم كما هو في كشف البنك",content);amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        financialJourneySheet("رسوم كشف البطاقة",content,"مراجعة الرسوم",sheet->{try{
+            long minor=optionalMinor(amount.getText().toString());String note=description.getText().toString().trim();if(minor<=0||note.isEmpty()){toast("اكتب المبلغ ووصف كشف البنك");return;}
+            LinearLayout review=form();journeyAmountCard(review,"رسوم مؤكدة من كشف البطاقة",money(minor,purchase.currency),UiKit.displayName(purchase.merchant));review.addView(label(note,14,INK,false));review.addView(label("هتظهر في يوم الشراء وتصنيفه. راجع التاريخ والعملة في الكشف.",13,MUTED,false));
+            financialJourneySheet("تأكيد رسوم البطاقة",review,"تأكيد الرسوم",confirmation->{try{new CardSettlements(db).addStatementFee(purchase.id,minor,note);confirmation.dismiss();sheet.dismiss();selectedTransaction=db.transactionById(purchase.id);render();toast("اتسجلت الرسوم بالمصدر اليدوي ووصف الكشف");}catch(IllegalArgumentException error){toast("راجع الرسوم الموجودة أو فك توزيع السداد أولًا");}},"رجوع",android.app.Dialog::dismiss);
+        }catch(IllegalArgumentException error){toast("راجع مبلغ الرسوم");}},"إلغاء",android.app.Dialog::dismiss);
+    }
+
     private void showOriginalMessages(List<ExpenseDb.SourceEvidence> messages) {
         LinearLayout content=form();
         if(messages.isEmpty()) content.addView(label("مصدر نصي غير متاح لهذه العملية. الإشعارات القديمة تحتاج إعادة وصول؛ والإدخال اليدوي وCSV ليس لهما رسالة أصلية.",14,MUTED,false));
@@ -2752,6 +2928,12 @@ public final class MainActivity extends Activity {
     private void transactionOptions(ExpenseDb.Transaction item) {
         List<String> labels = new ArrayList<>();
         List<Runnable> actions = new ArrayList<>();
+        if(new CardSettlements(db).isSettlement(item.id)){
+            labels.add("تفاصيل سداد البطاقة / التراجع");actions.add(()->cardSettlementResult(item.id));
+        }else if(!"income".equals(item.kind)&&("transfer".equals(item.kind)||"تحويلات".equals(item.category))){
+            labels.add("ده سداد لبطاقة ائتمان");actions.add(()->cardRepaymentDialog(item));
+        }
+        if(isCreditPurchase(item)){labels.add("إضافة رسوم مؤكدة من كشف البطاقة");actions.add(()->statementFeeDialog(item));}
         labels.add("تعديل العملية"); actions.add(() -> editTransactionDialog(item));
         if("expense".equals(item.kind)){labels.add("حوّلها لالتزام شهري");actions.add(()->commitmentFromTransaction(item));}
         if("expense".equals(item.kind)){labels.add("راجع نسخة SMS مختصرة مكررة");actions.add(()->reviewAbbreviatedSms(item));}
@@ -2888,13 +3070,8 @@ public final class MainActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s,int start,int count,int after){}
             @Override public void onTextChanged(CharSequence s,int start,int before,int count){draw[0].run();}
             @Override public void afterTextChanged(Editable s){}
-        });draw[0].run();picker.setContentView(content);picker.setCanceledOnTouchOutside(true);
-        android.view.Window window=picker.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-        window.setGravity(Gravity.BOTTOM);window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-        window.setDimAmount(0.35f);window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        window.setNavigationBarColor(SURFACE);window.getDecorView().setPadding(0,0,0,0);
-        int desiredHeight=dp(300+90*Math.min(4,Math.max(1,candidates.size())));
-        picker.show();window.setLayout(-1,Math.min(desiredHeight,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f)));
+        });draw[0].run();int desiredHeight=dp(300+90*Math.min(4,Math.max(1,candidates.size())));
+        showJourneyWindow(picker,content,desiredHeight);
     }
 
     private String reimbursementEffect(ExpenseDb.ReimbursementPreview preview) {

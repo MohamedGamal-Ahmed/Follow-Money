@@ -50,3 +50,8 @@ The signed Beta APK (0.2.0-beta / code 3) built offline, passed signature/actual
 - The public privacy URL returned HTTP 200 on 14 October; confirm the final policy and artifact remain consistent before upload.
 
 See [Google Play preparation](GOOGLE_PLAY_RELEASE.md) and [Arabic usage](USAGE_AR.md). Publication and restricted-SMS approval remain subject to Google's review.
+
+
+## Owner-approved cancellation/repayment repair, 16 October
+
+The owner authorized a separate PR to address visible cancellation history, corrected notifications, explicit credit-card repayment review/undo, optional allocations and confirmed statement fees after a real incident. This is a scoped exception to the feature freeze. Implementation uses additive schema v22 and synthetic emulator fixtures; it does not authorize rewriting the owner's ledger, rescanning the phone, replacing the appealed APK, signing a release, or merging this PR. The owner will review and merge. Current accounting contracts and validation are described in ARCHITECTURE.md and the PR.

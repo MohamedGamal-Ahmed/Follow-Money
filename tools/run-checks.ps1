@@ -11,11 +11,11 @@ try {
     $out = '.tmp/qa-jvm'
     New-Item -ItemType Directory -Force $out | Out-Null
     $src = 'app/src/main/java/com/mohamedgamal/masareef'
-    $files = @('ExpenseParser','MerchantClassifier','NavigationState','TransactionJourney','DailyPoints','CsvImport','BudgetPeriod','SourceIdentity','CaptureIdentity','BalanceTimeline','CommitmentHint','MoneyTotals','SmsPreview','SmsParts','BrandCatalog','DailyAllowance','MoneyFlow','AccountMovement','RepairRules','Insights','MonthlyReport') | ForEach-Object { "$src/$_.java" }
-    $tests = @('ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','BalanceTimelineSmokeTest','CommitmentHintSmokeTest','PhaseOneLogicTest','MoneyFlowTest','RepairRulesTest','InsightsTest','MerchantClassificationTest','MonthlyReportTest','JourneyLogicTest','DailyPointsTest','AuditStructureTest','ManualAmountTest') | ForEach-Object { "tools/$_.java" }
+    $files = @('ExpenseParser','CaptureNotice','MerchantClassifier','NavigationState','TransactionJourney','DailyPoints','CsvImport','BudgetPeriod','SourceIdentity','CaptureIdentity','BalanceTimeline','CommitmentHint','MoneyTotals','SmsPreview','SmsParts','BrandCatalog','DailyAllowance','MoneyFlow','AccountMovement','RepairRules','Insights','MonthlyReport') | ForEach-Object { "$src/$_.java" }
+    $tests = @('CaptureNoticeTest','ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','BalanceTimelineSmokeTest','CommitmentHintSmokeTest','PhaseOneLogicTest','MoneyFlowTest','RepairRulesTest','InsightsTest','MerchantClassificationTest','MonthlyReportTest','JourneyLogicTest','DailyPointsTest','AuditStructureTest','ManualAmountTest') | ForEach-Object { "tools/$_.java" }
     & "$env:JAVA_HOME/bin/javac$suffix" -encoding UTF-8 -d $out @files @tests
     if ($LASTEXITCODE -ne 0) { throw 'JVM compilation failed' }
-    foreach ($class in @('ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','com.mohamedgamal.masareef.BalanceTimelineSmokeTest','com.mohamedgamal.masareef.CommitmentHintSmokeTest','com.mohamedgamal.masareef.PhaseOneLogicTest','com.mohamedgamal.masareef.MoneyFlowTest','com.mohamedgamal.masareef.RepairRulesTest','com.mohamedgamal.masareef.InsightsTest','com.mohamedgamal.masareef.MerchantClassificationTest','com.mohamedgamal.masareef.MonthlyReportTest','com.mohamedgamal.masareef.JourneyLogicTest','com.mohamedgamal.masareef.DailyPointsTest','AuditStructureTest','com.mohamedgamal.masareef.ManualAmountTest')) {
+    foreach ($class in @('com.mohamedgamal.masareef.CaptureNoticeTest','ParserSmokeTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','com.mohamedgamal.masareef.BalanceTimelineSmokeTest','com.mohamedgamal.masareef.CommitmentHintSmokeTest','com.mohamedgamal.masareef.PhaseOneLogicTest','com.mohamedgamal.masareef.MoneyFlowTest','com.mohamedgamal.masareef.RepairRulesTest','com.mohamedgamal.masareef.InsightsTest','com.mohamedgamal.masareef.MerchantClassificationTest','com.mohamedgamal.masareef.MonthlyReportTest','com.mohamedgamal.masareef.JourneyLogicTest','com.mohamedgamal.masareef.DailyPointsTest','AuditStructureTest','com.mohamedgamal.masareef.ManualAmountTest')) {
         & "$env:JAVA_HOME/bin/java$suffix" -cp $out $class
         if ($LASTEXITCODE -ne 0) { throw "Test failed: $class" }
     }
@@ -34,10 +34,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'App installation failed' }
         & $adb -s $Device install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
         if ($LASTEXITCODE -ne 0) { throw 'Test installation failed' }
-        foreach ($mode in @('base','phase','features','audit')) {
+        foreach ($mode in @('base','phase','features','audit','card')) {
             $arguments = @()
             if ($mode -eq 'phase') { $arguments = @('-e','phase_one','true') }
             if ($mode -eq 'features') { $arguments = @('-e','feature_audit','checks') }
+            if ($mode -eq 'card') { $arguments = @('-e','feature_audit','card') }
             if ($mode -eq 'audit') { $arguments = @('-e','feature_audit','regressions') }
             $result = & $adb -s $Device shell am instrument -w @arguments com.mohamedgamal.masareef.test/com.mohamedgamal.masareef.ReconciliationTest
             $result

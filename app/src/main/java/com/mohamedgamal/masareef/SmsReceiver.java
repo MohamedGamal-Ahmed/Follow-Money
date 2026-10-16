@@ -61,6 +61,7 @@ public final class SmsReceiver extends BroadcastReceiver {
                 boolean added = db.addSms(sender,body,message.when);
                 changed |= added || CommitmentHint.parse(sender, body,message.when) != null ||
                         CommitmentHint.completedPlanKey(sender, body) != null;
+                CaptureNotifier.notifyEvent(context,db.lastCaptureEvent());
                 ExpenseDb.Transaction after = added ? db.lastCaptured() : null;
                 if (after != null && (before == null || after.id > before.id)) CaptureNotifier.notify(context, after);
             }
