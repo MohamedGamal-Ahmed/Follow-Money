@@ -26,7 +26,7 @@ allprojects { p ->
     if ($LASTEXITCODE -ne 0) { throw 'QA app install failed' }
     & $adb -s $Device install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
     if ($LASTEXITCODE -ne 0) { throw 'QA test install failed' }
-    $modes = if ($UiOnly) { @('card_ui_light','card_ui_dark','card_ui_large') } else { @('base','phase','checks','regressions','card','card_ui_light','card_ui_dark','card_ui_large','journey') }
+    $modes = if ($UiOnly) { @('menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large') } else { @('base','phase','checks','regressions','card','menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large','journey') }
     foreach ($mode in $modes) {
         $arguments = @()
         if ($mode -eq 'phase') { $arguments = @('-e','phase_one','true') }
@@ -35,6 +35,6 @@ allprojects { p ->
         $result = & $adb -s $Device shell am instrument -w @arguments "$appId.test/com.mohamedgamal.masareef.ReconciliationTest"
         $result
         $report = $result -join "`n"
-        if ($LASTEXITCODE -ne 0 -or $report -notmatch '(Passed: [1-9][0-9]*|(?:Card journey UI|Journey UI) checks passed: [1-9][0-9]*); failed: 0' -or $report -match ': FAILED|INSTRUMENTATION_FAILED|Process crashed') { throw "QA failed: $mode" }
+        if ($LASTEXITCODE -ne 0 -or $report -notmatch '(Passed: [1-9][0-9]*|(?:Card journey UI|Journey UI|Selection UI) checks passed: [1-9][0-9]*); failed: 0' -or $report -match ': FAILED|INSTRUMENTATION_FAILED|Process crashed') { throw "QA failed: $mode" }
     }
 } finally { Pop-Location }

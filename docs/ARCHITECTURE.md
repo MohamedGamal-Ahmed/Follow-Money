@@ -80,3 +80,12 @@ Synthetic regression: a card purchase of 220.00 plus a confirmed statement fee o
 
 
 Verification of implementation commit `9149f3e`: `tools/run-checks.ps1` passed all 17 JVM suites, production debug/test APK builds and lint (0 errors, 66 existing warnings). `tools/run-card-journeys.ps1 -Device emulator-5556` passed 112 native Android tests (18 base + 14 phase + 27 features + 31 audit + 22 card/cancellation), 123 card journey UI checks (41 each in light/dark/font-scale 1.3) and 61 existing reimbursement journey UI checks. Actual pending-intent delivery is awaited, and captures wait for compositor presentation. Synthetic `RealDataReplay` retained 226.60 of purchase/statement-fee spending after removing the canceled 227.00 repayment. These are synthetic emulator results, not a real phone replay or installation. [Reviewed screenshots and provenance](screenshots/card-settlement-2026-10-16/README.md).
+
+
+## Shared selectors and action menus
+
+All 33 form-selector call sites and the two compact commitment selectors use `AppChoiceSpinner`. It keeps the adapter values, original positions and `OnItemSelectedListener` contracts, while opening a themed single-choice dialog with an explicit selected state instead of the platform dropdown. The same `ChoiceDialogBuilder` renders all 20 action/choice menus and four multi-select menus with the existing app typography, rounded surfaces, light/dark tokens and icons. Forms and confirmation dialogs without list items retain their existing behavior. System-owned date/file/permission pickers stay under Android control.
+
+Lists with eight or more options have a search field. Filtering preserves original positions and checkbox state; no financial value is inferred from display text. Multi-select menus retain caller save/cancel semantics and any supplied form, including the InstaPay handle input. Long labels wrap, scroll height is bounded, touch targets are at least 48dp, and cancellation/destructive actions use text as well as color. `SelectionUiTest` exercises the actual transaction editor, account action menu and combined input/multi-select dialog in light, dark and enlarged-font modes.
+
+Original bank messages use the same themed bottom sheet as the financial journeys, with a separate rounded card per evidence item, sender/source and saved time, selectable unmodified message text, scrollable content and a fixed close button. Missing/unreadable evidence remains explicit. Synthetic menu UI checks include this screen in both themes and at font scale 1.3.

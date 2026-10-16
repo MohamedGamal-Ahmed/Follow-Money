@@ -55,3 +55,5 @@ See [Google Play preparation](GOOGLE_PLAY_RELEASE.md) and [Arabic usage](USAGE_A
 ## Owner-approved cancellation/repayment repair, 16 October
 
 The owner authorized a separate PR to address visible cancellation history, corrected notifications, explicit credit-card repayment review/undo, optional allocations and confirmed statement fees after a real incident. This is a scoped exception to the feature freeze. Implementation uses additive schema v22 and synthetic emulator fixtures; it does not authorize rewriting the owner's ledger, rescanning the phone, replacing the appealed APK, signing a release, or merging this PR. The owner will review and merge. Current accounting contracts and validation are described in ARCHITECTURE.md and the PR.
+
+The owner subsequently expanded the same PR to standardize app-defined selectors and action menus throughout the UI, including transaction categories and account actions. This reuses existing tokens and Android widgets; no dependency, permission, accounting-schema or release-artifact change is added by the menu work.
