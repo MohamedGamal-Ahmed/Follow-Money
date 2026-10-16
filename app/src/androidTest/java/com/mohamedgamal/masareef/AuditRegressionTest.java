@@ -375,6 +375,209 @@ final class AuditRegressionTest {
         eq(1,report.evidenceFailures);
         ok(db.transactionById(buy)!=null);
     }
+    /**
+     * Deleting a purchase that is being suggested must move the ledger's change counter, so the cached
+     * suggestion set can be reloaded instead of continuing to advertise a row that no longer exists.
+     */
+    public void testLocalEditMovesTheChangeCounterAndTheSuggestionScan(){
+        long older=at(LocalDate.now().minusDays(30),10),newer=older+30L*86400000;
+        entry(older,7000,"QA SUB");
+        long id=entry(newer,7000,"QA SUB");
+        Set<Long> before=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
+        ok(before.contains(id),"the newest monthly match must be suggested");
+        long counter=db.changes();
+        ok(!MainActivity.ledgerChanged(db.changes(),counter),"reading the ledger must not look like an edit");
+        db.deleteTransaction(id);
+        ok(MainActivity.ledgerChanged(db.changes(),counter),"a local delete must move the change counter");
+        Set<Long> after=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
+        ok(!after.contains(id),"the deleted purchase must leave the suggestion scan");
+    }
+    /** The snapshot generation and redraw-identity rules the page uses to reject a stale or pointless redraw. */
+    public void testSnapshotGenerationAndRedrawIdentityRules(){
+        ok(MainActivity.ledgerSnapshotIsCurrent(4,4),"a snapshot from the current generation is applied");
+        ok(!MainActivity.ledgerSnapshotIsCurrent(4,5),"a snapshot read before a local edit is discarded");
+        ok(!MainActivity.ledgerChanged(7,7),"an unchanged ledger needs no reload");
+        ok(MainActivity.ledgerChanged(8,7),"a changed ledger needs a reload");
+        ok(MainActivity.isEditingSurface(12,false,false),"the commitment editor holds unsaved input");
+        ok(MainActivity.isEditingSurface(2,false,true),"a focused field holds unsaved input");
+        ok(MainActivity.isEditingSurface(2,true,false),"an intro form holds unsaved input");
+        ok(!MainActivity.isEditingSurface(2,false,false),"the commitments page can be redrawn");
+        ok(!MainActivity.isEditingSurface(0,false,false),"home can be redrawn");
+        long t=at(LocalDate.now(),10);
+        entry(t,1000,"QA A");
+        long id=entry(t+1000,2000,"QA B");
+        List<ExpenseDb.Transaction> rows=db.recurringCandidateTransactions();
+        ok(MainActivity.sameRows(rows,db.recurringCandidateTransactions()),"unchanged rows need no redraw");
+        db.updateTransaction(id,9999,"EGP","QA B","تسوق",null,"expense",null,null,null);
+        ok(!MainActivity.sameRows(rows,db.recurringCandidateTransactions()),"an edited amount forces a redraw");
+        rows=db.recurringCandidateTransactions();
+        db.deleteTransaction(id);
+        ok(!MainActivity.sameRows(rows,db.recurringCandidateTransactions()),"a deleted row forces a redraw");
+    }
+    /**
+     * One snapshot redraw that lands while the screen is in the requested state. The ledger gains a row after
+     * the page is drawn, so the pass must want a redraw, and whether that redraw happens is the thing under
+     * test. Returns {draft before, draft after, page before, page after}; the page is the drawn ScrollView
+     * instance, so a rebuilt page is a different object and a skipped redraw keeps the same one.
+     */
+    private Object[] heldSnapshotRedraw(boolean openEditor){
+        long t=at(LocalDate.now(),10);
+        entry(t,7000,"QA DRAFT");
+        entry(t+30L*86400000,7000,"QA DRAFT");
+        MainActivity activity=null;
+        java.lang.reflect.Field dbField=null;ExpenseDb original=null;
+        try{
+            dbField=MainActivity.class.getDeclaredField("db");dbField.setAccessible(true);
+            java.lang.reflect.Field intro=MainActivity.class.getDeclaredField("introVisible");intro.setAccessible(true);
+            final java.lang.reflect.Field scroll=MainActivity.class.getDeclaredField("pageScroll");scroll.setAccessible(true);
+            final java.lang.reflect.Field rows=MainActivity.class.getDeclaredField("recurringCandidateRows");rows.setAccessible(true);
+            final java.lang.reflect.Field refreshing=MainActivity.class.getDeclaredField("refreshingLedger");refreshing.setAccessible(true);
+            final java.lang.reflect.Field tab=MainActivity.class.getDeclaredField("selectedTab");tab.setAccessible(true);
+            final java.lang.reflect.Method render=MainActivity.class.getDeclaredMethod("render");render.setAccessible(true);
+            final java.lang.reflect.Method refresh=MainActivity.class.getDeclaredMethod("refreshLedger",boolean.class);refresh.setAccessible(true);
+            activity=(MainActivity)runner.startActivitySync(new android.content.Intent(runner.getTargetContext(),MainActivity.class)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            original=(ExpenseDb)dbField.get(activity);
+            final MainActivity target=activity;
+            dbField.set(target,db);
+            runner.runOnMainSync(()->{
+                try{
+                    intro.setBoolean(target,false);
+                    tab.setInt(target,2);
+                    render.invoke(target);
+                    refresh.invoke(target,true);   // settle the cache on this test's isolated ledger
+                }catch(Exception error){throw new RuntimeException(error);}
+            });
+            ok(settled(target,rows,refreshing,2),"the initial page must settle on the seeded ledger");
+            final Object[] pageBefore={null};
+            final String[] draft={"",null};
+            runner.runOnMainSync(()->{
+                try{
+                    if(openEditor)tab.setInt(target,12);            // the user opens the commitment editor
+                    render.invoke(target);
+                    android.widget.EditText field=firstEditText(target.getWindow().getDecorView());
+                    if(openEditor&&field!=null)field.setText("مسودة");// and types before the pass lands
+                    draft[0]=field==null?"":field.getText().toString();
+                    pageBefore[0]=scroll.get(target);
+                }catch(Exception error){throw new RuntimeException(error);}
+            });
+            runner.waitForIdleSync();
+            entry(t-100L*86400000,7000,"QA DRAFT");   // the ledger moves, so the snapshot wants a redraw
+            runner.runOnMainSync(()->{try{refresh.invoke(target,true);}catch(Exception error){throw new RuntimeException(error);}});
+            ok(settled(target,rows,refreshing,3),"the moved ledger must settle into a new snapshot");
+            final Object[] pageAfter={null};
+            runner.runOnMainSync(()->{
+                try{
+                    pageAfter[0]=scroll.get(target);
+                    android.widget.EditText field=firstEditText(target.getWindow().getDecorView());
+                    draft[1]=field==null?null:field.getText().toString();
+                }catch(Exception error){throw new RuntimeException(error);}
+            });
+            return new Object[]{draft[0],draft[1],pageBefore[0],pageAfter[0]};
+        }catch(Exception error){throw new AssertionError(error);}
+        finally{
+            if(activity!=null){
+                final MainActivity closing=activity;final java.lang.reflect.Field restore=dbField;final ExpenseDb previous=original;
+                runner.runOnMainSync(()->{try{restore.set(closing,previous);closing.finish();}catch(Exception ignored){}});
+            }
+        }
+    }
+    /** Waits for the capture worker's snapshot to be applied on the UI thread, so the test never races it. */
+    private boolean settled(MainActivity target,java.lang.reflect.Field rows,java.lang.reflect.Field refreshing,int expected){
+        for(int attempt=0;attempt<100;attempt++){
+            final boolean[] done={false};
+            runner.runOnMainSync(()->{
+                try{
+                    done[0]=!((java.util.concurrent.atomic.AtomicBoolean)refreshing.get(target)).get()
+                            &&((java.util.List<?>)rows.get(target)).size()==expected;
+                }catch(Exception error){throw new RuntimeException(error);}
+            });
+            if(done[0])return true;
+            try{Thread.sleep(100);}catch(InterruptedException interrupted){throw new AssertionError(interrupted);}
+        }
+        return false;
+    }
+    private static android.widget.EditText firstEditText(android.view.View view){
+        if(view instanceof android.widget.EditText)return (android.widget.EditText)view;
+        if(view instanceof android.view.ViewGroup){
+            android.view.ViewGroup group=(android.view.ViewGroup)view;
+            for(int index=0;index<group.getChildCount();index++){
+                android.widget.EditText found=firstEditText(group.getChildAt(index));
+                if(found!=null)return found;
+            }
+        }
+        return null;
+    }
+    /**
+     * The delayed snapshot redraw must not rebuild a page the user is typing in. The refresh is requested while
+     * the commitments page is open and the editor is opened (and typed into) before the worker's snapshot lands.
+     */
+    public void testDelayedRedrawKeepsTheCommitmentEditorDraft(){
+        Object[] result=heldSnapshotRedraw(true);
+        ok("مسودة".equals(result[0]),"the editor must accept the typed draft, saw: "+result[0]);
+        ok("مسودة".equals(result[1]),"the typed draft must survive the delayed redraw, saw: "+result[1]);
+        ok(result[2]!=null&&result[2]==result[3],"an open editor holds unsaved input, so the page must not be rebuilt");
+    }
+    /**
+     * Control for the test above: the very same delayed refresh must rebuild the page when no editor is open,
+     * which proves the redraw really is attempted and that the draft case is decided by the editor guard.
+     */
+    public void testDelayedRedrawRebuildsThePageWhenNoEditorIsOpen(){
+        Object[] result=heldSnapshotRedraw(false);
+        ok(result[2]!=null&&result[2]!=result[3],"the delayed refresh must rebuild a page with no unsaved input");
+    }
+    /**
+     * A local delete must leave the cached suggestions. The row is deleted straight from the ledger, so the only
+     * thing that can drop it from the cache is the reload the app schedules on its next render.
+     */
+    public void testDeletedRowLeavesTheCachedSuggestions(){
+        long t=at(LocalDate.now(),10);
+        entry(t,7000,"QA CACHE");
+        long newest=entry(t+30L*86400000,7000,"QA CACHE");
+        MainActivity activity=null;
+        java.lang.reflect.Field dbField=null;ExpenseDb original=null;
+        try{
+            dbField=MainActivity.class.getDeclaredField("db");dbField.setAccessible(true);
+            final java.lang.reflect.Field intro=MainActivity.class.getDeclaredField("introVisible");intro.setAccessible(true);
+            final java.lang.reflect.Field rows=MainActivity.class.getDeclaredField("recurringCandidateRows");rows.setAccessible(true);
+            final java.lang.reflect.Field refreshing=MainActivity.class.getDeclaredField("refreshingLedger");refreshing.setAccessible(true);
+            final java.lang.reflect.Field candidates=MainActivity.class.getDeclaredField("recurringCandidates");candidates.setAccessible(true);
+            final java.lang.reflect.Field tab=MainActivity.class.getDeclaredField("selectedTab");tab.setAccessible(true);
+            final java.lang.reflect.Method render=MainActivity.class.getDeclaredMethod("render");render.setAccessible(true);
+            final java.lang.reflect.Method refresh=MainActivity.class.getDeclaredMethod("refreshLedger",boolean.class);refresh.setAccessible(true);
+            activity=(MainActivity)runner.startActivitySync(new android.content.Intent(runner.getTargetContext(),MainActivity.class)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            original=(ExpenseDb)dbField.get(activity);
+            final MainActivity target=activity;
+            dbField.set(target,db);
+            runner.runOnMainSync(()->{
+                try{
+                    intro.setBoolean(target,false);
+                    tab.setInt(target,2);
+                    render.invoke(target);
+                    refresh.invoke(target,true);   // settle the cache on this test's isolated ledger
+                }catch(Exception error){throw new RuntimeException(error);}
+            });
+            ok(settled(target,rows,refreshing,2),"the cache must settle on the seeded ledger");
+            ok(cachedCandidates(target,candidates).contains(newest),"the seeded monthly match must be suggested");
+            db.deleteTransaction(newest);   // the same local edit the delete button makes
+            runner.runOnMainSync(()->{try{render.invoke(target);}catch(Exception error){throw new RuntimeException(error);}});
+            ok(settled(target,rows,refreshing,1),"the cache must reload once the ledger changes under it");
+            ok(!cachedCandidates(target,candidates).contains(newest),"the deleted purchase must leave the cache");
+        }catch(Exception error){throw new AssertionError(error);}
+        finally{
+            if(activity!=null){
+                final MainActivity closing=activity;final java.lang.reflect.Field restore=dbField;final ExpenseDb previous=original;
+                runner.runOnMainSync(()->{try{restore.set(closing,previous);closing.finish();}catch(Exception ignored){}});
+            }
+        }
+    }
+    private static Set<Long> cachedCandidates(MainActivity target,java.lang.reflect.Field field){
+        try{
+            @SuppressWarnings("unchecked") Set<Long> value=(Set<Long>)field.get(target);
+            return value;
+        }catch(Exception error){throw new AssertionError(error);}
+    }
     private int archivePromotions(){
         try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions",ExpenseDb.RepairReport.class);
             method.setAccessible(true);return (Integer)method.invoke(db,new ExpenseDb.RepairReport());}

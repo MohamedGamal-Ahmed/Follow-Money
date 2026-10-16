@@ -1348,6 +1348,16 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
     }
 
+    /**
+     * SQLite's per-connection change counter. Every local write bumps it, so a cached suggestion set can
+     * tell that the ledger moved without enumerating each add/edit/delete call site.
+     */
+    long changes() {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT total_changes()",null)) {
+            return c.moveToFirst()?c.getLong(0):-1;
+        }
+    }
+
     /** The row inserted most recently, used for the instant capture notification. */
     public Transaction latestInserted() {
         return transactionWhere(null, null, "id DESC");

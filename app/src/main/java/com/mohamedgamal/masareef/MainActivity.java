@@ -151,6 +151,13 @@ public final class MainActivity extends Activity {
     private List<ExpenseDb.Transaction> recurringCandidateRows = new ArrayList<>();
     private final java.util.concurrent.atomic.AtomicBoolean refreshingLedger = new java.util.concurrent.atomic.AtomicBoolean();
     private boolean ledgerRefreshPending;
+    /**
+     * Generation counter, bumped by every local ledger edit. A snapshot read under an older generation is
+     * discarded instead of applied, so a redraw can never re-advertise a row the user just deleted.
+     */
+    private final java.util.concurrent.atomic.AtomicLong ledgerVersion = new java.util.concurrent.atomic.AtomicLong();
+    /** The change counter the applied snapshot was read at; render() reloads once the ledger moves past it. */
+    private Long ledgerChanges;
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             boolean visible = selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15;
@@ -1836,19 +1843,75 @@ public final class MainActivity extends Activity {
     static final class LedgerSnapshot {
         final Set<Long> candidates;
         final List<ExpenseDb.Transaction> rows;
-        LedgerSnapshot(Set<Long> candidates, List<ExpenseDb.Transaction> rows) {
+        /** The ledger generation this snapshot was read under. */
+        final long version;
+        /** SQLite's change counter after the read, so the next render can tell the ledger moved. */
+        final long changes;
+        /** Installments this pass settled; a non-zero count means the pages must be redrawn. */
+        final int normalized;
+        LedgerSnapshot(Set<Long> candidates, List<ExpenseDb.Transaction> rows, long version, long changes, int normalized) {
             this.candidates = candidates; this.rows = rows;
+            this.version = version; this.changes = changes; this.normalized = normalized;
         }
+    }
+
+    /** The commitment editor page. Mid-typing, so a delayed redraw must not rebuild it. */
+    private static final int EDITOR_TAB = 12;
+
+    /**
+     * Whether the screen in front of the user holds unsaved input. Dialogs are separate windows and survive a
+     * redraw, but the editor page and the intro forms are part of this activity's view tree.
+     */
+    static boolean isEditingSurface(int tab, boolean introVisible, boolean focusedInput) {
+        return tab == EDITOR_TAB || introVisible || focusedInput;
+    }
+
+    /** A snapshot read before a local edit landed must be discarded instead of applied. */
+    static boolean ledgerSnapshotIsCurrent(long readVersion, long currentVersion) {
+        return readVersion == currentVersion;
+    }
+
+    /** Any local write bumps SQLite's change counter, so a cached suggestion set can tell that it aged. */
+    static boolean ledgerChanged(long observedChanges, long snapshotChanges) {
+        return observedChanges != snapshotChanges;
+    }
+
+    /** Cheap identity of the applied rows: a different size, id, amount or merchant needs a redraw. */
+    static boolean sameRows(List<ExpenseDb.Transaction> first, List<ExpenseDb.Transaction> second) {
+        if (first.size() != second.size()) return false;
+        for (int index = 0; index < first.size(); index++) {
+            ExpenseDb.Transaction left = first.get(index), right = second.get(index);
+            if (left.id != right.id || left.amountMinor != right.amountMinor
+                    || !left.currency.equals(right.currency) || !left.merchant.equals(right.merchant)) return false;
+        }
+        return true;
     }
 
     /**
      * One capture-worker pass: settle early payments, then read the twelve-month candidate scan. This is the
      * only place the suggestion query runs, so no render ever spans a year of expenses on the UI thread.
      */
-    static LedgerSnapshot readLedgerSnapshot(ExpenseDb db) {
-        normalizeEarlyPaymentsOnWorker(db);
+    static LedgerSnapshot readLedgerSnapshot(ExpenseDb db, long version) {
+        int normalized = normalizeEarlyPaymentsOnWorker(db);
         List<ExpenseDb.Transaction> rows = db.recurringCandidateTransactions();
-        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring()), rows);
+        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring()), rows, version, db.changes(), normalized);
+    }
+
+    /** A local ledger edit: bump the generation so an in-flight snapshot is rejected, then reload the cache. */
+    private void invalidateLedger() {
+        ledgerVersion.incrementAndGet();
+        refreshLedger(true);
+    }
+
+    /** True when redrawing cannot disturb input the user has not saved yet. */
+    private boolean canRedrawNow() {
+        if (isFinishing() || isDestroyed()) return false;
+        return !isEditingSurface(selectedTab, introVisible, getCurrentFocus() instanceof android.widget.EditText);
+    }
+
+    /** The suggestion data a redraw would show is different from what the page is currently drawn with. */
+    private boolean cacheDiffers(LedgerSnapshot snapshot) {
+        return !snapshot.candidates.equals(recurringCandidates) || !sameRows(snapshot.rows, recurringCandidateRows);
     }
 
     /**
@@ -1857,23 +1920,43 @@ public final class MainActivity extends Activity {
      */
     private void refreshLedger(final boolean rerender) {
         if (!refreshingLedger.compareAndSet(false, true)) { ledgerRefreshPending = ledgerRefreshPending || rerender; return; }
+        final long version = ledgerVersion.get();
         CaptureQueue.submit(() -> {
             LedgerSnapshot snapshot = null;
-            try { snapshot = readLedgerSnapshot(db); }
+            try { snapshot = readLedgerSnapshot(db, version); }
             catch (RuntimeException ignored) { }
             final LedgerSnapshot ready = snapshot;
             runOnUiThread(() -> {
                 boolean repeat = ledgerRefreshPending;
                 ledgerRefreshPending = false;
                 refreshingLedger.set(false);
-                if (ready != null) { recurringCandidates = ready.candidates; recurringCandidateRows = ready.rows; }
-                if (rerender && !isFinishing() && !isDestroyed()) render();
+                if (ready == null) { if (repeat) refreshLedger(true); return; }
+                if (!ledgerSnapshotIsCurrent(ready.version, ledgerVersion.get())) {
+                    // A local edit landed while this pass was reading, so its snapshot must not be applied.
+                    ledgerRefreshPending = repeat;
+                    refreshLedger(true);
+                    return;
+                }
+                boolean changed = ready.normalized > 0 || cacheDiffers(ready);
+                recurringCandidates = ready.candidates;
+                recurringCandidateRows = ready.rows;
+                ledgerChanges = ready.changes;
+                // Never rebuild the screen while the user is typing in it; the cache is already current, so the
+                // next render (leaving the editor, opening a page) shows the settled data.
+                if (rerender && changed && canRedrawNow()) render();
                 if (repeat) refreshLedger(true);
             });
         });
     }
 
     private void render() {
+        // Any local add/edit/delete bumps SQLite's change counter, so the cached suggestions cannot stay stale
+        // behind a page whose only refresh path is this render().
+        if (db != null) {
+            long changes = db.changes();
+            if (ledgerChanges == null) ledgerChanges = changes;
+            else if (ledgerChanged(changes, ledgerChanges)) invalidateLedger();
+        }
         savePageScroll();
         DailyPointsStore.observeToday(this);
         settingsGroup = null;

@@ -7,6 +7,8 @@ import java.nio.file.Path;
  * Source-level guard for F-03: the drawing path must stay write-free while early-payment
  * normalization happens off the UI thread. Reading the source is the only way to assert this
  * without starting the real activity (whose onCreate writes the user's primary ledger).
+ * It also guards the follow-up rules: the suggestion cache reloads after a local edit and a
+ * delayed snapshot redraw never rebuilds an open editor.
  */
 public final class AuditStructureTest {
     private static int checked;
@@ -24,8 +26,22 @@ public final class AuditStructureTest {
         String normalize = body(main, "private void refreshLedger(final boolean rerender)");
         check(normalize.contains("CaptureQueue.submit("), "the ledger pass must run on the one capture worker");
         check(normalize.contains("runOnUiThread"), "the ledger pass must return to the UI thread to re-render");
-        check(normalize.contains("isFinishing()") && normalize.contains("isDestroyed()"),
-                "the re-render must keep the finishing/destroyed guard");
+        check(normalize.contains("canRedrawNow()"),
+                "the delayed redraw must re-check the current screen, not the page that requested the refresh");
+        check(normalize.contains("ledgerSnapshotIsCurrent("),
+                "a snapshot read before a local edit must be discarded instead of applied");
+        check(normalize.contains("readLedgerSnapshot(db, version)") && normalize.contains("ledgerVersion"),
+                "every pass must carry the generation it was read under");
+        check(body(main, "private boolean canRedrawNow()").contains("isEditingSurface")
+                        && body(main, "private boolean canRedrawNow()").contains("isFinishing()")
+                        && body(main, "private boolean canRedrawNow()").contains("isDestroyed()"),
+                "the redraw guard must keep the finishing/destroyed check and the editing-surface check");
+        check(body(main, "static boolean isEditingSurface(int tab, boolean introVisible, boolean focusedInput)")
+                        .contains("EDITOR_TAB"),
+                "the commitment editor page must count as an unsaved editing surface");
+        String render = body(main, "private void render()");
+        check(render.contains("db.changes()") && render.contains("invalidateLedger()"),
+                "render() must reload the cache once the ledger moved, so a manual edit cannot leave it stale");
         check(!main.contains("EARLY_PAYMENT_QUEUE") && !daily.contains("NORMALIZE_QUEUE"),
                 "no extra writer thread may be created beside the capture worker");
         check(body(main, "private void recurringScreen()").contains("recurringCandidates"),
@@ -41,8 +57,13 @@ public final class AuditStructureTest {
                 "private void introScreen()", "private void introProfileScreen()"})
             check(!body(main, page).contains("recurringCandidateTransactions"),
                     page + " must read the cached suggestion set");
-        check(body(main, "static LedgerSnapshot readLedgerSnapshot(ExpenseDb db)").contains("recurringCandidateTransactions"),
+        String snapshot = "static LedgerSnapshot readLedgerSnapshot(ExpenseDb db, long version)";
+        check(body(main, snapshot).contains("normalizeEarlyPaymentsOnWorker(db)"),
+                "the pass must settle early payments on the worker");
+        check(body(main, snapshot).contains("recurringCandidateTransactions"),
                 "the twelve-month candidate scan must stay on the capture worker");
+        check(body(main, snapshot).contains("db.changes()"),
+                "the snapshot must record the change counter it was read at");
         check(!body(daily, "static void refresh(Context context)").contains("normalizeEarlyPayments"),
                 "refresh() must not normalize (render() calls it, so it would loop)");
         check(body(daily, "@Override public void onReceive(Context context,Intent intent)").contains("normalizeEarlyPayments"),
