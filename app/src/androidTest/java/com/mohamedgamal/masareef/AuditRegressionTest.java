@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 /** Focused audit regressions. All ledger/settings writes use disposable emulator fixtures. */
@@ -286,8 +287,27 @@ final class AuditRegressionTest {
         Set<Long> ids=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
         ok(ids.contains(newer));
     }
+    public void testUnreadableEvidenceIsReportedAndNeverArchivesARow(){
+        long t=at(LocalDate.now(),10),buy=manual(t,10000,"expense");
+        db.getWritableDatabase().execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,received_at,encrypted_body) VALUES(?,?,?,?,?)",
+                new Object[]{"qa-unreadable",buy,"SMS",t,"not-a-real-keystore-body"});
+        List<ExpenseDb.SourceEvidence> evidence=db.sourceEvidence(buy);
+        eq(1,evidence.size());
+        ok(evidence.get(0).failed);
+        ok(evidence.get(0).body==null);
+        ok(MainActivity.originalMessageText(evidence.get(0)).equals("النص الأصلي غير متاح على هذا الجهاز"));
+        ExpenseDb.RepairReport report=db.repairAll();
+        eq(0,report.promotions);
+        eq(1,report.evidenceFailures);
+        ok(db.transactionById(buy)!=null);
+    }
     private int archivePromotions(){
-        try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions");method.setAccessible(true);return (Integer)method.invoke(db);}
+        try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions",ExpenseDb.RepairReport.class);
+            method.setAccessible(true);return (Integer)method.invoke(db,new ExpenseDb.RepairReport());}
+        catch(NoSuchMethodException legacySignature){
+            try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions");method.setAccessible(true);return (Integer)method.invoke(db);}
+            catch(Exception error){throw new RuntimeException(error);}
+        }
         catch(Exception error){throw new RuntimeException(error);}
     }
 }

@@ -28,13 +28,28 @@ final class EvidenceVault {
                     Base64.encodeToString(cipher.doFinal(text.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
         } catch (Exception error) { return null; }
     }
-    static String decrypt(String text) {
-        if (text == null) return null;
+    /** What a stored body turned out to be: readable text, or evidence this device can no longer open. */
+    static final class Read {
+        static final Read NONE = new Read(null, false);
+        final String body;
+        final boolean failed;
+        Read(String body, boolean failed) { this.body = body; this.failed = failed; }
+    }
+
+    /** Opens one stored body, telling "nothing was stored" apart from "stored but unreadable". */
+    static Read read(String text) {
+        if (text == null) return Read.NONE;
         try {
             String[] parts = text.split(":", 2);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)));
-            return new String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), StandardCharsets.UTF_8);
-        } catch (Exception error) { return null; }
+            return new Read(new String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), StandardCharsets.UTF_8), false);
+        } catch (Exception error) {
+            return new Read(null, true);
+        }
+    }
+
+    static String decrypt(String text) {
+        return read(text).body;
     }
 }

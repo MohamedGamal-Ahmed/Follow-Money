@@ -2579,6 +2579,12 @@ public final class MainActivity extends Activity {
         page.addView(actions, actionParams);
     }
 
+    /** Evidence this device can no longer open is shown as a notice instead of silently disappearing. */
+    static String originalMessageText(ExpenseDb.SourceEvidence evidence) {
+        if (evidence.body != null) return evidence.body;
+        return "النص الأصلي غير متاح على هذا الجهاز";
+    }
+
     private void showOriginalMessages(List<ExpenseDb.SourceEvidence> messages) {
         LinearLayout content=form();
         if(messages.isEmpty()) content.addView(label("مصدر نصي غير متاح لهذه العملية. الإشعارات القديمة تحتاج إعادة وصول؛ والإدخال اليدوي وCSV ليس لهما رسالة أصلية.",14,MUTED,false));
@@ -2586,7 +2592,7 @@ public final class MainActivity extends Activity {
             content.addView(label(evidence.source+" · "+evidence.sender,13,INK,true));
             content.addView(label(Instant.ofEpochMilli(evidence.receivedAt).atZone(ZoneId.systemDefault())
                     .format(DateTimeFormatter.ofPattern("d MMM yyyy · h:mm a",new Locale("ar"))),12,MUTED,false));
-            TextView body=label(evidence.body==null?"تعذر فتح المصدر المحفوظ":evidence.body,14,INK,false);
+            TextView body=label(originalMessageText(evidence),14,INK,false);
             body.setTextIsSelectable(true);body.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG);
             body.setPadding(0,dp(12),0,dp(16));content.addView(body);
         }

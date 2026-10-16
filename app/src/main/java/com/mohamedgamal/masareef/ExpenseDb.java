@@ -599,6 +599,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             while(c.moveToNext()) {
                 long id=c.getLong(0);boolean prefix=false;
                 for(SourceEvidence part:sourceEvidence(id))for(SourceEvidence whole:full) {
+                    if(part.body==null||whole.body==null)continue;
                     if(!"SMS".equals(part.source)||!"SMS".equals(whole.source)||Math.abs(part.receivedAt-whole.receivedAt)>120000)continue;
                     String partBank=SourceIdentity.bank(part.sender),wholeBank=SourceIdentity.bank(whole.sender);
                     if(!java.util.Objects.equals(partBank==null?part.sender:partBank,wholeBank==null?whole.sender:wholeBank))continue;
@@ -805,17 +806,20 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         try (Cursor c=getReadableDatabase().rawQuery("SELECT source,sender,received_at,encrypted_body FROM capture_evidence " +
                 "WHERE transaction_id=? ORDER BY encrypted_body IS NULL,received_at DESC",new String[]{Long.toString(id)})) {
             while(c.moveToNext()) {
-                String body=EvidenceVault.decrypt(c.getString(3));
-                if(body!=null) rows.add(new SourceEvidence(c.getString(0),c.getString(1),c.getLong(2),body));
+                EvidenceVault.Read body=EvidenceVault.read(c.getString(3));
+                if(body.body!=null || body.failed) rows.add(new SourceEvidence(c.getString(0),c.getString(1),c.getLong(2),body.body,body.failed));
             }
         }
         return rows;
     }
 
     public static final class SourceEvidence {
-        public final String source,sender,body; public final long receivedAt;
+        public final String source,sender,body; public final long receivedAt; public final boolean failed;
         SourceEvidence(String source,String sender,long receivedAt,String body) {
-            this.source=source;this.sender=sender;this.receivedAt=receivedAt;this.body=body;
+            this(source,sender,receivedAt,body,false);
+        }
+        SourceEvidence(String source,String sender,long receivedAt,String body,boolean failed) {
+            this.source=source;this.sender=sender;this.receivedAt=receivedAt;this.body=body;this.failed=failed;
         }
     }
 
@@ -1825,7 +1829,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             ContentValues values=new ContentValues();values.put("kind","income");values.put("category","دخل");
             values.put("merchant",income.merchant.replaceAll("رقم\\s*مرجعي.*","").trim());
-            for(SourceEvidence evidence:sourceEvidence(keepId)) if("SMS".equals(evidence.source)) {
+            for(SourceEvidence evidence:sourceEvidence(keepId)) if("SMS".equals(evidence.source) && evidence.body!=null) {
                 ExpenseParser.Parsed parsed=ExpenseParser.parseIncome(evidence.sender,evidence.body);
                 if(parsed!=null && parsed.amountMinor==income.amountMinor && parsed.currency.equals(income.currency)) {
                     ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(evidence.body,evidence.receivedAt);
@@ -2215,7 +2219,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public static final int REPAIR_VERSION = 2;
 
     public static final class RepairReport {
-        public int promotions, duplicates, ownTransfers, commitments, recategorized;
+        public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures;
         public long movedMinor, feesMinor;
         public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized > 0; }
     }
@@ -2245,7 +2249,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         RepairReport report=new RepairReport();
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
-            report.promotions=archivePromotions();
+            report.promotions=archivePromotions(report);
             report.recategorized=recategorizeWithCurrentRules();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
@@ -2341,22 +2345,26 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** Re-checks stored source messages: a promotion that was booked by an older parser is archived with its evidence. */
-    private int archivePromotions() {
+    private int archivePromotions(RepairReport report) {
         java.util.Map<Long,Boolean> verdict=new java.util.LinkedHashMap<>();
+        java.util.Set<Long> unreadable=new java.util.HashSet<>();
         try (Cursor c=getReadableDatabase().rawQuery("SELECT e.transaction_id,e.encrypted_body FROM capture_evidence e " +
                 "JOIN transactions t ON t.id=e.transaction_id WHERE t.user_edited=0 AND t.fee_parent_id IS NULL " +
                 "AND NOT EXISTS (SELECT 1 FROM reimbursements r WHERE r.income_id=t.id OR r.expense_id=t.id)",null)) {
             while (c.moveToNext()) {
                 long id=c.getLong(0);
-                String body=c.isNull(1)?null:EvidenceVault.decrypt(c.getString(1));
-                // Unknown or unreadable evidence never archives a row.
-                boolean promotion=body!=null && ExpenseParser.isPromotion(body);
+                EvidenceVault.Read body=EvidenceVault.read(c.isNull(1)?null:c.getString(1));
+                // Evidence this device cannot open is reported, never used to delete a row.
+                if(body.failed) unreadable.add(id);
+                boolean promotion=body.body!=null && ExpenseParser.isPromotion(body.body);
                 verdict.put(id,verdict.getOrDefault(id,true) && promotion);
             }
         }
         int archived=0;
-        for (java.util.Map.Entry<Long,Boolean> entry:verdict.entrySet())
+        for (java.util.Map.Entry<Long,Boolean> entry:verdict.entrySet()) {
+            if(unreadable.contains(entry.getKey())) {report.evidenceFailures++;continue;}
             if (entry.getValue()) {archiveEntry(entry.getKey(),"promotional message, not a payment",true);archived++;}
+        }
         return archived;
     }
 
