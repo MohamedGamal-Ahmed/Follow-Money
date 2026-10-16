@@ -35,8 +35,21 @@ public class SummaryWidget extends AppWidgetProvider {
     }
 
     @Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids) {
+        draw(context, manager, ids);
+        // Normalization writes to the ledger, so it belongs on the one capture worker, never on the main thread
+        // the widget is updated from. The widget shows what it has, then redraws only if settling moved a row.
+        final Context app = context.getApplicationContext();
+        CaptureQueue.submit(() -> {
+            int moved = 0;
+            try (ExpenseDb db = new ExpenseDb(app)) { moved = MainActivity.normalizeEarlyPaymentsOnWorker(db); }
+            catch (RuntimeException ignored) { }
+            if (moved > 0) draw(app, AppWidgetManager.getInstance(app), ids);
+        });
+    }
+
+    /** Read-only render from whatever the ledger currently holds; it never writes and never normalizes. */
+    static void draw(Context context, AppWidgetManager manager, int[] ids) {
         try (ExpenseDb db = new ExpenseDb(context)) {
-            try { db.normalizeEarlyPayments(); } catch (RuntimeException ignored) { }
             DailySummary snapshot=DailySummary.load(context,db);LocalDate today=snapshot.date;
             boolean hidden=context.getSharedPreferences("widget_settings",Context.MODE_PRIVATE).getBoolean("hide_amounts",false);
             String currency=context.getSharedPreferences("widget_settings",Context.MODE_PRIVATE).getString("currency","EGP");

@@ -7,8 +7,8 @@ import java.nio.file.Path;
  * Source-level guard for F-03: the drawing path must stay write-free while early-payment
  * normalization happens off the UI thread. Reading the source is the only way to assert this
  * without starting the real activity (whose onCreate writes the user's primary ledger).
- * It also guards the follow-up rules: the suggestion cache reloads after a local edit and a
- * delayed snapshot redraw never rebuilds an open editor.
+ * It also guards the follow-up rules: the suggestion cache reloads after a local edit, a delayed
+ * snapshot redraw never rebuilds an open editor, and the installed-widget path never normalizes.
  */
 public final class AuditStructureTest {
     private static int checked;
@@ -88,6 +88,20 @@ public final class AuditStructureTest {
         }
         check(guards == inputs && inputs >= 13,
                 "every manual amount input must re-check an ambiguous dot (guards " + guards + " vs inputs " + inputs + ")");
+        // The widget draws from render() -> refreshWidgets() -> DailyRefreshReceiver.refresh() -> onUpdate, so the
+        // whole installed-widget path must stay write-free and settle on the one capture worker instead.
+        String widget = read("app/src/main/java/com/mohamedgamal/masareef/SummaryWidget.java");
+        check(!widget.contains("normalizeEarlyPayments()"),
+                "no widget path may normalize on the main thread it is updated from");
+        String widgetUpdate = body(widget, "@Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids)");
+        check(widgetUpdate.contains("CaptureQueue.submit("),
+                "the widget must hand its normalization to the one capture worker");
+        check(widgetUpdate.contains("MainActivity.normalizeEarlyPaymentsOnWorker("),
+                "the widget must normalize through the shared worker helper");
+        check(!body(widget, "static void draw(Context context, AppWidgetManager manager, int[] ids)").contains("normalizeEarlyPayments"),
+                "drawing a widget must stay read-only");
+        check(body(widget, "static void refresh(Context context)").contains("onUpdate("),
+                "refresh() must keep rendering every installed widget");
         System.out.println("Source structure checks passed: " + checked);
     }
 
