@@ -1110,7 +1110,7 @@ public final class MainActivity extends Activity {
                     boolean current = year[0] == today.getYear() && m == today.getMonthValue();
                     boolean enabled = withData.contains(String.format(Locale.ROOT, "%04d-%02d", year[0], m)) || current;
                     boolean selected = selectedMonth.getYear() == year[0] && selectedMonth.getMonthValue() == m;
-                    TextView cell = label(MONTH_NAMES[m - 1], 14, selected ? Color.WHITE : enabled ? INK : MUTED, selected);
+                    TextView cell = label(MONTH_NAMES[m - 1], 14, selected ? onPrimary() : enabled ? INK : MUTED, selected);
                     cell.setGravity(Gravity.CENTER);
                     cell.setPadding(0, dp(12), 0, dp(12));
                     cell.setBackground(selected ? rounded(primaryFill(), 14) : outlined(SURFACE, BORDER, 14));
@@ -1570,6 +1570,7 @@ public final class MainActivity extends Activity {
      * Lime-on-forest brand elements (navigation, intro, hero cards) intentionally keep BRAND.
      */
     private int primaryFill() { return dark ? ACCENT : BRAND; }
+    private int onPrimary() { return dark ? 0xff0d1a16 : Color.WHITE; }
 
     private GradientDrawable rounded(int color, int radius) {
         GradientDrawable shape = new GradientDrawable();
@@ -2719,7 +2720,7 @@ public final class MainActivity extends Activity {
         }
 
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
-        TextView edit = label("تعديل العملية", 15, Color.WHITE, true);
+        TextView edit = label("تعديل العملية", 15, onPrimary(), true);
         edit.setGravity(Gravity.CENTER); edit.setBackground(rounded(primaryFill(), 16));
         actions.addView(edit, new LinearLayout.LayoutParams(0, dp(54), 1));
         edit.setOnClickListener(v -> editTransactionDialog(item));
@@ -2845,7 +2846,7 @@ public final class MainActivity extends Activity {
         content.addView(scroller,new LinearLayout.LayoutParams(-1,0,1));
         List<ExpenseDb.Transaction> candidates=db.reimbursementCandidates(fresh,older);
         long[] selection={previousSelection};
-        Button review=new Button(this);review.setText("راجع الربط");review.setTypeface(BOLD);review.setTextColor(Color.WHITE);
+        Button review=new Button(this);review.setText("راجع الربط");review.setTypeface(BOLD);review.setTextColor(onPrimary());
         review.setBackground(rounded(primaryFill(),14));review.setAllCaps(false);review.setMinHeight(dp(50));
         LinearLayout.LayoutParams reviewParams=new LinearLayout.LayoutParams(-1,dp(52));reviewParams.topMargin=dp(10);content.addView(review,reviewParams);
         Runnable[] draw=new Runnable[1];draw[0]=()->{
@@ -2868,7 +2869,7 @@ public final class MainActivity extends Activity {
                 FrameLayout check=new FrameLayout(this);check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
                 View circle=new View(this);circle.setBackground(chosen?rounded(ACCENT,99):outlined(SURFACE,ACCENT,99));
                 check.addView(circle,new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.CENTER));
-                if(chosen){ImageView tick=tintedIcon(R.drawable.ic_check,Color.WHITE);tick.setPadding(dp(4),dp(4),dp(4),dp(4));
+                if(chosen){ImageView tick=tintedIcon(R.drawable.ic_check,onPrimary());tick.setPadding(dp(4),dp(4),dp(4),dp(4));
                     check.addView(tick,new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.CENTER));}
                 row.addView(check,new LinearLayout.LayoutParams(dp(38),dp(48)));
                 row.setContentDescription("اختيار "+UiKit.displayName(tx.merchant)+"، "+money(tx.amountMinor,tx.currency)+"، "+dayLabel(day));
@@ -3224,7 +3225,7 @@ public final class MainActivity extends Activity {
             copy.addView(label("سداد شهري متكرر · " + money(item.amountMinor, item.currency), 11, MUTED, false));
             LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(10));
             suggestion.addView(copy, copyParams);
-            TextView add = label("أضفه", 12, Color.WHITE, true);
+            TextView add = label("أضفه", 12, onPrimary(), true);
             add.setGravity(Gravity.CENTER); add.setPadding(dp(14), 0, dp(14), 0);
             add.setBackground(rounded(primaryFill(), 12));
             add.setOnClickListener(v -> confirmRecurring(item));
@@ -3685,7 +3686,7 @@ public final class MainActivity extends Activity {
             for (int i = 0; i < dayViews.size(); i++) {
                 boolean selected = i + 1 == dueDay[0];
                 TextView day = dayViews.get(i);
-                day.setTextColor(selected ? Color.WHITE : INK);
+                day.setTextColor(selected ? onPrimary() : INK);
                 day.setTypeface(selected ? BOLD : REGULAR);
                 day.setBackground(selected ? rounded(primaryFill(), 14) : outlined(SURFACE, BORDER, 14));
             }
@@ -3735,7 +3736,7 @@ public final class MainActivity extends Activity {
             for (int i = 0; i < reminderViews.size(); i++) {
                 boolean selected = reminderValues[i] == remind[0];
                 TextView option = reminderViews.get(i);
-                option.setTextColor(selected ? Color.WHITE : INK);
+                option.setTextColor(selected ? onPrimary() : INK);
                 option.setTypeface(selected ? BOLD : REGULAR);
                 option.setBackground(selected ? rounded(primaryFill(), 14) : outlined(SURFACE, BORDER, 14));
             }
@@ -3766,7 +3767,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2); hintParams.topMargin = dp(16);
         page.addView(hint, hintParams);
 
-        TextView save = label("احفظ الالتزام", 16, Color.WHITE, true);
+        TextView save = label("احفظ الالتزام", 16, onPrimary(), true);
         save.setGravity(Gravity.CENTER); save.setBackground(rounded(primaryFill(), 18));
         LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(56)); saveParams.topMargin = dp(20);
         page.addView(save, saveParams);
@@ -4055,7 +4056,7 @@ public final class MainActivity extends Activity {
             Button confirm=new Button(this);confirm.setTypeface(day.complete?REGULAR:BOLD);
             confirm.setText(day.complete?"إلغاء تأكيد اكتمال اليوم":"تأكيد اكتمال تسجيل اليوم");
             confirm.setEnabled(day.complete||!day.needsReview);
-            if(!day.complete){confirm.setBackground(rounded(ACCENT,16));confirm.setTextColor(Color.WHITE);}
+            if(!day.complete){confirm.setBackground(rounded(ACCENT,16));confirm.setTextColor(onPrimary());}
             LinearLayout.LayoutParams actionParams=new LinearLayout.LayoutParams(-1,-2);actionParams.topMargin=dp(10);parent.addView(confirm,actionParams);
             confirm.setOnClickListener(v->{
                 if(day.complete){DailyPointsStore.revoke(this,code,day.date);dialog.dismiss();render();pointsDialog(code,all);return;}
@@ -4319,7 +4320,7 @@ public final class MainActivity extends Activity {
     }
 
     private TextView addChip(LinearLayout row, String text, boolean selected, Runnable action) {
-        TextView chip = label(text, 13, selected ? Color.WHITE : INK, selected);
+        TextView chip = label(text, 13, selected ? onPrimary() : INK, selected);
         chip.setGravity(Gravity.CENTER);
         chip.setPadding(dp(14), 0, dp(14), 0);
         chip.setBackground(selected ? rounded(primaryFill(), 99) : outlined(SURFACE, BORDER, 99));

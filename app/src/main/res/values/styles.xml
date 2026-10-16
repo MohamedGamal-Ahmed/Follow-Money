@@ -45,5 +45,7 @@
     </style>
     <style name="AppDialogPrimaryButton.Dark">
         <item name="android:background">@drawable/dialog_primary_button_dark</item>
+        <!-- White on the accent is 2.4:1; dark ink is 7.6:1. -->
+        <item name="android:textColor">#0D1A16</item>
     </style>
 </resources>
