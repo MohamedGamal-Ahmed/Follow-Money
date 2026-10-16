@@ -48,6 +48,15 @@ public final class PhaseOneLogicTest {
         equal("espressolab",BrandCatalog.merchant("ESPRESSO LAB-CCENTER ALMA"));
         equal("espressolab",BrandCatalog.merchant("Espressolab Egypt"));equal(null,BrandCatalog.merchant("ES"));
         equal("cleopatra",BrandCatalog.merchant("CLEOPATRA HOSPITAL"));
+        // Uber Eats is its own brand; the "Uber" prefix must never win the match.
+        equal("ubereats",BrandCatalog.merchant("Uber Eats"));equal("ubereats",BrandCatalog.merchant("UBER EATS CAIRO"));
+        equal("uber",BrandCatalog.merchant("Uber"));equal("uber",BrandCatalog.merchant("Uber Cairo"));
+        // A card network is a payment method, never the beneficiary merchant of a longer descriptor.
+        equal(null,BrandCatalog.merchant("VISA PURCHASE CAIRO"));equal(null,BrandCatalog.merchant("MasterCard fee"));
+        equal("visa",BrandCatalog.merchant("Visa"));equal("mastercard",BrandCatalog.merchant("MasterCard"));
+        // Claude is billed as the product or as the company; both show the Claude mark.
+        equal("claude",BrandCatalog.merchant("CLAUDE.AI SUBSCRIPTION"));equal("claude",BrandCatalog.merchant("ANTHROPIC"));
+        equal(null,BrandCatalog.merchant("CLAUDETTE BOUTIQUE"));equal(null,BrandCatalog.bank("Claude"));
         long when=today.atTime(12,0).atZone(cairo).toInstant().toEpochMilli();
         SmsPreview preview=SmsPreview.parse("BANK","Card purchase at CARREFOUR EGP 250.00. Available balance EGP 300",when);
         equal("expense",preview.kind);equal(25000L,preview.amountMinor);equal(true,preview.balanceIncluded);equal(false,preview.selected);

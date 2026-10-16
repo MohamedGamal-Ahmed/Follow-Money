@@ -340,7 +340,7 @@ public final class MainActivity extends Activity {
                 String stamp=sourceDate(balance.occurredAt);
                 ExpenseDb.PaymentSource origin=db.paymentSource(balance.anchorSourceId);
                 card.addView(label("رصيد البداية: "+stamp+" · "+balance.source+
-                        (origin==null?"":" · "+origin.kind+" •"+origin.last4),12,MUTED,false));
+                        (origin==null?"":" · "+origin.kind+UiKit.last4Suffix(origin.last4)),12,MUTED,false));
                 if(balance.estimated)card.addView(label(balance.movementCount+" حركات بعده · حتى "+sourceDate(balance.updatedAt),12,MUTED,false));
             }
             if(!knownBalance)card.addView(label("الرصيد غير متاح · أضف رصيد بداية",16,MUTED,true));
@@ -395,7 +395,7 @@ public final class MainActivity extends Activity {
     }
 
     private void sourceProfileDialog(ExpenseDb.PaymentSource source) {
-        LinearLayout content=form();content.addView(label(source.name+" · "+source.kind+" •"+source.last4,14,MUTED,false));
+        LinearLayout content=form();content.addView(label(source.name+" · "+source.kind+UiKit.last4Suffix(source.last4),14,MUTED,false));
         EditText name=input("اسم واضح ليك، مثل حساب المصروفات",content);name.setText(source.displayName==null?"":source.displayName);
         android.widget.CheckBox reviewed=new android.widget.CheckBox(this);reviewed.setText("راجعت الوسيلة وأعرف أني بستخدمها");
         reviewed.setTextColor(INK);reviewed.setChecked(source.reviewed);content.addView(reviewed);
@@ -1113,7 +1113,7 @@ public final class MainActivity extends Activity {
                     TextView cell = label(MONTH_NAMES[m - 1], 14, selected ? Color.WHITE : enabled ? INK : MUTED, selected);
                     cell.setGravity(Gravity.CENTER);
                     cell.setPadding(0, dp(12), 0, dp(12));
-                    cell.setBackground(selected ? rounded(dark ? ACCENT : BRAND, 14) : outlined(SURFACE, BORDER, 14));
+                    cell.setBackground(selected ? rounded(primaryFill(), 14) : outlined(SURFACE, BORDER, 14));
                     cell.setAlpha(enabled ? 1f : 0.35f);
                     cell.setEnabled(enabled);
                     cell.setContentDescription(MONTH_NAMES[m - 1] + " " + year[0] + (enabled ? "" : "، مفيش عمليات"));
@@ -1564,6 +1564,13 @@ public final class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_REQUEST);
     }
 
+    /**
+     * Fill for a selected choice or a filled call-to-action with white text. The forest brand color almost
+     * disappears on the dark surface, so dark mode uses the accent, like the dialog primary button.
+     * Lime-on-forest brand elements (navigation, intro, hero cards) intentionally keep BRAND.
+     */
+    private int primaryFill() { return dark ? ACCENT : BRAND; }
+
     private GradientDrawable rounded(int color, int radius) {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(color); shape.setCornerRadius(dp(radius));
@@ -1598,8 +1605,7 @@ public final class MainActivity extends Activity {
         String brand=BrandCatalog.bank(source.name);
         if(brand!=null) {
             int res=brandLogo(brand);
-            if(res!=0){ImageView icon=new ImageView(this);icon.setImageResource(res);icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                icon.setBackground(rounded("alexbank".equals(brand)?BRAND:Color.WHITE,size/2));icon.setPadding(dp(4),dp(4),dp(4),dp(4));icon.setContentDescription(source.name);return icon;}
+            if(res!=0)return UiKit.logoBadge(this,res,brand,source.name,size,dark?0:BORDER);
         }
         return identityBadge(source.name, source.kind, size);
     }
@@ -1658,7 +1664,7 @@ public final class MainActivity extends Activity {
             if (width <= 0) return;
             float ratio = maximum <= 0 ? 0 : Math.min(1f, (float) value / maximum);
             GradientDrawable fill = rounded(value > maximum ? CORAL : color, 5);
-            android.graphics.drawable.ClipDrawable clip = new android.graphics.drawable.ClipDrawable(fill, Gravity.END, android.graphics.drawable.ClipDrawable.HORIZONTAL);
+            android.graphics.drawable.ClipDrawable clip = new android.graphics.drawable.ClipDrawable(fill, Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL);
             android.graphics.drawable.LayerDrawable layers = new android.graphics.drawable.LayerDrawable(
                     new android.graphics.drawable.Drawable[]{rounded(BORDER, 5), clip});
             track.setBackground(layers); clip.setLevel((int) (ratio * 10000));
@@ -2714,7 +2720,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
         TextView edit = label("تعديل العملية", 15, Color.WHITE, true);
-        edit.setGravity(Gravity.CENTER); edit.setBackground(rounded(dark ? ACCENT : BRAND, 16));
+        edit.setGravity(Gravity.CENTER); edit.setBackground(rounded(primaryFill(), 16));
         actions.addView(edit, new LinearLayout.LayoutParams(0, dp(54), 1));
         edit.setOnClickListener(v -> editTransactionDialog(item));
         ImageView delete = tintedIcon(R.drawable.ic_trash, CORAL);
@@ -2840,7 +2846,7 @@ public final class MainActivity extends Activity {
         List<ExpenseDb.Transaction> candidates=db.reimbursementCandidates(fresh,older);
         long[] selection={previousSelection};
         Button review=new Button(this);review.setText("راجع الربط");review.setTypeface(BOLD);review.setTextColor(Color.WHITE);
-        review.setBackground(rounded(BRAND,14));review.setAllCaps(false);review.setMinHeight(dp(50));
+        review.setBackground(rounded(primaryFill(),14));review.setAllCaps(false);review.setMinHeight(dp(50));
         LinearLayout.LayoutParams reviewParams=new LinearLayout.LayoutParams(-1,dp(52));reviewParams.topMargin=dp(10);content.addView(review,reviewParams);
         Runnable[] draw=new Runnable[1];draw[0]=()->{
             list.removeAllViews();String text=search.getText().toString().trim().toLowerCase(Locale.ROOT);int found=0;
@@ -3220,7 +3226,7 @@ public final class MainActivity extends Activity {
             suggestion.addView(copy, copyParams);
             TextView add = label("أضفه", 12, Color.WHITE, true);
             add.setGravity(Gravity.CENTER); add.setPadding(dp(14), 0, dp(14), 0);
-            add.setBackground(rounded(dark ? ACCENT : BRAND, 12));
+            add.setBackground(rounded(primaryFill(), 12));
             add.setOnClickListener(v -> confirmRecurring(item));
             suggestion.addView(add, new LinearLayout.LayoutParams(-2, dp(36)));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(12);
@@ -3679,9 +3685,9 @@ public final class MainActivity extends Activity {
             for (int i = 0; i < dayViews.size(); i++) {
                 boolean selected = i + 1 == dueDay[0];
                 TextView day = dayViews.get(i);
-                day.setTextColor(selected ? LIME : INK);
+                day.setTextColor(selected ? Color.WHITE : INK);
                 day.setTypeface(selected ? BOLD : REGULAR);
-                day.setBackground(selected ? rounded(BRAND, 14) : outlined(SURFACE, BORDER, 14));
+                day.setBackground(selected ? rounded(primaryFill(), 14) : outlined(SURFACE, BORDER, 14));
             }
         };
         for (int d = 1; d <= 31; d++) {
@@ -3731,7 +3737,7 @@ public final class MainActivity extends Activity {
                 TextView option = reminderViews.get(i);
                 option.setTextColor(selected ? Color.WHITE : INK);
                 option.setTypeface(selected ? BOLD : REGULAR);
-                option.setBackground(selected ? rounded(dark ? ACCENT : BRAND, 14) : outlined(SURFACE, BORDER, 14));
+                option.setBackground(selected ? rounded(primaryFill(), 14) : outlined(SURFACE, BORDER, 14));
             }
         };
         for (int i = 0; i < reminderValues.length; i++) {
@@ -3761,7 +3767,7 @@ public final class MainActivity extends Activity {
         page.addView(hint, hintParams);
 
         TextView save = label("احفظ الالتزام", 16, Color.WHITE, true);
-        save.setGravity(Gravity.CENTER); save.setBackground(rounded(dark ? ACCENT : BRAND, 18));
+        save.setGravity(Gravity.CENTER); save.setBackground(rounded(primaryFill(), 18));
         LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(56)); saveParams.topMargin = dp(20);
         page.addView(save, saveParams);
 
@@ -4316,7 +4322,7 @@ public final class MainActivity extends Activity {
         TextView chip = label(text, 13, selected ? Color.WHITE : INK, selected);
         chip.setGravity(Gravity.CENTER);
         chip.setPadding(dp(14), 0, dp(14), 0);
-        chip.setBackground(selected ? rounded(dark ? ACCENT : BRAND, 99) : outlined(SURFACE, BORDER, 99));
+        chip.setBackground(selected ? rounded(primaryFill(), 99) : outlined(SURFACE, BORDER, 99));
         chip.setOnClickListener(v -> action.run());
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(38)); params.setMarginEnd(dp(8));
         row.addView(chip, params);
@@ -4337,8 +4343,11 @@ public final class MainActivity extends Activity {
             case "أقساط": background = 0xffe3ebfb; ink = 0xff1f3a93; icon = R.drawable.ic_cat_installment; break;
             case "رعاية صحية":
             case "صحة": background = 0xfffde8e8; ink = 0xffa82c2c; icon = R.drawable.ic_cat_health; break;
+            case "رسوم تحويل":
             case "تحويلات": background = 0xffeef0ed; ink = 0xff4a5551; icon = R.drawable.ic_cat_transfer; break;
             case "سحب نقدي": background = 0xffedeff9; ink = 0xff3b4ba8; icon = R.drawable.ic_cat_atm; break;
+            case "سكن وإيجار": background = 0xffe8eef1; ink = 0xff3d5a66; icon = R.drawable.ic_cat_home; break;
+            case "عائلة ومساعدات": background = 0xfff4ecf4; ink = 0xff7a3d6b; icon = R.drawable.ic_cat_family; break;
             case "دخل": background = 0xffe7f5ec; ink = 0xff106b47; icon = R.drawable.ic_cat_income; break;
             default: background = 0xffeef0ed; ink = 0xff4a5551; icon = R.drawable.ic_cat_other;
         }
@@ -4473,6 +4482,8 @@ public final class MainActivity extends Activity {
             case "mcdonalds" -> R.drawable.brand_mcdonalds;
             case "kfc" -> R.drawable.brand_kfc;
             case "uber" -> R.drawable.brand_uber;
+            case "ubereats" -> R.drawable.brand_ubereats;
+            case "claude" -> R.drawable.brand_claude;
             case "netflix" -> R.drawable.brand_netflix;
             case "spotify" -> R.drawable.brand_spotify;
             case "ikea" -> R.drawable.brand_ikea;
@@ -4499,16 +4510,7 @@ public final class MainActivity extends Activity {
     private View merchantBadge(String name, String category, int size) {
         String id=BrandCatalog.merchant(name);
         int logo=brandLogo(id);
-        if (logo != 0) {
-            ImageView icon = new ImageView(this);
-            icon.setImageResource(logo);
-            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            icon.setBackground(outlined(Color.WHITE, dark ? Color.WHITE : BORDER, size / 2));
-            int inset = dp(Math.max(6, size / 6));
-            icon.setPadding(inset, inset, inset, inset);
-            icon.setContentDescription(name);
-            return icon;
-        }
+        if (logo != 0) return UiKit.logoBadge(this, logo, id, name, size, dark ? 0 : BORDER);
         if ("سحب نقدي".equals(category) || "تحويلات".equals(category) ||
                 ("دخل".equals(category) && UiKit.provider(name) == null)) {
             int[] style = categoryStyle(category);

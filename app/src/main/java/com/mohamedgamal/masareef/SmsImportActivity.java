@@ -43,10 +43,11 @@ public final class SmsImportActivity extends Activity {
     private static final int BRAND=0xff0b3d2e;
     private static final int LIME=0xffc8f25a;
     private int accent=BRAND,border=0xffe3e6df;
+    private boolean dark;
     private int INK=0xff0d1f1a,MUTED=0xff5e6b66,background=0xfff4f5f1,surface=0xffffffff;
 
     @Override public void onCreate(Bundle state) {
-        boolean dark=getSharedPreferences("MainActivity",MODE_PRIVATE).getBoolean("dark_mode",false);
+        dark=getSharedPreferences("MainActivity",MODE_PRIVATE).getBoolean("dark_mode",false);
         if(dark)setTheme(R.style.AppTheme_Dark);
         super.onCreate(state);
         if(dark) {
@@ -141,13 +142,18 @@ public final class SmsImportActivity extends Activity {
         page.addView(button("آخر 30 يوم",()->scan(LocalDate.now().minusDays(29))));
         page.addView(button("آخر 90 يوم",()->scan(LocalDate.now().minusDays(89))));
         page.addView(button("كل الرسائل",()->scan(null)));
-        EditText custom=new EditText(this);custom.setHint("تاريخ البداية YYYY-MM-DD");custom.setSingleLine(true);custom.setTypeface(font);page.addView(custom);
-        page.addView(button("فحص من تاريخ محدد",()->{
-            try {LocalDate d=LocalDate.parse(ExpenseParser.normalizeDigits(custom.getText().toString().trim()));
-                if(d.isAfter(LocalDate.now()))throw new IllegalArgumentException();scan(d);
-            } catch(RuntimeException e){custom.setError("أدخل تاريخًا صحيحًا لا يتجاوز اليوم");}
-        }));
+        // A calendar instead of a typed YYYY-MM-DD field: the date can never be malformed or in the future.
+        page.addView(button("فحص من تاريخ تختاره",this::pickStartDate));
         page.addView(button("لاحقًا",this::finish));
+    }
+    private void pickStartDate() {
+        LocalDate today=LocalDate.now(),initial=today.minusDays(29);
+        android.app.DatePickerDialog picker=new android.app.DatePickerDialog(this,
+                (view,year,month,day)->scan(LocalDate.of(year,month+1,day)),
+                initial.getYear(),initial.getMonthValue()-1,initial.getDayOfMonth());
+        picker.setTitle("بداية فترة الفحص");
+        picker.getDatePicker().setMaxDate(System.currentTimeMillis());
+        picker.show();
     }
     private void scan(LocalDate date) {
         if(checkSelfPermission(Manifest.permission.READ_SMS)!=PackageManager.PERMISSION_GRANTED) {
@@ -172,12 +178,7 @@ public final class SmsImportActivity extends Activity {
             // A bank sender identifies the source, never an unknown purchase merchant.
             String brand=r.isTransaction()?BrandCatalog.merchant(r.title):BrandCatalog.bank(r.sender);
             int logo=MainActivity.brandLogo(brand);
-            if(logo!=0) {
-                ImageView badge=new ImageView(this);badge.setImageResource(logo);
-                badge.setScaleType(ImageView.ScaleType.FIT_CENTER);badge.setContentDescription(r.title);
-                GradientDrawable white=new GradientDrawable();white.setColor(0xffffffff);white.setCornerRadius(dp(22));badge.setBackground(white);
-                badge.setPadding(dp(5),dp(5),dp(5),dp(5));heading.addView(badge,new LinearLayout.LayoutParams(dp(44),dp(44)));
-            }
+            if(logo!=0)heading.addView(UiKit.logoBadge(this,logo,brand,r.isTransaction()?r.title:r.sender,44,dark?0:border),new LinearLayout.LayoutParams(dp(44),dp(44)));
             box.addView(heading);
             boolean dateOnly="date_only".equals(r.timePrecision);
             String detail=r.category+"\n"+r.sender+" · "+Instant.ofEpochMilli(r.eventAt).atZone(ZoneId.systemDefault())
@@ -187,11 +188,19 @@ public final class SmsImportActivity extends Activity {
             if(r.captureStatus==1)detail+="\nمسجلة سابقًا · اختيارها قد يحدث مصدرها؛ التصحيح اليدوي محفوظ";
             if(r.captureStatus==2)detail+="\nمستبعدة سابقًا · لن تُعاد إضافتها";
             TextView info=text(detail,12);info.setTextColor(MUTED);box.addView(info);
-            Button original=button("عرض الرسالة",()->new AlertDialog.Builder(this).setTitle("المصدر · "+r.sender).setMessage(r.body).setPositiveButton("إغلاق",null).show());
+            Button original=button("عرض الرسالة",()->showOriginal(r));
             box.addView(original);
         }
         if(session.items.isEmpty())rows.addView(text("لم نجد رسائل مالية قابلة للمراجعة في هذه الفترة.",16));
         updateSelection();
+    }
+    /** Same reading view as the transaction details: scrollable, selectable, direction from the message itself. */
+    private void showOriginal(SmsPreview r) {
+        TextView body=text(r.body==null||r.body.isEmpty()?"النص الأصلي غير متاح":r.body,14);
+        body.setTextIsSelectable(true);body.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG);
+        body.setPadding(dp(24),dp(8),dp(24),dp(8));
+        ScrollView scroll=new ScrollView(this);scroll.addView(body);
+        new AlertDialog.Builder(this).setTitle("المصدر · "+r.sender).setView(scroll).setPositiveButton("إغلاق",null).show();
     }
     private void updateSelection() {
         int n=0,tx=0;for(SmsPreview r:session.items)if(r.selected){n++;if(r.isTransaction())tx++;}
