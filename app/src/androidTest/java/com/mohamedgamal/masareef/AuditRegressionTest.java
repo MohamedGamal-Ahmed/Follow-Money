@@ -236,6 +236,28 @@ final class AuditRegressionTest {
         eq(1,db.normalizeEarlyPayments());
         ok(!MainActivity.dueWord(db.recurringById(id).nextDue).contains("متأخر"));
     }
+    public void testCaptureQueueRunsWorkInOrderOnOneBackgroundThread(){
+        final java.util.List<String> threads=java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
+        final java.util.List<Integer> order=java.util.Collections.synchronizedList(new java.util.ArrayList<Integer>());
+        final java.util.concurrent.CountDownLatch done=new java.util.concurrent.CountDownLatch(3);
+        for(int index=1;index<=3;index++){
+            final int value=index;
+            CaptureQueue.submit(()->{threads.add(Thread.currentThread().getName());order.add(value);done.countDown();});
+        }
+        try{ok(done.await(10,java.util.concurrent.TimeUnit.SECONDS));}catch(InterruptedException interrupted){throw new AssertionError(interrupted);}
+        eq(3,order.size());
+        ok(order.get(0)==1&&order.get(1)==2&&order.get(2)==3);
+        for(String name:threads) ok("capture-worker".equals(name));
+    }
+    public void testSmsCaptureNowWritesOnceAndDeduplicates(){
+        SmsParts parts=new SmsParts();
+        parts.add("BANK",at(LocalDate.now(),10),"Card purchase EGP 100 at QA SHOP");
+        SmsReceiver.captureNow(context,parts);
+        eq(1,db.transactionCount());
+        eq(10000,db.transactions().get(0).amountMinor);
+        SmsReceiver.captureNow(context,parts);
+        eq(1,db.transactionCount());
+    }
     private int archivePromotions(){
         try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions");method.setAccessible(true);return (Integer)method.invoke(db);}
         catch(Exception error){throw new RuntimeException(error);}

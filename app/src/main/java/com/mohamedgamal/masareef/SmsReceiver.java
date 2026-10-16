@@ -26,11 +26,22 @@ public final class SmsReceiver extends BroadcastReceiver {
             long when = message.getTimestampMillis();
             parts.add(sender,when,message.getDisplayMessageBody());
         }
-        boolean changed = false;
+        // Writing the ledger can be slow; keep it off the main thread and hold the broadcast open until it is done.
+        final PendingResult pending = goAsync();
+        final Context app = context.getApplicationContext();
+        CaptureQueue.submit(() -> {
+            try { captureNow(app, parts); }
+            catch (RuntimeException error) {
+                android.util.Log.e("FollowMoney", "SMS skipped: " + error.getClass().getSimpleName());
+            } finally { pending.finish(); }
+        });
+    }
+
+    /** Writes one broadcast's messages; runs on the capture worker, never on the main thread. */
+    static void captureNow(Context context, SmsParts parts) {
+        boolean changed;
         try (ExpenseDb db = new ExpenseDb(context)) {
             changed = handle(db, context, parts);
-        } catch (RuntimeException error) {
-            android.util.Log.e("FollowMoney", "SMS skipped: " + error.getClass().getSimpleName());
         }
         if (changed) notifyDataChanged(context);
         else DailyRefreshReceiver.refresh(context);
