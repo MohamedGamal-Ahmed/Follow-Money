@@ -26,7 +26,20 @@ allprojects { p ->
     if ($LASTEXITCODE -ne 0) { throw 'QA app install failed' }
     & $adb -s $Device install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
     if ($LASTEXITCODE -ne 0) { throw 'QA test install failed' }
-    $modes = if ($UiOnly) { @('menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large') } else { @('base','phase','checks','regressions','card','menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large','journey') }
+    foreach($permission in @('android.permission.READ_SMS','android.permission.RECEIVE_SMS','android.permission.POST_NOTIFICATIONS')){
+        & $adb -s $Device shell pm grant $appId $permission
+        if($LASTEXITCODE -ne 0){throw "QA permission failed: $permission"}
+    }
+    # Disable this disposable receiver while seeding: no queued live write may race instrumentation fixtures.
+    $receiver="$appId/com.mohamedgamal.masareef.SmsReceiver"
+    & $adb -s $Device shell run-as $appId pm disable $receiver
+    if($LASTEXITCODE -ne 0){throw 'QA receiver isolation failed'}
+    try{
+        & $adb -s $Device emu sms send QAIMPORT 'Card purchase at QA IMPORT EGP 15.00 using card **8877. Available balance EGP 985.00'
+        if($LASTEXITCODE -ne 0){throw 'Synthetic inbox fixture failed'}
+        Start-Sleep -Seconds 2
+    }finally{& $adb -s $Device shell run-as $appId pm enable $receiver}
+    $modes = if ($UiOnly) { @('menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large','sms_ui_light','sms_ui_dark','sms_ui_large') } else { @('base','phase','checks','regressions','card','menus_light','menus_dark','menus_large','card_ui_light','card_ui_dark','card_ui_large','sms_ui_light','sms_ui_dark','sms_ui_large','journey') }
     foreach ($mode in $modes) {
         $arguments = @()
         if ($mode -eq 'phase') { $arguments = @('-e','phase_one','true') }
@@ -35,6 +48,6 @@ allprojects { p ->
         $result = & $adb -s $Device shell am instrument -w @arguments "$appId.test/com.mohamedgamal.masareef.ReconciliationTest"
         $result
         $report = $result -join "`n"
-        if ($LASTEXITCODE -ne 0 -or $report -notmatch '(Passed: [1-9][0-9]*|(?:Card journey UI|Journey UI|Selection UI) checks passed: [1-9][0-9]*); failed: 0' -or $report -match ': FAILED|INSTRUMENTATION_FAILED|Process crashed') { throw "QA failed: $mode" }
+        if ($LASTEXITCODE -ne 0 -or $report -notmatch '(Passed: [1-9][0-9]*|(?:Card journey UI|Journey UI|Selection UI|Sms import UI) checks passed: [1-9][0-9]*); failed: 0' -or $report -match ': FAILED|INSTRUMENTATION_FAILED|Process crashed') { throw "QA failed: $mode" }
     }
 } finally { Pop-Location }

@@ -27,12 +27,29 @@ final class CaptureEvents {
         }
     }
     static final class Event {
-        final long id,when;final Long archiveId,originalId,amount;final String status,currency,title,sender,source,body;
-        Event(Cursor c){id=c.getLong(0);status=c.getString(1);amount=c.isNull(2)?null:c.getLong(2);currency=c.getString(3);title=c.getString(4);when=c.getLong(5);archiveId=c.isNull(6)?null:c.getLong(6);originalId=c.isNull(7)?null:c.getLong(7);sender=c.getString(8);source=c.getString(9);body=c.getString(10);}
+        final long id,when;final Long archiveId,originalId,amount;final String status,currency,title,sender,source,body;final ExpenseDb.Transaction original;
+        Event(Cursor c){id=c.getLong(0);status=c.getString(1);amount=c.isNull(2)?null:c.getLong(2);currency=c.getString(3);title=c.getString(4);when=c.getLong(5);archiveId=c.isNull(6)?null:c.getLong(6);originalId=c.isNull(7)?null:c.getLong(7);sender=c.getString(8);source=c.getString(9);body=c.getString(10);original=c.getColumnCount()>11?archivedTransaction(c.getString(11)):null;}
         boolean cancelled(){return "cancelled".equals(status);}
+        long displayWhen(){return original==null?when:original.when;}
+        private static ExpenseDb.Transaction archivedTransaction(String payload){
+            if(payload==null)return null;
+            try{
+                JSONObject p=new JSONObject(payload);
+                return new ExpenseDb.Transaction(p.getLong("id"),p.getLong("occurred_at"),p.getLong("amount_minor"),p.getString("currency"),p.getString("merchant"),p.getString("category"),p.optString("source"),nullableId(p,"payment_source_id"),p.optString("card_last4"),p.getString("kind"),nullableId(p,"destination_source_id"),p.optString("note"),false,p.optString("time_precision"));
+            }catch(org.json.JSONException invalid){return null;}
+        }
+        private static Long nullableId(JSONObject p,String key)throws org.json.JSONException{return p.isNull(key)||!p.has(key)?null:p.getLong(key);}
     }
     private static final String COLUMNS="id,status,amount_minor,currency,title,received_at,archive_id,original_transaction_id,sender,source,encrypted_body";
-    Event byId(long id){try(Cursor c=db.getReadableDatabase().rawQuery("SELECT "+COLUMNS+" FROM capture_events WHERE id=?",new String[]{Long.toString(id)})){return c.moveToFirst()?new Event(c):null;}}
+    private static final String HISTORY="SELECT e."+COLUMNS.replace(",",",e.")+",a.payload FROM capture_events e LEFT JOIN transaction_archive a ON a.id=e.archive_id";
+    Event byId(long id){try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" WHERE e.id=?",new String[]{Long.toString(id)})){return c.moveToFirst()?new Event(c):null;}}
+    /** Filter on the archived operation date, including cancellations received in a later month. */
+    List<Event> timelineBetween(long start,long end){
+        List<Event> rows=new ArrayList<>();
+        try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" ORDER BY e.received_at DESC,e.id DESC",null)){
+            while(c.moveToNext()){Event event=new Event(c);if(event.displayWhen()>=start&&event.displayWhen()<end)rows.add(event);}
+        }return rows;
+    }
     List<Event> between(long start,long end){List<Event> rows=new ArrayList<>();try(Cursor c=db.getReadableDatabase().rawQuery("SELECT "+COLUMNS+" FROM capture_events WHERE received_at>=? AND received_at<? ORDER BY received_at DESC,id DESC LIMIT 100",new String[]{Long.toString(start),Long.toString(end)})){while(c.moveToNext())rows.add(new Event(c));}return rows;}
     private Long source(String sender,String last4){
         String key=SourceIdentity.key(sender,last4);if(key==null)return null;Long found=null;

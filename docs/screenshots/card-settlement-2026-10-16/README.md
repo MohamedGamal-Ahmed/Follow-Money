@@ -27,3 +27,17 @@ Actual screenshots from `SelectionUiTest`, using the same synthetic QA fixtures 
 | Original bank messages | [Image](messages-light.png) | [Image](messages-dark.png) |
 
 Font scale 1.3: [category selection](category-dark-large.png), [original bank messages](messages-dark-large.png). Message text stays selectable and unchanged; close/actions remain accessible. All accounts, handles and message content shown here are synthetic.
+
+## Inline cancellations and period-first SMS import
+
+Synthetic emulator captures after the follow-up requested during review:
+
+| State | Capture |
+| --- | --- |
+| Canceled operation among the day's rows, × badge, struck-through amount, excluded from the day total | [Light](cancellation-inline-light.png), [dark](cancellation-inline-dark.png) |
+| Choosing a period starts import; manual preview is optional | [Dark](import-period-dark.png) |
+| Result after the batch, with read-only message details and a fixed destination button | [Light](import-result-light.png) |
+| Optional selection of 85 synthetic messages; fixed actions remain visible with font scale 1.3 | [Dark, large font](import-review-dark-large.png) |
+| Selectable original bank message on the app surface and typography | [Dark, large font](import-message-dark-large.png) |
+
+`SmsImportUiTest` checks actual inbox import without a selection step, repeat import idempotence, calendar dismissal without import, fixed actions before/after scrolling, selection across pages, and the stop-scan/save race. The inbox contains invented emulator messages only. The dark primary action uses dark ink on the accent fill.

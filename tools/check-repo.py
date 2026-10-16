@@ -36,7 +36,9 @@ allowed_docs.update("docs/screenshots/card-settlement-2026-10-16/"+name for name
     "canceled-light.png", "canceled-dark.png", "review-dark-large.png",
     "category-light.png", "category-dark.png", "actions-light.png", "actions-dark.png",
     "messages-light.png", "messages-dark.png", "multiselect-light.png", "multiselect-dark.png",
-    "category-dark-large.png", "messages-dark-large.png"))
+    "category-dark-large.png", "messages-dark-large.png",
+    "cancellation-inline-light.png", "cancellation-inline-dark.png", "import-period-dark.png",
+    "import-result-light.png", "import-review-dark-large.png", "import-message-dark-large.png"))
 private_paths = re.compile(r"(^|/)(\.tmp|\.gradle|\.idea|build|captures|__pycache__)(/|$)|(^|/)local\.properties$|\.(apk|aab|jks|keystore|p12|pfx|dpapi\.xml|db|sqlite\w*|tar|log|hprof)(-|$)|(^|/)\.env($|\.)", re.I)
 credential = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b|\bAIza[A-Za-z0-9_-]{35}\b")
 for name in files:

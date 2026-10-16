@@ -59,6 +59,24 @@ final class CardCancellationTest {
         eq(22000,scalar("SELECT SUM(amount_minor) FROM transactions WHERE kind='expense'"));eq(1,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(db.lastCaptured()==null);
         ok(!db.addSms("BANK",debit(),time));ok(!db.addSms("BANK",cancel(),time+3000));ok(!db.addSms("BANK",cancel(),time+4000));eq(1,scalar("SELECT COUNT(*) FROM capture_events"));ok(!db.addNotification("qa.bank.app","BANK",cancel(),time+5000));eq(1,scalar("SELECT COUNT(*) FROM capture_events"));
     }
+    public void testCancelledTimelineUsesOriginalMonthAndSource(){
+        long boundary=java.time.LocalDate.now().withDayOfMonth(1).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        ok(db.addSms("BANK",debit(),boundary-1000));ExpenseDb.Transaction original=db.lastCaptured();
+        ok(db.addSms("BANK",cancel(),boundary+1000));CaptureEvents.Event cancelled=event();
+        ok(cancelled.original!=null);eq(original.when,cancelled.displayWhen());eq(original.paymentSourceId,cancelled.original.paymentSourceId);
+        eq(1,new CaptureEvents(db).timelineBetween(boundary-86400000,boundary).size());
+        eq(0,new CaptureEvents(db).timelineBetween(boundary,boundary+86400000).size());eq(0,db.transactionCount());
+    }
+    public void testAutomaticImportIncludesCancellationAndSkipsDeclinesAndExcludedRows(){
+        SmsPreview debit=SmsPreview.parse("BANK",debit(),time);
+        SmsPreview cancellation=SmsPreview.parse("BANK",cancel(),time+3000);
+        SmsPreview decline=SmsPreview.parse("BANK","تم رفض عملية خصم 15 جنيه من بطاقة رقم 2222",time+4000);
+        SmsPreview excluded=SmsPreview.parse("BANK","Card purchase at QA EXCLUDED EGP 99",time);excluded.captureStatus=2;
+        java.util.List<SmsPreview> rows=java.util.Arrays.asList(debit,cancellation,decline,excluded);SmsPreview.selectForImport(rows);
+        java.util.List<SmsPreview> selected=new java.util.ArrayList<>();for(SmsPreview row:rows)if(row.selected)selected.add(row);
+        eq(2,selected.size());eq(0,SmsImportActivity.applySelected(db,selected));eq(0,db.transactionCount());ok(event().cancelled());eq(2,new CaptureEvents(db).evidence(event()).size());
+        eq(0,SmsImportActivity.applySelected(db,selected));eq(1,scalar("SELECT COUNT(*) FROM capture_events"));
+    }
     public void testOutOfOrderCancellationSettlesWhenEarlierDebitArrives(){
         ok(db.addSms("BANK",cancel(),time+3000));ok(!event().cancelled());ok(db.addSms("BANK",debit(),time));ok(event().cancelled());eq(0,db.transactionCount());eq(2,new CaptureEvents(db).evidence(event()).size());ok(db.lastCaptured()==null);
     }

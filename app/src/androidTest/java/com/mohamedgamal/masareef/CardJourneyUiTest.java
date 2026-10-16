@@ -93,7 +93,10 @@ final class CardJourneyUiTest {
             main(()->invoke("statementFeeDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(purchase)));ok(has("رسوم كشف البطاقة"));ok(has("قيمة الرسوم"));screen("05-fee");click("إلغاء");
             ok(db.addSms("BANK","تم تحويل مبلغ 227 جنيه من حساب رقم 3333 إلى بطاقة ائتمان رقم 4444",t+1000));
             ok(db.addSms("BANK","تم الغاء التحويل بمبلغ 227 جنيه من حساب رقم 3333",t+4000));CaptureEvents.Event event=db.lastCaptureEvent();ok(event!=null&&event.cancelled());
-            main(()->{set("selectedTab",6);invoke("resetTransactionFilters",new Class<?>[0]);invoke("render",new Class<?>[0]);((ScrollView)get("pageScroll")).fullScroll(android.view.View.FOCUS_DOWN);});ok(has("سجل الإلغاء"));ok(has("ملغاة"));screen("06-history");
+            main(()->{set("selectedTab",6);invoke("resetTransactionFilters",new Class<?>[0]);invoke("render",new Class<?>[0]);((ScrollView)get("pageScroll")).scrollTo(0,0);});ok(!has("سجل الإلغاء"));ok(has("ملغاة"));ok(has("مش محسوبة في الإجماليات"));screen("06-history");
+            main(()->{set("transactionKindFilter",event.original.kind);invoke("render",new Class<?>[0]);});ok(has("ملغاة"));
+            main(()->{set("transactionKindFilter","income");invoke("render",new Class<?>[0]);});ok(!has("ملغاة"));
+            main(()->{invoke("resetTransactionFilters",new Class<?>[0]);invoke("render",new Class<?>[0]);});
             main(()->invoke("showCaptureEvent",new Class<?>[]{CaptureEvents.Event.class},event));ok(has("محاولة ملغاة"));screen("07-canceled");click("عرض المصدر المحفوظ");ok(has("تم الغاء"));ok(has("تم تحويل"));screen("08-evidence");click("إغلاق");
             CaptureNotifier.buildEvent(target,event).contentIntent.send();awaitText("محاولة ملغاة");ok(has("محاولة ملغاة"));ok((Integer)get("selectedTab")==6);click("إغلاق");
             result.putString("stream","Card journey UI checks passed: "+checked+"; failed: 0; dark="+dark+"\nCaptures: "+captures+"\n");

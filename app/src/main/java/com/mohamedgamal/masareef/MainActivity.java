@@ -543,7 +543,7 @@ public final class MainActivity extends Activity {
         note(getString(R.string.widget_lock_privacy_notice));
                 break;
             case "capture":
-                note("الرسائل والإشعارات الجديدة تُقرأ بعد منح الإذن. استيراد القديم يبدأ بمعاينة قبل الحفظ.");
+                note("الرسائل والإشعارات الجديدة تُقرأ بعد منح الإذن. اختيار فترة الرسائل القديمة يبدأ الاستيراد مباشرة، والمراجعة قبل الحفظ اختيارية.");
                 setting("استيراد رسائل SMS القديمة",this::requestSmsImport);
                 setting("تطبيقات الدفع والإشعارات",this::chooseNotificationApps);
                 setting(hasNotificationAccess()?"الوصول للإشعارات: مفعل":"تفعيل الوصول للإشعارات",this::openNotificationSettings);
@@ -1440,8 +1440,8 @@ public final class MainActivity extends Activity {
                     !getPreferences(MODE_PRIVATE).getBoolean("initial_sms_import_done",false)) {
                 getPreferences(MODE_PRIVATE).edit().putBoolean("initial_import_prompted",true).apply();
                 new ChoiceDialogBuilder().setTitle("راجع رسائلك القديمة")
-                        .setMessage("الجديد بيتسجل تلقائيًا. القديم تقدر تختار فترته وتراجع المرشحين قبل الحفظ.")
-                        .setPositiveButton("مراجعة الرسائل",(d,w)->importSms()).setNegativeButton("لاحقًا",null).show();
+                        .setMessage("الجديد بيتسجل تلقائيًا. القديم تختار فترته ويبدأ استيراده مباشرة، أو تفعّل المراجعة الاختيارية قبل الحفظ.")
+                        .setPositiveButton("اختيار فترة الاستيراد",(d,w)->importSms()).setNegativeButton("لاحقًا",null).show();
             }
         } else {
             if (getPreferences(MODE_PRIVATE).getBoolean("sms_permission_prompted", false)) return;
@@ -2576,6 +2576,7 @@ public final class MainActivity extends Activity {
         page.addView(results);
         Set<Long> candidates = recurringCandidates;
         Map<Long, Long> dayOffsets = db.reimbursementOffsets();
+        List<TransactionTimelineRow> timeline=transactionTimeline(month);
         Runnable refresh = () -> {
             results.removeAllViews();bulkChecks.clear();Set<Long> visible=new HashSet<>();
             String text = transactionSearch.trim().toLowerCase(Locale.ROOT);
@@ -2584,17 +2585,11 @@ public final class MainActivity extends Activity {
             TextView dayTotal = null;
             MoneyTotals net = new MoneyTotals();
             int count = 0;
-            for (ExpenseDb.Transaction tx : month) {
-                if (!transactionKindFilter.isEmpty() && !transactionKindFilter.equals(tx.kind)) continue;
-                if (!transactionCategoryFilter.isEmpty() && !transactionCategoryFilter.equals(tx.category)) continue;
-                if(transactionExcludeTransfers && isSentTransfer(tx)) continue;
-                if(!transactionBucketFilter.isEmpty() && !MoneyFlow.bucket(tx.kind,tx.category).name().equals(transactionBucketFilter)) continue;
-                if(!transactionCurrencyFilter.isEmpty() && !transactionCurrencyFilter.equals(tx.currency)) continue;
-                if (transactionSourceFilter != null && !transactionSourceFilter.equals(tx.paymentSourceId) && !transactionSourceFilter.equals(tx.destinationSourceId)) continue;
-                if (!text.isEmpty() && !tx.merchant.toLowerCase(Locale.ROOT).contains(text) &&
-                        !tx.category.toLowerCase(Locale.ROOT).contains(text) &&
-                        !money(tx.amountMinor, tx.currency).toLowerCase(Locale.ROOT).contains(text)) continue;
-                LocalDate day = Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate();
+            for (TransactionTimelineRow entry : timeline) {
+                ExpenseDb.Transaction tx=entry.transaction;
+                if(tx==null){if(!matchesCaptureFilters(entry.event,text))continue;}
+                else if(!matchesTransactionFilters(tx,text))continue;
+                LocalDate day = Instant.ofEpochMilli(entry.when()).atZone(ZoneId.systemDefault()).toLocalDate();
                 if (!day.equals(currentDay)) {
                     if (dayTotal != null) setDayTotal(dayTotal, net);
                     currentDay = day; net = new MoneyTotals();
@@ -2610,15 +2605,18 @@ public final class MainActivity extends Activity {
                     group = listCard(results);
                     ((LinearLayout.LayoutParams) group.getLayoutParams()).topMargin = 0;
                 }
-                net.add(tx.currency,tx.kind,tx.category,ExpenseDb.effectiveAmount(tx,dayOffsets));
-                if("expense".equals(tx.kind))visible.add(tx.id);
-                transactionRow(group, tx, candidates.contains(tx.id));
+                if(entry.event!=null)captureEventRow(group,entry.event);
+                else{
+                    net.add(tx.currency,tx.kind,tx.category,ExpenseDb.effectiveAmount(tx,dayOffsets));
+                    if("expense".equals(tx.kind))visible.add(tx.id);
+                    transactionRow(group, tx, candidates.contains(tx.id));
+                }
                 count++;
             }
+
             if (dayTotal != null) setDayTotal(dayTotal, net);
             bulkSelected.retainAll(visible);updateBulkCount();
-            boolean hasHistory=cancellationHistory(results);
-            if (count == 0&&!hasHistory) {
+            if (count == 0) {
                 LinearLayout box = card(results);
                 box.setGravity(Gravity.CENTER_HORIZONTAL);
                 box.addView(label("مفيش عمليات تطابق البحث والفلاتر", 14, MUTED, false));
@@ -2886,28 +2884,50 @@ public final class MainActivity extends Activity {
         long id=intent==null?-1:intent.getLongExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT,-1);
         if(id<0)return;intent.removeExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT);
         CaptureEvents.Event event=new CaptureEvents(db).byId(id);if(event==null)return;
-        selectedTab=6;resetTransactionFilters();selectedMonth=Instant.ofEpochMilli(event.when).atZone(ZoneId.systemDefault()).toLocalDate().withDayOfMonth(1);render();showCaptureEvent(event);
+        selectedTab=6;resetTransactionFilters();selectedMonth=Instant.ofEpochMilli(event.displayWhen()).atZone(ZoneId.systemDefault()).toLocalDate().withDayOfMonth(1);render();showCaptureEvent(event);
     }
-    private boolean cancellationHistory(LinearLayout results){
-        // Financial drill-downs show their own ledger rows; history is available on the unfiltered transactions page.
-        if(!transactionKindFilter.isEmpty()||!transactionCategoryFilter.isEmpty()||!transactionBucketFilter.isEmpty()||transactionSourceFilter!=null||transactionExcludeTransfers)return false;
+    private static final class TransactionTimelineRow{
+        final ExpenseDb.Transaction transaction;final CaptureEvents.Event event;
+        TransactionTimelineRow(ExpenseDb.Transaction transaction,CaptureEvents.Event event){this.transaction=transaction;this.event=event;}
+        long when(){return event==null?transaction.when:event.displayWhen();}
+    }
+    private List<TransactionTimelineRow> transactionTimeline(List<ExpenseDb.Transaction> active){
+        List<TransactionTimelineRow> rows=new ArrayList<>();for(ExpenseDb.Transaction tx:active)rows.add(new TransactionTimelineRow(tx,null));
         LocalDate start=transactionPeriod==null?selectedMonth:transactionPeriod[0],end=transactionPeriod==null?selectedMonth.plusMonths(1):transactionPeriod[1];
-        List<CaptureEvents.Event> events=new CaptureEvents(db).between(start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),end.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli());
-        boolean header=false;
-        for(CaptureEvents.Event event:events){
-            if(!transactionCurrencyFilter.isEmpty()&&!transactionCurrencyFilter.equals(event.currency))continue;
-            String title=event.cancelled()?"ملغاة · محاولة تحويل":"إلغاء يحتاج مراجعة";
-            String amount=event.amount==null?"المبلغ غير مؤكد":money(event.amount,event.currency);
-            if(!transactionSearch.isBlank()&&!(title+amount+event.title).toLowerCase(Locale.ROOT).contains(transactionSearch.trim().toLowerCase(Locale.ROOT)))continue;
-            if(!header){results.addView(label("سجل الإلغاء · خارج الإجماليات",16,INK,true));header=true;}
-            LinearLayout row=card(results);LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
-            heading.addView(label(event.title,14,INK,true),new LinearLayout.LayoutParams(0,-2,1));
-            LinearLayout badge=new LinearLayout(this);badge.setGravity(Gravity.CENTER_VERTICAL);badge.setPadding(dp(10),dp(5),dp(10),dp(5));badge.setBackground(outlined(SURFACE,BORDER,99));
-            ImageView status=tintedIcon(R.drawable.ic_close,event.cancelled()?CORAL:MUTED);badge.addView(status,new LinearLayout.LayoutParams(dp(18),dp(18)));badge.addView(label(event.cancelled()?"ملغاة":"تحتاج مراجعة",12,event.cancelled()?CORAL:MUTED,true));heading.addView(badge);row.addView(heading);
-            row.addView(label(amount,18,MUTED,true));row.addView(label(event.cancelled()?"مش محسوبة في الإجماليات":"العملية الأصلية لم تتغير",12,MUTED,false));row.addView(label("وقت استلام الرسالة: "+sourceDate(event.when),12,MUTED,false));
-            row.addView(label(event.cancelled()?"المحاولة محفوظة؛ المشتريات الأصلية لم تتغير":"لا توجد مطابقة مؤكدة؛ لم نغيّر أي عملية",12,MUTED,false));
-            row.setContentDescription(title+" "+amount+" عرض المصدر");row.setOnClickListener(v->showCaptureEvent(event));
-        }return header;
+        for(CaptureEvents.Event event:new CaptureEvents(db).timelineBetween(start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),end.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()))rows.add(new TransactionTimelineRow(null,event));
+        rows.sort((a,b)->Long.compare(b.when(),a.when()));return rows;
+    }
+    private boolean matchesTransactionFilters(ExpenseDb.Transaction tx,String text){
+        return (transactionKindFilter.isEmpty()||transactionKindFilter.equals(tx.kind))
+                &&(transactionCategoryFilter.isEmpty()||transactionCategoryFilter.equals(tx.category))
+                &&(!transactionExcludeTransfers||!isSentTransfer(tx))
+                &&(transactionBucketFilter.isEmpty()||MoneyFlow.bucket(tx.kind,tx.category).name().equals(transactionBucketFilter))
+                &&(transactionCurrencyFilter.isEmpty()||transactionCurrencyFilter.equals(tx.currency))
+                &&(transactionSourceFilter==null||transactionSourceFilter.equals(tx.paymentSourceId)||transactionSourceFilter.equals(tx.destinationSourceId))
+                &&(text.isEmpty()||(tx.merchant+" "+tx.category+" "+money(tx.amountMinor,tx.currency)).toLowerCase(Locale.ROOT).contains(text));
+    }
+    private boolean matchesCaptureFilters(CaptureEvents.Event event,String text){
+        if(event.original!=null){
+            String query=text.replace("ملغاة", "").trim();return matchesTransactionFilters(event.original,query);
+        }
+        if(!transactionKindFilter.isEmpty()||!transactionCategoryFilter.isEmpty()||!transactionBucketFilter.isEmpty()||transactionSourceFilter!=null||transactionExcludeTransfers)return false;
+        return (transactionCurrencyFilter.isEmpty()||transactionCurrencyFilter.equals(event.currency))
+                &&(text.isEmpty()||(event.title+" "+(event.cancelled()?"ملغاة":"تحتاج مراجعة")+" "+(event.amount==null?"":money(event.amount,event.currency))).toLowerCase(Locale.ROOT).contains(text));
+    }
+    private void captureEventRow(LinearLayout container,CaptureEvents.Event event){
+        if(container.getChildCount()>0)divider(container);
+        LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(0,dp(10),0,dp(10));container.addView(row);
+        LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(merchantBadge(event.title,event.original==null?"تحويلات":event.original.category,42),new LinearLayout.LayoutParams(dp(42),dp(42)));
+        TextView title=label(event.title,14,INK,true);title.setMaxLines(2);LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,-2,1);tp.setMarginStart(dp(10));heading.addView(title,tp);
+        LinearLayout badge=new LinearLayout(this);badge.setGravity(Gravity.CENTER_VERTICAL);badge.setPadding(dp(8),dp(5),dp(8),dp(5));badge.setBackground(outlined(SURFACE,BORDER,99));
+        int color=event.cancelled()?CORAL:MUTED;badge.addView(tintedIcon(R.drawable.ic_close,color),new LinearLayout.LayoutParams(dp(18),dp(18)));badge.addView(label(event.cancelled()?"ملغاة":"تحتاج مراجعة",12,color,true));heading.addView(badge);row.addView(heading);
+        String amount=event.amount==null?"المبلغ غير مؤكد":money(event.amount,event.currency);
+        TextView value=label(amount,17,MUTED,true);if(event.cancelled())value.setPaintFlags(value.getPaintFlags()|android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);row.addView(value);
+        row.addView(label(event.cancelled()?"ملغاة · مش محسوبة في الإجماليات":"العملية الأصلية لم تتغير",12,MUTED,false));
+        if(event.original!=null)row.addView(label(transactionTimeLabel(event.original,false),12,MUTED,false));
+        row.addView(label((event.body==null?"وقت الأرشفة: ":"استلام رسالة الإلغاء: ")+sourceDate(event.when),12,MUTED,false));
+        row.setContentDescription(event.title+" · "+(event.cancelled()?"ملغاة":"تحتاج مراجعة")+" · "+amount+" · عرض المصدر");row.setOnClickListener(v->showCaptureEvent(event));
     }
     private void showCaptureEvent(CaptureEvents.Event event){
         String message=event.cancelled()?"المحاولة ملغاة ومش محسوبة في الإجماليات. إلغاء السداد لا يلغي المشتريات الأصلية أو رسومها.":"لم نجد عملية واحدة مؤكدة لنربطها برسالة الإلغاء. راجع المصدر والعمليات؛ لن نحذف عملية بالتخمين.";
@@ -2952,7 +2972,7 @@ public final class MainActivity extends Activity {
         View handle=new View(this);handle.setBackground(rounded(BORDER,99));LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(dp(42),dp(4));hp.gravity=Gravity.CENTER_HORIZONTAL;hp.bottomMargin=dp(12);content.addView(handle,hp);
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);heading.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);TextView headingText=label(title,20,INK,true);headingText.setTextDirection(View.TEXT_DIRECTION_RTL);headingText.setMaxLines(3);heading.addView(headingText,new LinearLayout.LayoutParams(0,-2,1));heading.addView(iconButton(R.drawable.ic_close,"إغلاق",sheet::dismiss),new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(heading);
         ScrollView scroller=scrollForm(body);scroller.setVerticalScrollBarEnabled(false);content.addView(scroller,new LinearLayout.LayoutParams(-1,0,1));
-        Button proceed=new Button(this);proceed.setTag("financial_journey_primary");proceed.setText(primary);proceed.setTypeface(BOLD);proceed.setTextColor(Color.WHITE);proceed.setBackground(rounded(BRAND,14));proceed.setAllCaps(false);proceed.setMinHeight(dp(52));
+        Button proceed=new Button(this);proceed.setTag("financial_journey_primary");proceed.setText(primary);proceed.setTypeface(BOLD);proceed.setTextColor(dark?0xff0d1f1a:Color.WHITE);proceed.setBackground(rounded(dark?ACCENT:BRAND,14));proceed.setAllCaps(false);proceed.setMinHeight(dp(52));
         LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2);pp.topMargin=dp(12);content.addView(proceed,pp);proceed.setOnClickListener(v->accept.accept(sheet));
         if(secondary!=null){Button previous=new Button(this);previous.setText(secondary);previous.setTypeface(BOLD);previous.setTextColor(INK);previous.setBackground(outlined(SURFACE,BORDER,14));previous.setAllCaps(false);previous.setMinHeight(dp(48));LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2);bp.topMargin=dp(8);content.addView(previous,bp);previous.setOnClickListener(v->back.accept(sheet));}
         showJourneyWindow(sheet,content,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f));return sheet;
