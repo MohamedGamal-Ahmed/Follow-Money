@@ -194,12 +194,7 @@ public final class SmsImportActivity extends Activity {
             // A bank sender identifies the source, never an unknown purchase merchant.
             String brand=r.isTransaction()?BrandCatalog.merchant(r.title):BrandCatalog.bank(r.sender);
             int logo=MainActivity.brandLogo(brand);
-            if(logo!=0) {
-                ImageView badge=new ImageView(this);badge.setImageResource(logo);
-                badge.setScaleType(ImageView.ScaleType.FIT_CENTER);badge.setContentDescription(r.title);
-                GradientDrawable white=new GradientDrawable();white.setColor(0xffffffff);white.setCornerRadius(dp(22));badge.setBackground(white);
-                badge.setPadding(dp(5),dp(5),dp(5),dp(5));heading.addView(badge,new LinearLayout.LayoutParams(dp(44),dp(44)));
-            }
+            if(logo!=0)heading.addView(UiKit.logoBadge(this,logo,brand,r.isTransaction()?r.title:r.sender,44,dark?0:border),new LinearLayout.LayoutParams(dp(44),dp(44)));
             box.addView(heading);
             boolean dateOnly="date_only".equals(r.timePrecision);
             String detail=r.category+"\n"+r.sender+" · "+Instant.ofEpochMilli(r.eventAt).atZone(ZoneId.systemDefault())
