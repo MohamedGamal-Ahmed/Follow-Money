@@ -476,8 +476,26 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 new String[]{oldMerchant,Long.toString(oldAmount),currency,account==null?"-1":Long.toString(account)});
     }
 
-    private void archiveEntry(long id,String reason,boolean exclude) {
+    /** A row's live dependents share its life: bank-fee children and reimbursement links must go with it. */
+    private void deleteDependentRows(long id) {
         SQLiteDatabase writable=getWritableDatabase();
+        writable.delete("transactions","fee_parent_id=?",new String[]{Long.toString(id)});
+        writable.delete("reimbursements","income_id=? OR expense_id=?",new String[]{Long.toString(id),Long.toString(id)});
+    }
+
+    void archiveEntry(long id,String reason,boolean exclude) {
+        SQLiteDatabase writable=getWritableDatabase();
+        boolean own=!writable.inTransaction();
+        if(own) writable.beginTransaction();
+        try {
+            archiveRow(writable,id,reason,exclude);
+            if(own) writable.setTransactionSuccessful();
+        } finally {
+            if(own) writable.endTransaction();
+        }
+    }
+
+    private void archiveRow(SQLiteDatabase writable,long id,String reason,boolean exclude) {
         try (Cursor c=writable.rawQuery("SELECT * FROM transactions WHERE id=?",new String[]{Long.toString(id)})) {
             if (!c.moveToFirst()) return;
             org.json.JSONObject payload=new org.json.JSONObject();
@@ -506,6 +524,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?",new Object[]{id});
                 writable.delete("capture_evidence","transaction_id=?",new String[]{Long.toString(id)});
             }
+            deleteDependentRows(id);
             writable.delete("transactions","id=?",new String[]{Long.toString(id)});
         }
     }
@@ -619,7 +638,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         Long account=autoSource(sender,parsed.cardLast4,body);
         if (account==null) return false;
         try (Cursor c=getReadableDatabase().rawQuery("SELECT id FROM transactions WHERE kind='expense' AND user_edited=0 " +
-                "AND payment_source_id=? AND amount_minor=? AND currency=? AND received_at BETWEEN ? AND ?",
+                "AND payment_source_id=? AND amount_minor=? AND currency=? AND received_at BETWEEN ? AND ? " +
+                "AND NOT EXISTS (SELECT 1 FROM reimbursements r WHERE r.income_id=transactions.id OR r.expense_id=transactions.id)",
                 new String[]{Long.toString(account),Long.toString(parsed.amountMinor),parsed.currency,
                         Long.toString(receivedAt-120000),Long.toString(receivedAt)})) {
             if (c.getCount()!=1 || !c.moveToFirst()) return false;
@@ -1716,8 +1736,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 values.put("unique_key", cursor.getString(0));
                 writable.insertWithOnConflict("excluded_messages", null, values, SQLiteDatabase.CONFLICT_IGNORE);
             }
-            writable.delete("transactions", "fee_parent_id=?", new String[]{Long.toString(id)});
-            writable.delete("reimbursements", "income_id=? OR expense_id=?", new String[]{Long.toString(id), Long.toString(id)});
+            deleteDependentRows(id);
             writable.delete("transactions", "id=?", new String[]{Long.toString(id)});
             writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?", new Object[]{id});
             writable.delete("capture_evidence", "transaction_id=?", new String[]{Long.toString(id)});
@@ -2308,7 +2327,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private int archivePromotions() {
         java.util.Map<Long,Boolean> verdict=new java.util.LinkedHashMap<>();
         try (Cursor c=getReadableDatabase().rawQuery("SELECT e.transaction_id,e.encrypted_body FROM capture_evidence e " +
-                "JOIN transactions t ON t.id=e.transaction_id WHERE t.user_edited=0 AND t.fee_parent_id IS NULL",null)) {
+                "JOIN transactions t ON t.id=e.transaction_id WHERE t.user_edited=0 AND t.fee_parent_id IS NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM reimbursements r WHERE r.income_id=t.id OR r.expense_id=t.id)",null)) {
             while (c.moveToNext()) {
                 long id=c.getLong(0);
                 String body=c.isNull(1)?null:EvidenceVault.decrypt(c.getString(1));

@@ -200,4 +200,35 @@ final class AuditRegressionTest {
         try{db.getWritableDatabase().execSQL("UPDATE transactions SET time_precision='guessed' WHERE id=?",new Object[]{id});
             throw new AssertionError("Invalid precision accepted");}catch(android.database.sqlite.SQLiteConstraintException expected){}
     }
+    public void testArchiveEntryRemovesFeeChildrenAndReimbursementLinks(){
+        long t=at(LocalDate.now(),10),buy=manual(t,10000,"expense"),back=manual(t+1000,4000,"income"),fee=manual(t,200,"expense");
+        db.getWritableDatabase().execSQL("UPDATE transactions SET fee_parent_id=? WHERE id=?",new Object[]{buy,fee});
+        db.linkReimbursement(back,buy);
+        eq(1,scalar("SELECT COUNT(*) FROM reimbursements"));
+        eq(1,scalar("SELECT COUNT(*) FROM transactions WHERE fee_parent_id="+buy));
+        db.archiveEntry(buy,"qa archive",true);
+        ok(db.transactionById(buy)==null);
+        eq(0,scalar("SELECT COUNT(*) FROM reimbursements"));
+        eq(0,scalar("SELECT COUNT(*) FROM transactions WHERE fee_parent_id="+buy));
+    }
+    public void testArchivePromotionsSkipsReimbursementLinkedRows(){
+        long t=at(LocalDate.now(),10);
+        String promo="Get up to 20% cash back when you pay with your card at AMAZON. Offer valid till 30 Oct. T&Cs apply. EGP 500 max";
+        ok(ExpenseParser.isPromotion(promo));
+        long linked=manual(t,10000,"expense"),linkedBack=manual(t+1000,4000,"income"),plain=manual(t,7000,"expense");
+        db.linkReimbursement(linkedBack,linked);
+        String sealed=EvidenceVault.encrypt(promo);
+        db.getWritableDatabase().execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,received_at,encrypted_body) VALUES(?,?,?,?,?)",
+                new Object[]{"qa-promo-linked",linked,"SMS",t,sealed});
+        db.getWritableDatabase().execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,received_at,encrypted_body) VALUES(?,?,?,?,?)",
+                new Object[]{"qa-promo-plain",plain,"SMS",t,sealed});
+        eq(1,archivePromotions());
+        ok(db.transactionById(linked)!=null);
+        ok(db.transactionById(plain)==null);
+        eq(1,scalar("SELECT COUNT(*) FROM reimbursements"));
+    }
+    private int archivePromotions(){
+        try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions");method.setAccessible(true);return (Integer)method.invoke(db);}
+        catch(Exception error){throw new RuntimeException(error);}
+    }
 }
