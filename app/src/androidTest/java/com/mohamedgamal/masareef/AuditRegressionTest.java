@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Set;
 
 /** Focused audit regressions. All ledger/settings writes use disposable emulator fixtures. */
 final class AuditRegressionTest {
@@ -257,6 +258,33 @@ final class AuditRegressionTest {
         eq(10000,db.transactions().get(0).amountMinor);
         SmsReceiver.captureNow(context,parts);
         eq(1,db.transactionCount());
+    }
+    public void testRecurringCandidatesGroupByMerchantInsideTheMonthlyWindow(){
+        long t=at(LocalDate.now().minusDays(30),10);
+        long older=manual(t,5000,"expense"),newer=manual(t+30L*86400000,5000,"expense"),tooClose=manual(t+14L*86400000,5000,"expense");
+        Set<Long> ids=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
+        ok(ids.contains(newer));
+        ok(!ids.contains(tooClose));
+        ok(!ids.contains(older));
+        long stale=at(LocalDate.now().minusDays(430),10);
+        manual(stale,5000,"expense");
+        long staleNew=manual(stale+30L*86400000,5000,"expense");
+        ids=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
+        ok(!ids.contains(staleNew));
+        db.putCommitment(null,"QA expense",5000,"EGP",LocalDate.now().plusMonths(1),"monthly","installment",12,0,1,"QA expense",null);
+        ids=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
+        ok(!ids.contains(newer));
+    }
+    public void testRecurringCandidateScanReachesBeyondTheNewestFiveHundredRows(){
+        long base=at(LocalDate.now().minusDays(60),10);
+        manual(base,4000,"expense");
+        long newer=manual(base+30L*86400000,4000,"expense");
+        for(int i=0;i<510;i++) manual(base+31L*86400000+i*60000L,3000,"expense");
+        eq(512,db.transactionCount());
+        eq(500,db.transactions().size());
+        ok(!db.transactions().stream().anyMatch(item->item.id==newer));
+        Set<Long> ids=MainActivity.recurringCandidateIds(db.recurringCandidateTransactions(),db.recurring());
+        ok(ids.contains(newer));
     }
     private int archivePromotions(){
         try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions");method.setAccessible(true);return (Integer)method.invoke(db);}

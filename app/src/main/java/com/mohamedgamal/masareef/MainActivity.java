@@ -1340,28 +1340,37 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
-    private Set<Long> detectRecurringCandidates(List<ExpenseDb.Transaction> items) {
+    /**
+     * Ids of expenses that look like a monthly commitment: another payment to the same merchant in the
+     * same currency about a month earlier. Grouped by merchant so each list is scanned once, not per row.
+     */
+    static Set<Long> recurringCandidateIds(List<ExpenseDb.Transaction> items, List<ExpenseDb.Recurring> confirmed) {
         Set<Long> ids = new HashSet<>();
-        List<ExpenseDb.Recurring> confirmed = db.recurring();
-        for (int i = 0; i < items.size(); i++) {
-            ExpenseDb.Transaction recent = items.get(i);
-            if (!"expense".equals(recent.kind) || ExpenseParser.genericMerchant(recent.merchant) ||
-                    "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
-            boolean already = false;
-            for (ExpenseDb.Recurring r : confirmed)
-                if (r.merchant.equalsIgnoreCase(recent.merchant) && r.currency.equals(recent.currency)) already = true;
-            if (already) continue;
-            LocalDate current = Instant.ofEpochMilli(recent.when).atZone(ZoneId.systemDefault()).toLocalDate();
-            for (int j = i + 1; j < items.size(); j++) {
-                ExpenseDb.Transaction older = items.get(j);
-                if (!"expense".equals(older.kind)) continue;
-                if (!recent.merchant.equalsIgnoreCase(older.merchant) || !recent.currency.equals(older.currency)) continue;
-                LocalDate previous = Instant.ofEpochMilli(older.when).atZone(ZoneId.systemDefault()).toLocalDate();
-                long days = ChronoUnit.DAYS.between(previous, current);
-                long difference = Math.abs(recent.amountMinor - older.amountMinor);
-                if (days >= 25 && days <= 35 && ("فواتير".equals(recent.category) || "أقساط".equals(recent.category) || difference <= Math.max(100, recent.amountMinor / 20))) {
-                    ids.add(recent.id);
-                    break;
+        Set<String> confirmedKeys = new HashSet<>();
+        for (ExpenseDb.Recurring r : confirmed)
+            if (r.merchant != null) confirmedKeys.add(r.merchant.toLowerCase(Locale.ROOT) + "\n" + r.currency);
+        Map<String, List<ExpenseDb.Transaction>> groups = new LinkedHashMap<>();
+        for (ExpenseDb.Transaction item : items) {
+            if (!"expense".equals(item.kind)) continue;
+            groups.computeIfAbsent(item.merchant.toLowerCase(Locale.ROOT) + "\n" + item.currency, key -> new ArrayList<>()).add(item);
+        }
+        for (List<ExpenseDb.Transaction> group : groups.values()) {
+            group.sort((first, second) -> Long.compare(second.when, first.when));
+            for (int i = 0; i < group.size(); i++) {
+                ExpenseDb.Transaction recent = group.get(i);
+                if (ExpenseParser.genericMerchant(recent.merchant) || confirmedKeys.contains(recent.merchant.toLowerCase(Locale.ROOT) + "\n" + recent.currency) ||
+                        "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
+                LocalDate current = Instant.ofEpochMilli(recent.when).atZone(ZoneId.systemDefault()).toLocalDate();
+                for (int j = i + 1; j < group.size(); j++) {
+                    ExpenseDb.Transaction older = group.get(j);
+                    long days = ChronoUnit.DAYS.between(Instant.ofEpochMilli(older.when).atZone(ZoneId.systemDefault()).toLocalDate(), current);
+                    if (days > 35) break; // newest first: everything further along is even older
+                    if (days < 25) continue;
+                    long difference = Math.abs(recent.amountMinor - older.amountMinor);
+                    if ("فواتير".equals(recent.category) || "أقساط".equals(recent.category) || difference <= Math.max(100, recent.amountMinor / 20)) {
+                        ids.add(recent.id);
+                        break;
+                    }
                 }
             }
         }
@@ -2007,7 +2016,7 @@ public final class MainActivity extends Activity {
         List<ExpenseDb.Transaction> all = db.transactions();
         if (all.isEmpty()) empty("لسه مفيش عمليات", "ابدأ بإضافة مصروف أو استيراد رسائل البنك");
         else {
-            Set<Long> candidates = detectRecurringCandidates(all);
+            Set<Long> candidates = recurringCandidateIds(db.recurringCandidateTransactions(), db.recurring());
             LinearLayout list = listCard(page);
             for (int i = 0; i < Math.min(5, all.size()); i++) transactionRow(list, all.get(i), candidates.contains(all.get(i).id));
         }
@@ -2270,7 +2279,7 @@ public final class MainActivity extends Activity {
         LinearLayout results = new LinearLayout(this);
         results.setOrientation(LinearLayout.VERTICAL);
         page.addView(results);
-        Set<Long> candidates = detectRecurringCandidates(db.transactions());
+        Set<Long> candidates = recurringCandidateIds(db.recurringCandidateTransactions(), db.recurring());
         Map<Long, Long> dayOffsets = db.reimbursementOffsets();
         Runnable refresh = () -> {
             results.removeAllViews();bulkChecks.clear();Set<Long> visible=new HashSet<>();
@@ -3042,7 +3051,7 @@ public final class MainActivity extends Activity {
                 "أقساط فاليو أو ترو أو البنك، واشتراكات زي كلود وجوجل ون، وفواتير الموبايل. هنفكّرك قبل الميعاد بيوم.");
 
         List<ExpenseDb.Transaction> transactions = db.transactions();
-        Set<Long> candidates = detectRecurringCandidates(transactions);
+        Set<Long> candidates = recurringCandidateIds(db.recurringCandidateTransactions(), db.recurring());
         Set<String> suggested = new HashSet<>();
         for (ExpenseDb.Transaction item : transactions) {
             if (!candidates.contains(item.id) || !suggested.add(item.merchant.toLowerCase(Locale.ROOT))) continue;
