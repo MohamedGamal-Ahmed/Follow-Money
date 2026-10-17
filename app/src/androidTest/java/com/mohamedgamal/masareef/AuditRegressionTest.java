@@ -104,6 +104,17 @@ final class AuditRegressionTest {
         ExpenseDb.CsvBatchResult again=db.importCsvBatch("qa-file",rows);eq(0,again.saved);eq(4,again.duplicates);
     }
 
+    public void testRefusedTransferFeeCannotSilentlyShrinkTheDebit(){
+        long t=at(LocalDate.now(),10),from=db.addPaymentSource("QA A","حساب","1111"),to=db.addPaymentSource("QA B","حساب","2222");
+        ok(db.addManualEntry(t,10050,"EGP","QA debit","تحويلات",from,"expense",null,null));long debit=db.latestInserted().id;
+        // The fee row would be refused (its key is excluded); the split must not go ahead without it.
+        db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+debit});
+        try{db.reconcileOwnTransfer(debit,10000,50,from,to,Collections.<Long>emptyList());throw new AssertionError("Transfer was split without saving its fee");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        ok("expense".equals(db.transactionById(debit).kind));eq(10050,db.transactionById(debit).amountMinor);eq(0,db.transferFee(debit));
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;
