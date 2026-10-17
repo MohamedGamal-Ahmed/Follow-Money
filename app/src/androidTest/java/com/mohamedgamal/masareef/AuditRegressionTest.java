@@ -143,6 +143,23 @@ final class AuditRegressionTest {
         eq(rows,db.transactionCount());ok("expense".equals(db.transactionById(out).kind));
     }
 
+    public void testTransactionNotificationActionsHaveDistinctIdentities(){
+        android.app.PendingIntent open5=CaptureNotifier.transactionIntent(context,5,false),edit5=CaptureNotifier.transactionIntent(context,5,true);
+        android.app.PendingIntent open6=CaptureNotifier.transactionIntent(context,6,false),edit6=CaptureNotifier.transactionIntent(context,6,true);
+        ok(!open5.equals(edit5),"open and edit of one transaction share an identity");
+        ok(!edit5.equals(open6),"the edit action of one transaction is the open action of the next");
+        ok(!open5.equals(open6)&&!edit5.equals(edit6),"two transactions share an identity");
+        ok(open5.equals(CaptureNotifier.transactionIntent(context,5,false)),"same transaction and action must keep one identity");
+    }
+
+    public void testPaidActionReportsWhenNothingChanged(){
+        ok(db.addRecurring("QA monthly",10000,"EGP",LocalDate.now()));
+        long id=scalar("SELECT id FROM recurring ORDER BY id DESC LIMIT 1");
+        ok(ReminderReceiver.markPaid(context,id,LocalDate.now()));
+        ok(!ReminderReceiver.markPaid(context,id,LocalDate.now()),"A repeated tap was reported as a new payment");
+        ok(!ReminderReceiver.markPaid(context,id+999,LocalDate.now()),"A missing commitment was reported as paid");
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;

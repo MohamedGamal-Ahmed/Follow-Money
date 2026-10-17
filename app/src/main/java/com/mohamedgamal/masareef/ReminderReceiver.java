@@ -37,12 +37,18 @@ public final class ReminderReceiver extends BroadcastReceiver {
                 AlarmManager.INTERVAL_DAY, pending);
     }
 
+    /** Marks one commitment paid for the day. False when nothing changed (already paid, finished or missing). */
+    static boolean markPaid(Context context, long id, LocalDate day) {
+        try (ExpenseDb db = new ExpenseDb(context)) {
+            db.markRecurringPaid(id, day);
+            return true;
+        }
+    }
+
     @Override public void onReceive(Context context, Intent intent) {
         if (ACTION_MARK_PAID.equals(intent.getAction())) {
             long id = intent.getLongExtra(EXTRA_ID, -1);
-            if (id >= 0) try (ExpenseDb db = new ExpenseDb(context)) {
-                db.markRecurringPaid(id, LocalDate.now());
-            }
+            if (id >= 0) markPaid(context, id, LocalDate.now());
             NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
             if (manager != null) manager.cancel((int) id);
             SmsReceiver.notifyDataChanged(context);
