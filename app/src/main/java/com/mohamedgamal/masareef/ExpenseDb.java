@@ -21,6 +21,7 @@ import java.util.Set;
 public final class ExpenseDb extends SQLiteOpenHelper {
     private final CaptureTransaction capture = new CaptureTransaction(this);
     private final TransactionRepository transactionRows = new TransactionRepository(this);
+    private final EvidenceRepository captureEvidence = new EvidenceRepository(this);
     public ExpenseDb(Context context) {
         super(context, "masareef.db", null, 23);
     }
@@ -387,12 +388,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 }
             }
             if (existing >= 0) {
-                ContentValues evidence = new ContentValues();
-                evidence.put("unique_key", key); evidence.put("transaction_id", existing); evidence.put("message_hash", hash);
-                evidence.put("normalized_hash", normalized); evidence.put("reference_hash", reference);
-                evidence.put("source", channel); evidence.put("sender", label); evidence.put("received_at", receivedAt);
-                evidence.put("direction", direction); evidence.put("encrypted_body", EvidenceVault.encrypt(body));
-                writable.insertWithOnConflict("capture_evidence", null, evidence, SQLiteDatabase.CONFLICT_REPLACE);
+                captureEvidence.record(key,existing,hash,normalized,reference,channel,label,receivedAt,direction,body);
                 if (added && !CaptureNotice.cardRepayment(body) && "expense".equals(direction) && !linkTransferToCommitment(existing))
                     advanceRecurring(parsed.merchant, parsed.amountMinor, parsed.currency, receivedAt);
             }
@@ -805,19 +801,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         values.clear();values.put("hint_key",key);
         getWritableDatabase().update("recurring",values,"id=?",new String[]{Long.toString(recurringId)});
     }
-    public List<SourceEvidence> commitmentHistory(String key) {
-        List<SourceEvidence> rows=new ArrayList<>();
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT sender,received_at,encrypted_body FROM commitment_observations WHERE hint_key=? ORDER BY received_at DESC LIMIT 12",new String[]{key})) {
-            while(c.moveToNext()) rows.add(new SourceEvidence("SMS",c.getString(0),c.getLong(1),EvidenceVault.decrypt(c.getString(2))));
-        }
-        return rows;
-    }
-    public List<SourceEvidence> commitmentHistoryFor(long recurringId) {
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT hint_key FROM recurring WHERE id=?",new String[]{Long.toString(recurringId)})) {
-            if(c.moveToFirst() && !c.isNull(0)) return commitmentHistory(c.getString(0));
-        }
-        return new ArrayList<>();
-    }
+    public List<SourceEvidence> commitmentHistory(String key) { return captureEvidence.commitmentHistory(key); }
+
+    public List<SourceEvidence> commitmentHistoryFor(long recurringId) { return captureEvidence.commitmentHistoryFor(recurringId); }
+
     public static final class Suggestion {
         public final String key,merchant,kind,explanation,currency,cycle; public final long amount;public final Integer count;
         public final LocalDate date;public final SourceEvidence evidence;
@@ -829,23 +816,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
     }
 
-    public List<SourceEvidence> sourceEvidence(long id) {
-        List<SourceEvidence> rows=new ArrayList<>();
-        try(Cursor manual=getReadableDatabase().rawQuery("SELECT note,received_at FROM transactions WHERE id=? AND unique_key LIKE 'card-statement-fee:%'",new String[]{Long.toString(id)})){
-            if(manual.moveToFirst()){rows.add(new SourceEvidence("وصف يدوي من كشف البطاقة","تأكيد المستخدم",manual.getLong(1),manual.getString(0)));return rows;}
-        }
-        try(Cursor parent=getReadableDatabase().rawQuery("SELECT fee_parent_id FROM transactions WHERE id=?",new String[]{Long.toString(id)})) {
-            if(parent.moveToFirst() && !parent.isNull(0)) id=parent.getLong(0);
-        }
-        try (Cursor c=getReadableDatabase().rawQuery("SELECT source,sender,received_at,encrypted_body FROM capture_evidence " +
-                "WHERE transaction_id=? ORDER BY encrypted_body IS NULL,received_at DESC",new String[]{Long.toString(id)})) {
-            while(c.moveToNext()) {
-                EvidenceVault.Read body=EvidenceVault.read(c.getString(3));
-                if(body.body!=null || body.failed) rows.add(new SourceEvidence(c.getString(0),c.getString(1),c.getLong(2),body.body,body.failed));
-            }
-        }
-        return rows;
-    }
+    public List<SourceEvidence> sourceEvidence(long id) { return captureEvidence.sourceEvidence(id); }
 
     public static final class SourceEvidence {
         public final String source,sender,body; public final long receivedAt; public final boolean failed;
