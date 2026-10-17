@@ -34,6 +34,12 @@ final class SelectionUiTest {
         for(int i=0;i<node.getChildCount();i++)if(containsVisibleText(node.getChild(i),text))return true;
         return false;
     }
+    private android.view.View viewWithText(android.view.View node,String text){
+        if(node instanceof android.widget.TextView&&node.isShown()&&plain(((android.widget.TextView)node).getText()).equals(text))return node;
+        if(node instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)node;
+            for(int i=0;i<group.getChildCount();i++){android.view.View found=viewWithText(group.getChildAt(i),text);if(found!=null)return found;}}
+        return null;
+    }
     private boolean choiceChecked(String name) {
         for(AccessibilityNodeInfo node:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText(name)) {
             if(node.getText()==null||!node.getText().toString().equals(name))continue;
@@ -116,6 +122,28 @@ final class SelectionUiTest {
             db.deleteTransaction(id);
             click("افتكر التصنيف للتاجر ده في العمليات الجديدة");click("حفظ");
             ok(has("تعديل المعاملة"));ok(db.merchantRules().isEmpty());ok(db.transactionCount()==0);click("إلغاء");
+            if(android.os.Build.VERSION.SDK_INT>=29){
+                int sourcesBefore=db.paymentSources().size();
+                db.getWritableDatabase().execSQL("CREATE TRIGGER qa_source_alias_fault BEFORE INSERT ON source_aliases BEGIN SELECT RAISE(ABORT,'qa source alias fault'); END");
+                try{
+                    main(()->invoke("paymentSourceDialog",new Class<?>[0]));
+                    fill("اسم الوسيلة","HSBC");fill("آخر 3 أو 4 أرقام","9988");
+                    boolean[] callbackThrew={false};
+                    main(()->{
+                        android.view.View add=null;
+                        for(android.view.View root:android.view.inspector.WindowInspector.getGlobalWindowViews())
+                            if(viewWithText(root,"وسيلة دفع جديدة")!=null)add=viewWithText(root,"إضافة");
+                        if(add==null)throw new AssertionError("Missing source-dialog add action");
+                        try{add.performClick();}catch(RuntimeException expected){callbackThrew[0]=true;}
+                    });
+                    int partial=db.paymentSources().size()-sourcesBefore;
+                    if(partial!=0)throw new AssertionError("Failed source dialog left "+partial+" partial row(s); callbackThrew="+callbackThrew[0]);
+                    ok(!callbackThrew[0]);ok(has("وسيلة دفع جديدة"));
+                }finally{db.getWritableDatabase().execSQL("DROP TRIGGER IF EXISTS qa_source_alias_fault");}
+                click("إضافة");ok(!has("وسيلة دفع جديدة"));ok(db.paymentSources().size()==sourcesBefore+1);
+                ExpenseDb.PaymentSource created=db.paymentSources().stream().filter(s->"HSBC".equals(s.name)&&"9988".equals(s.last4)).findFirst().orElse(null);
+                ok(created!=null&&created.reviewed);ok(db.sourceAliasCount(created.id)==1);
+            }
             result.putString("stream","Selection UI checks passed: "+checked+"; failed: 0; dark="+dark+"; fontScale="+fontScale+"\nCaptures: "+captures+"\n");
         }catch(Throwable error){status=0;try{screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Selection UI FAILED: "+trace+"\n");}
         finally{try{if(activity!=null)main(()->{if(originalConfiguration!=null)activity.getResources().updateConfiguration(originalConfiguration,activity.getResources().getDisplayMetrics());activity.finish();});if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){status=0;result.putString("stream",result.getString("stream","")+error);}runner.finish(status,result);}
