@@ -892,8 +892,11 @@ public final class MainActivity extends Activity {
                     if (name.getText().toString().trim().isEmpty() || (!digits.isEmpty() && !digits.matches("[0-9]{3,4}"))) {
                         toast("اكتب الاسم وآخر 4 أرقام صحيحين"); return;
                     }
-                    long id=db.addPaymentSource(name.getText().toString(), kind.getSelectedItem().toString(), digits.isEmpty() ? null : digits);
-                    db.updateSourceProfile(id,"",false,true);
+                    try {
+                        new SourceMutation(db).createReviewed(name.getText().toString(), kind.getSelectedItem().toString(), digits.isEmpty() ? null : digits);
+                    } catch(RuntimeException error) {
+                        toast("تعذر إضافة وسيلة الدفع؛ راجع البيانات وحاول مرة أخرى."); return;
+                    }
                     dialog.dismiss();
                     render();
                 }));

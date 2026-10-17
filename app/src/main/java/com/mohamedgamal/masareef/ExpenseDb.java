@@ -1476,6 +1476,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public void updateSourceProfile(long id,String displayName,boolean archived,boolean reviewed) { accounts.updateSourceProfile(id,displayName,archived,reviewed); }
 
+    int updateSourceProfileRow(long id,String displayName,boolean archived,boolean reviewed) { return accounts.updateSourceProfileRow(id,displayName,archived,reviewed); }
+
+    boolean hasSourceAlias(String identity) { return accounts.hasSourceAlias(identity); }
+
     public List<PaymentSource> accountSources(boolean includeArchived) { return accounts.accountSources(includeArchived); }
 
     public List<PaymentSource> selectableSources() { return accounts.selectableSources(); }

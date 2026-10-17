@@ -141,8 +141,8 @@ final class SelectionUiTest {
                     ok(!callbackThrew[0]);ok(has("وسيلة دفع جديدة"));
                 }finally{db.getWritableDatabase().execSQL("DROP TRIGGER IF EXISTS qa_source_alias_fault");}
                 click("إضافة");ok(!has("وسيلة دفع جديدة"));ok(db.paymentSources().size()==sourcesBefore+1);
-                ExpenseDb.PaymentSource created=db.paymentSources().stream().filter(s->"HSBC".equals(s.name)&&"9988".equals(s.last4)).findFirst().orElse(null);
-                ok(created!=null&&created.reviewed);ok(db.sourceAliasCount(created.id)==1);
+                ExpenseDb.PaymentSource created=db.paymentSources().stream().filter(s->"HSBC".equals(s.name)&&"9988".equals(s.last4)).findFirst().orElseThrow(()->new AssertionError("Missing reviewed source"));
+                ok(created.reviewed);ok(db.sourceAliasCount(created.id)==1);
             }
             result.putString("stream","Selection UI checks passed: "+checked+"; failed: 0; dark="+dark+"; fontScale="+fontScale+"\nCaptures: "+captures+"\n");
         }catch(Throwable error){status=0;try{screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Selection UI FAILED: "+trace+"\n");}
