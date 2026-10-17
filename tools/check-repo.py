@@ -74,7 +74,7 @@ for forbidden in ("ExpenseDb", "ANDROID_ID", "getSerial", "READ_SMS", "SharedPre
 
 workflow = (ROOT / ".github/workflows/android-ci.yml").read_text(encoding="utf-8")
 for action in re.findall(r"uses: (\S+)", workflow):
-    require(bool(re.fullmatch(r"actions/[a-z-]+@[0-9a-f]{40}", action)), f"CI action is not pinned: {action}")
+    require(bool(re.fullmatch(r"(actions/[a-z-]+|reactivecircus/android-emulator-runner)@[0-9a-f]{40}", action)), f"CI action is not pinned: {action}")
 require("contents: read" in workflow and "persist-credentials: false" in workflow, "CI permissions/credential isolation missing")
 require("retention-days: 7" in workflow, "CI artifact retention must remain bounded")
 require(".tmp/ci/checks.txt" in workflow and not re.search(r"^\s+\.tmp/\*|^\s+\.tmp/$", workflow, re.M), "CI must not upload private temp folders")
