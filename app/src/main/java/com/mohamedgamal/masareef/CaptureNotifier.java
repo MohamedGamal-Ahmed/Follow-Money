@@ -62,6 +62,20 @@ final class CaptureNotifier {
                 .setContentIntent(content).setAutoCancel(true).build();
     }
 
+    /** The tap target of a "recorded" notification: opens the transaction, or its editor when edit is true. */
+    static PendingIntent transactionIntent(Context context, long transactionId, boolean edit) {
+        // A PendingIntent is identified by request code and by intent data, never by extras: give each
+        // (transaction, action) its own of both so one notification can never retarget another's button.
+        int code = 3_000_000 + 2 * (int) (transactionId % 500_000);
+        Intent open = new Intent(context, MainActivity.class)
+                .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .setData(android.net.Uri.parse("followmoney://transaction/" + transactionId + (edit ? "/edit" : "")))
+                .putExtra(EXTRA_TRANSACTION, transactionId);
+        if (edit) open.putExtra(EXTRA_EDIT, true);
+        return PendingIntent.getActivity(context, edit ? code + 1 : code, open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
     static Notification build(Context context,ExpenseDb.Transaction item) {
         boolean hidden=context.getSharedPreferences("widget_settings",Context.MODE_PRIVATE).getBoolean("hide_amounts",false);
         String amount = MainActivity.money(item.amountMinor, item.currency);
@@ -75,15 +89,8 @@ final class CaptureNotifier {
         String publicTitle="تم تسجيل عملية جديدة";
         String publicText="افتح Follow Money لعرض التفاصيل";
         if(hidden){title=publicTitle;text=publicText;}
-        int id = 3_000_000 + (int) (item.id % 1_000_000);
-        Intent open = new Intent(context, MainActivity.class)
-                .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                .putExtra(EXTRA_TRANSACTION, item.id);
-        PendingIntent content = PendingIntent.getActivity(context, id, open,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Intent edit = new Intent(open).putExtra(EXTRA_EDIT, true);
-        PendingIntent editIntent = PendingIntent.getActivity(context, id + 1, edit,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent content = transactionIntent(context, item.id, false);
+        PendingIntent editIntent = transactionIntent(context, item.id, true);
         Notification.Builder builder = new Notification.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_notify)
                 .setColor(0xff0b3d2e)
