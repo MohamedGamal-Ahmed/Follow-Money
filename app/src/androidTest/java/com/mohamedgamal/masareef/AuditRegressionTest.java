@@ -115,6 +115,34 @@ final class AuditRegressionTest {
         ok("expense".equals(db.transactionById(debit).kind));eq(10050,db.transactionById(debit).amountMinor);eq(0,db.transferFee(debit));
     }
 
+    public void testAutomaticRepairWithRefusedFeeKeepsImportCommittedAndPairForReview(){
+        long t=at(LocalDate.now(),10),from=db.addPaymentSource("QA A","حساب","1111"),to=db.addPaymentSource("QA B","حساب","2222");
+        ok(db.addManualEntry(t,10050,"EGP","QA out",MoneyFlow.OPEN_TRANSFER_CATEGORY,from,"expense",null,null));long out=db.latestInserted().id;
+        ok(db.addManualEntry(t+60000,10000,"EGP","QA in","دخل",to,"income",null,null));long in=db.latestInserted().id;
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0 WHERE id IN (?,?)",new Object[]{out,in});
+        // The repair after an SMS import would pair these legs; the fee row it needs is refused, so the pair must wait for review.
+        db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+out});
+        SmsPreview sms=SmsPreview.parse("BANK","Card purchase EGP 55 at QA SHOP",t+120000);ok(sms!=null);
+        long rows=db.transactionCount();
+        eq(1,SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(sms)));
+        eq(rows+1,db.transactionCount());
+        ok("expense".equals(db.transactionById(out).kind));eq(10050,db.transactionById(out).amountMinor);eq(0,db.transferFee(out));ok(db.transactionById(in)!=null);
+    }
+
+    public void testUnexpectedRepairFailureFailsTheWholeSmsImport(){
+        long t=at(LocalDate.now(),10),from=db.addPaymentSource("QA A","حساب","1111"),to=db.addPaymentSource("QA B","حساب","2222");
+        ok(db.addManualEntry(t,10050,"EGP","QA out",MoneyFlow.OPEN_TRANSFER_CATEGORY,from,"expense",null,null));long out=db.latestInserted().id;
+        ok(db.addManualEntry(t+60000,10000,"EGP","QA in","دخل",to,"income",null,null));
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0");
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_fee_fault BEFORE INSERT ON transactions WHEN NEW.unique_key LIKE 'fee:%' BEGIN SELECT RAISE(ABORT,'qa fee fault'); END");
+        SmsPreview sms=SmsPreview.parse("BANK","Card purchase EGP 55 at QA SHOP",t+120000);ok(sms!=null);
+        long rows=db.transactionCount();
+        try{SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(sms));throw new AssertionError("Import reported success although repair failed");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(rows,db.transactionCount());ok("expense".equals(db.transactionById(out).kind));
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;
