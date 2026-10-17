@@ -57,7 +57,7 @@ public final class ReminderReceiver extends BroadcastReceiver {
             }
             if (manager != null) manager.cancel((int) id);
             if (changed) SmsReceiver.notifyDataChanged(context);
-            else android.widget.Toast.makeText(context, "الدفع ده متسجل قبل كده", android.widget.Toast.LENGTH_LONG).show();
+            else android.widget.Toast.makeText(context, "ما اتسجلش دفع جديد. افتح التطبيق وراجع حالة الالتزام.", android.widget.Toast.LENGTH_LONG).show();
             return;
         }
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
