@@ -67,6 +67,30 @@ final class AuditRegressionTest {
                 new String[]{Long.toString(originalId)})){ok(cursor.moveToFirst());return cursor.getString(0);}
     }
 
+    public void testSmsImportRepairFailureRollsBackBatchAndIsReported(){
+        long t=at(LocalDate.now(),10);
+        ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
+        long rows=db.transactionCount();
+        SmsPreview bankCopy=SmsPreview.parse("BANK","Card purchase EGP 100 at QA SHOP",t+1000);ok(bankCopy!=null);
+        // The repair that follows the import merges the bank copy into the notification row; make that step fail.
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_repair_fault BEFORE DELETE ON transactions BEGIN SELECT RAISE(ABORT,'qa repair fault'); END");
+        try{SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(bankCopy));throw new AssertionError("Failed repair was reported as a saved import");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(rows,db.transactionCount());
+        eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
+    }
+
+    public void testSavedSmsImportSurvivesFailureReadingReviewList(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview card=SmsPreview.parse("BANK","Card purchase EGP 55 at QA SHOP",t);ok(card!=null);
+        eq(1,SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(card)));
+        // Reading the review list happens after the commit; if it fails the saved import must still be reported as saved.
+        db.getWritableDatabase().execSQL("DROP TABLE capture_events");
+        eq(0,SmsImportActivity.pendingAfterCommit(db,0,Long.MAX_VALUE).size());
+        eq(1,scalar("SELECT COUNT(*) FROM transactions"));
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;
