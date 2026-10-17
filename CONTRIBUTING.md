@@ -22,6 +22,7 @@ Use the feature form for suggestions. Explain the user problem and desired behav
 - Add meaningful cases for calculation/parsing fixes, including false-positive and duplicate scenarios.
 - Use synthetic data on a disposable emulator. Do not run write-oriented instrumentation on a user's phone.
 - Run `python tools/check-repo.py` and `./tools/run-checks.ps1 -Online`; use `-Android` when changing Android storage, receivers or widgets.
+- A pull request touching `ExpenseDb.java`, `SmsReceiver.java`, `PaymentNotificationListener.java`, `SmsImportActivity.java` or `MainActivity.java` must have the emulator CI job green before merge.
 - Open a pull request describing the resulting behavior, validation and known limits. Avoid unrelated formatting and generated artifacts.
 
 Commit messages should be clear English. Do not commit or push on someone else's behalf without their authorization.
