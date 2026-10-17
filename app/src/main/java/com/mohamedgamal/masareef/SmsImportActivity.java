@@ -45,6 +45,10 @@ public final class SmsImportActivity extends Activity {
             sql.setTransactionSuccessful();return added;
         }finally {sql.endTransaction();}
     }
+    /** The review list is a read after the commit. */
+    static List<CaptureEvents.Event> pendingAfterCommit(ExpenseDb db,long start,long end) {
+        return new CaptureEvents(db).pendingHistory(start,end);
+    }
     private Session session;
     private LinearLayout page, rows, footer;
     private TextView status, selection;
@@ -311,11 +315,11 @@ public final class SmsImportActivity extends Activity {
             if(!"ready".equals(phase))return;
             List<SmsPreview> selected=new ArrayList<>();for(SmsPreview r:items)if(r.selected&&r.captureStatus!=2)selected.add(r);
             skipped=items.size()-selected.size();
-            if(selected.isEmpty()){processed=0;added=0;try(ExpenseDb read=new ExpenseDb(app)){pending=new CaptureEvents(read).pendingHistory(rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
+            if(selected.isEmpty()){processed=0;added=0;try(ExpenseDb read=new ExpenseDb(app)){pending=pendingAfterCommit(read,rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
             new Thread(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
                     added=applyBatchWithRepair(writeDb,selected);processed=selected.size();
-                    pending=new CaptureEvents(writeDb).pendingHistory(rangeStart,rangeEnd);
+                    pending=pendingAfterCommit(writeDb,rangeStart,rangeEnd);
                     mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
                     phase="done";
                     try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException refreshError){android.util.Log.e("FollowMoney","Imported data; refresh unavailable: "+refreshError.getClass().getSimpleName());}

@@ -81,6 +81,16 @@ final class AuditRegressionTest {
         eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
     }
 
+    public void testSavedSmsImportSurvivesFailureReadingReviewList(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview card=SmsPreview.parse("BANK","Card purchase EGP 55 at QA SHOP",t);ok(card!=null);
+        eq(1,SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(card)));
+        // Reading the review list happens after the commit; if it fails the saved import must still be reported as saved.
+        db.getWritableDatabase().execSQL("DROP TABLE capture_events");
+        eq(0,SmsImportActivity.pendingAfterCommit(db,0,Long.MAX_VALUE).size());
+        eq(1,scalar("SELECT COUNT(*) FROM transactions"));
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;
