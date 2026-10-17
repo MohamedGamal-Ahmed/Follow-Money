@@ -42,6 +42,7 @@ allowed_docs.update("docs/screenshots/card-settlement-2026-10-16/"+name for name
 allowed_docs.update("docs/screenshots/review-alerts-2026-10-16/"+name for name in (
     "README.md", "classification-light.png", "alerts-dark-large.png", "calendar-light.png",
     "details-dark-large.png"))
+allowed_docs.add("docs/refactor-plan.md")
 private_paths = re.compile(r"(^|/)(\.tmp|\.gradle|\.idea|build|captures|__pycache__)(/|$)|(^|/)local\.properties$|\.(apk|aab|jks|keystore|p12|pfx|dpapi\.xml|db|sqlite\w*|tar|log|hprof)(-|$)|(^|/)\.env($|\.)", re.I)
 credential = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b|\bAIza[A-Za-z0-9_-]{35}\b")
 for name in files:
@@ -86,7 +87,7 @@ for forbidden in ("ExpenseDb", "ANDROID_ID", "getSerial", "READ_SMS", "SharedPre
 
 workflow = (ROOT / ".github/workflows/android-ci.yml").read_text(encoding="utf-8")
 for action in re.findall(r"uses: (\S+)", workflow):
-    require(bool(re.fullmatch(r"actions/[a-z-]+@[0-9a-f]{40}", action)), f"CI action is not pinned: {action}")
+    require(bool(re.fullmatch(r"(actions/[a-z-]+|reactivecircus/android-emulator-runner)@[0-9a-f]{40}", action)), f"CI action is not pinned: {action}")
 require("contents: read" in workflow and "persist-credentials: false" in workflow, "CI permissions/credential isolation missing")
 require("retention-days: 7" in workflow, "CI artifact retention must remain bounded")
 require(".tmp/ci/checks.txt" in workflow and not re.search(r"^\s+\.tmp/\*|^\s+\.tmp/$", workflow, re.M), "CI must not upload private temp folders")
