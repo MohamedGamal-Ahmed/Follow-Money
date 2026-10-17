@@ -920,6 +920,18 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }finally {sql.endTransaction();}
     }
 
+    /** What one CSV import did: new rows and rows that were already there. */
+    public static final class CsvBatchResult {
+        public final int saved, duplicates;
+        CsvBatchResult(int saved, int duplicates) { this.saved=saved; this.duplicates=duplicates; }
+    }
+
+    public CsvBatchResult importCsvBatch(String fileHash, List<CsvImport.Row> rows) {
+        int saved=0, duplicates=0;
+        for (CsvImport.Row row : rows) { if (addCsvEntry(fileHash, row)) saved++; else duplicates++; }
+        return new CsvBatchResult(saved, duplicates);
+    }
+
     private boolean insertEntry(String key, long when, long amount, String currency,
                                 String merchant, String category, String source, String messageHash,
                                 String cardLast4, Long sourceId, String kind, Long destinationId, String note) {
