@@ -199,6 +199,31 @@ final class AuditRegressionTest {
         ok(!otp.dbChanged);ok(otp.transaction==null);ok(otp.event==null);
     }
 
+    public void testCaptureUseCaseKeepsEarlierSnapshotsAndSourceIdentities(){
+        long t=at(LocalDate.now(),10);
+        CaptureTransaction capture=new CaptureTransaction(db);
+        CaptureResult fresh=capture.execute(CaptureRequest.notification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
+        ok(fresh.dbChanged);ok(fresh.transaction!=null);ok(fresh.event==null);
+        long id=fresh.transaction.id;
+        CaptureResult merged=capture.execute(CaptureRequest.sms("BANK","Card purchase EGP 100 at QA SHOP",t+2000));
+        ok(merged.dbChanged);ok(merged.transaction!=null);eq(db.lastCaptured().id,merged.transaction.id);
+        ok(db.transactionById(id)==null);eq(1,db.transactionCount());
+        long cancelAt=t+3600000;
+        ok(capture.execute(CaptureRequest.sms("BANK",CANCEL_DEBIT,cancelAt)).dbChanged);
+        CaptureResult cancelled=capture.execute(CaptureRequest.sms("BANK",CANCEL_NOTICE,cancelAt+3000));
+        ok(cancelled.event!=null&&cancelled.event.cancelled());ok(cancelled.transaction==null);
+        long eventId=cancelled.event.id;
+        CaptureResult ignored=capture.execute(CaptureRequest.sms("BANK","Your OTP is 123456",cancelAt+4000));
+        ok(!ignored.dbChanged);ok(ignored.transaction==null);ok(ignored.event==null);
+        eq(id,fresh.transaction.id);eq(10000,fresh.transaction.amountMinor);ok(fresh.event==null);
+        eq(eventId,cancelled.event.id);ok(cancelled.event.cancelled());
+        String body="Card purchase EGP 37 at QA SECOND SHOP";
+        ok(capture.apply(CaptureRequest.inboxSms("BANK",body,t+20000,t+10000,true)));
+        eq(1,db.smsCaptureStatus("BANK",body,t+20000,t+10000,true));
+        ok(!db.addSms("BANK",body,t+20000,t+10000,true));
+        eq(2,db.transactionCount());
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;

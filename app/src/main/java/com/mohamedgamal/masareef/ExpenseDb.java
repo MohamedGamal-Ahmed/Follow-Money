@@ -19,6 +19,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 public final class ExpenseDb extends SQLiteOpenHelper {
+    private final CaptureTransaction capture = new CaptureTransaction(this);
     private static final String[] TRANSACTION_COLUMNS = {
             "id", "occurred_at", "amount_minor", "currency", "merchant", "category", "source", "payment_source_id", "card_last4", "kind", "destination_source_id", "note", "needs_review", "time_precision"
     };
@@ -247,7 +248,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     CaptureResult captureSms(String sender, String body, long when) {
-        return resultOf(addAutomatic(sender, sender, body, when, "SMS"));
+        return capture.execute(CaptureRequest.sms(sender, body, when));
     }
 
     /** Receipt aliases are safe only if no other inbox SMS has that exact sender/body/sent-time identity. */
@@ -269,8 +270,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public boolean addSms(String sender, String body, long receivedAt, long sentAt, boolean receiptKeySafe) {
-        long when=CaptureIdentity.smsTimestamp(receivedAt, sentAt);
-        return addAutomatic(sender, sender, body, when, "SMS", receiptKeySafe ? receivedAt : when);
+        return capture.apply(CaptureRequest.inboxSms(sender, body, receivedAt, sentAt, receiptKeySafe));
     }
 
     /** Read-only status of one inbox SMS; used to audit capture coverage on any phone. */
@@ -303,23 +303,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     CaptureResult captureNotification(String packageName, String appLabel, String body, long when) {
-        return resultOf(addAutomatic(packageName, appLabel, body, when, "إشعار: " + appLabel));
+        return capture.execute(CaptureRequest.notification(packageName, appLabel, body, when));
     }
 
-    /** Snapshot of the capture that just finished; read right after it, before another capture overwrites the fields. */
-    private CaptureResult resultOf(boolean added) {
-        return new CaptureResult(added, added ? lastCaptured() : null, lastCaptureEvent);
-    }
-
-    private boolean addAutomatic(String sourceKey, String label, String body, long receivedAt, String channel) {
-        return addAutomatic(sourceKey, label, body, receivedAt, channel, receivedAt);
-    }
-
-    private boolean addAutomatic(String sourceKey, String label, String body, long receivedAt, String channel, long legacyReceivedAt) {
-        boolean added = addAutomaticCapture(sourceKey, label, body, receivedAt, channel, legacyReceivedAt);
-        // The other leg of an own transfer, or the bank copy of an app notification, may have just arrived.
-        if (added) repairAround(receivedAt);
-        return added;
+    /** Storage seam for CaptureTransaction; the connection and transaction policy stay here. */
+    boolean addAutomaticCapture(CaptureRequest request) {
+        return addAutomaticCapture(request.sourceKey, request.label, request.body, request.captureAt,
+                request.channel, request.legacyReceivedAt, true);
     }
 
     private long lastCapturedId = -1;
@@ -329,9 +319,6 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     /** The row the latest automatic capture created, followed through any merge the repair made right after it. */
     public Transaction lastCaptured() { return lastCapturedId < 0 ? null : transactionById(lastCapturedId); }
 
-    private boolean addAutomaticCapture(String sourceKey, String label, String body, long receivedAt, String channel, long legacyReceivedAt) {
-        return addAutomaticCapture(sourceKey,label,body,receivedAt,channel,legacyReceivedAt,true);
-    }
     private boolean addAutomaticCapture(String sourceKey,String label,String body,long receivedAt,String channel,long legacyReceivedAt,boolean automaticCancellation){
         lastCaptureEvent=null;lastCapturedId=-1;
         if (body == null || ExpenseParser.isVerificationMessage(body)) return false;
