@@ -1210,17 +1210,12 @@ public final class MainActivity extends Activity {
                     if(learn && !ExpenseDb.canRememberMerchant(merchant.getText().toString(),category.getSelectedItem().toString())) {
                         toast("حفظ التصنيف متاح للمشتريات، مش التحويلات أو الأقساط");return;
                     }
-                    android.database.sqlite.SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
-                    try {
-                    db.updateTransaction(item.id, minor, currency.getSelectedItem().toString(),
+                    new TransactionMutation(db).update(item.id, minor, currency.getSelectedItem().toString(),
                             merchant.getText().toString(), "income".equals(type) ? "دخل" :
                                     "transfer".equals(type) ? "تحويلات" : category.getSelectedItem().toString(),
                             from, type, "transfer".equals(type) ? to : null, note.getText().toString(),
                             day.atTime(Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalTime())
-                                    .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
-                    if(learn) db.rememberMerchantCategory(merchant.getText().toString(),category.getSelectedItem().toString());
-                    sql.setTransactionSuccessful();
-                    } finally {sql.endTransaction();}
+                                    .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),learn);
                 } catch (RuntimeException error) { toast("تعذر الحفظ؛ راجع التاريخ والبيانات"); return; }
                 dialog.dismiss();
                 if (selectedTab == 10) selectedTransaction=db.transactionById(item.id);
