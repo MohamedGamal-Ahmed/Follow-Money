@@ -1553,7 +1553,14 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public void updateTransaction(long id, long amountMinor, String currency, String merchant,
                                   String category, Long sourceId, String kind, Long destinationId,
                                   String note, Long occurredAt) {
-        if (amountMinor <= 0 || merchant.isBlank()) return;
+        updateTransactionRow(id,amountMinor,currency,merchant,category,sourceId,kind,destinationId,note,occurredAt);
+    }
+
+    /** Affected primary rows; the public compatibility API still ignores this count. */
+    int updateTransactionRow(long id, long amountMinor, String currency, String merchant,
+                             String category, Long sourceId, String kind, Long destinationId,
+                             String note, Long occurredAt) {
+        if (amountMinor <= 0 || merchant.isBlank()) return 0;
         if(new CardSettlements(this).related(id))throw new IllegalArgumentException("Undo card repayment links before editing");
         try(Cursor fee=getReadableDatabase().rawQuery("SELECT p.currency,p.payment_source_id FROM transactions f JOIN transactions p ON p.id=f.fee_parent_id WHERE f.id=? AND f.unique_key LIKE 'card-statement-fee:%'",new String[]{Long.toString(id)})){
             if(fee.moveToFirst()&&(!currency.equals(fee.getString(0))||sourceId==null||fee.isNull(1)||sourceId!=fee.getLong(1)||kind!=null&&!"expense".equals(kind)))throw new IllegalArgumentException("Statement fee must keep the purchase currency and card");
@@ -1573,8 +1580,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (occurredAt != null) values.put("occurred_at", occurredAt);
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
-            sql.update("transactions", values, "id=?", new String[]{Long.toString(id)});
+            int affected=sql.update("transactions", values, "id=?", new String[]{Long.toString(id)});
             sql.setTransactionSuccessful();
+            return affected;
         } finally { sql.endTransaction(); }
     }
 
