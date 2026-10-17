@@ -177,6 +177,11 @@ final class AuditRegressionTest {
         ok("صحة".equals(db.merchantRules().get(0).category));
     }
 
+    public void testMissingEditedTransactionNeverLearnsMerchant(){
+        new TransactionMutation(db).update(999999,5500,"EGP","QA MISSING","صحة",null,"expense",null,"reviewed",at(LocalDate.now(),10),true);
+        eq(0,db.transactionCount());eq(0,db.merchantRules().size());
+    }
+
     public void testCaptureOutcomeNewDuplicateCancellationAndMergeFollowed(){
         long t=at(LocalDate.now(),10);
         // New: one row, no event.
