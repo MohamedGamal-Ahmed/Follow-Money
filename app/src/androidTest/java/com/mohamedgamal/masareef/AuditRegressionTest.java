@@ -91,6 +91,19 @@ final class AuditRegressionTest {
         eq(1,scalar("SELECT COUNT(*) FROM transactions"));
     }
 
+    public void testCsvBatchFaultAtRowLeavesNothingSavedAndDuplicatesAreCounted(){
+        List<CsvImport.Row> rows=CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA ONE,-1.00\n2026-10-15,QA TWO,-2.00\n2026-10-15,QA FAULT,-3.00\n2026-10-15,QA FOUR,-4.00");
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_csv_fault BEFORE INSERT ON transactions WHEN NEW.merchant='QA FAULT' BEGIN SELECT RAISE(ABORT,'qa csv fault'); END");
+        long before=db.transactionCount();
+        try{db.importCsvBatch("qa-file",rows);throw new AssertionError("Faulty CSV batch was reported as imported");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(before,db.transactionCount());
+        db.getWritableDatabase().execSQL("DROP TRIGGER qa_csv_fault");
+        ExpenseDb.CsvBatchResult first=db.importCsvBatch("qa-file",rows);eq(4,first.saved);eq(0,first.duplicates);
+        ExpenseDb.CsvBatchResult again=db.importCsvBatch("qa-file",rows);eq(0,again.saved);eq(4,again.duplicates);
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;
