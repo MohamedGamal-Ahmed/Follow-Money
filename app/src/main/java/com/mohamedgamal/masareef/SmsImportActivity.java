@@ -32,6 +32,19 @@ public final class SmsImportActivity extends Activity {
             sql.setTransactionSuccessful();return added;
         }finally {sql.endTransaction();}
     }
+    /** One approved import: the batch and the repair around it share one transaction owned here. Returns the net ledger increase. */
+    static long applyBatchWithRepair(ExpenseDb db,List<SmsPreview> selected) {
+        android.database.sqlite.SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try {
+            long before=db.transactionCount();applySelected(db,selected);
+            // Do not run a global transfer repair here: unselected history must stay untouched.
+            long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
+            for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}
+            db.repairBetween(first-86_400_000L,last+86_400_000L);
+            long added=db.transactionCount()-before;
+            sql.setTransactionSuccessful();return added;
+        }finally {sql.endTransaction();}
+    }
     private Session session;
     private LinearLayout page, rows, footer;
     private TextView status, selection;
@@ -301,16 +314,8 @@ public final class SmsImportActivity extends Activity {
             if(selected.isEmpty()){processed=0;added=0;try(ExpenseDb read=new ExpenseDb(app)){pending=new CaptureEvents(read).pendingHistory(rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
             new Thread(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
-                    // Do not run a global transfer repair here: unselected history must stay untouched.
-                    android.database.sqlite.SQLiteDatabase sql=writeDb.getWritableDatabase();sql.beginTransaction();
-                    try{
-                    long before=writeDb.transactionCount();applySelected(writeDb,selected);processed=selected.size();
-                    // Only around the imported messages: their bank/app copies and own-transfer legs.
-                    long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
-                    for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}
-                    writeDb.repairBetween(first-86_400_000L,last+86_400_000L);
-                    added=writeDb.transactionCount()-before;pending=new CaptureEvents(writeDb).pendingHistory(rangeStart,rangeEnd);sql.setTransactionSuccessful();
-                    }finally{sql.endTransaction();}
+                    added=applyBatchWithRepair(writeDb,selected);processed=selected.size();
+                    pending=new CaptureEvents(writeDb).pendingHistory(rangeStart,rangeEnd);
                     mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
                     phase="done";
                     try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException refreshError){android.util.Log.e("FollowMoney","Imported data; refresh unavailable: "+refreshError.getClass().getSimpleName());}
