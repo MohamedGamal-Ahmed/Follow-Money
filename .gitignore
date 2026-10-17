@@ -40,6 +40,7 @@ docs/*
 !docs/RELEASE_FREEZE_2026-10-14.md
 !docs/CLAUDE_AUDIT_TRIAGE_2026-10-15.md
 !docs/CLOSED_TESTING_PLAN.md
+!docs/refactor-plan.md
 !docs/NEXT_STEPS_2026-10-13.md
 !docs/screenshots/
 !docs/brand-catalog-2026-10-10/
