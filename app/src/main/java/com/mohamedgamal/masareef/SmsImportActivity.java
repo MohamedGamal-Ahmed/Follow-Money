@@ -45,9 +45,10 @@ public final class SmsImportActivity extends Activity {
             sql.setTransactionSuccessful();return added;
         }finally {sql.endTransaction();}
     }
-    /** The review list is a read after the commit. */
+    /** The review list is a read after the commit: failing to read it must never turn a saved import into a reported failure. */
     static List<CaptureEvents.Event> pendingAfterCommit(ExpenseDb db,long start,long end) {
-        return new CaptureEvents(db).pendingHistory(start,end);
+        try {return new CaptureEvents(db).pendingHistory(start,end);}
+        catch(RuntimeException unreadable){android.util.Log.e("FollowMoney","Imported data; review list unavailable: "+unreadable.getClass().getSimpleName());return Collections.emptyList();}
     }
     private Session session;
     private LinearLayout page, rows, footer;
@@ -319,8 +320,8 @@ public final class SmsImportActivity extends Activity {
             new Thread(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
                     added=applyBatchWithRepair(writeDb,selected);processed=selected.size();
-                    pending=pendingAfterCommit(writeDb,rangeStart,rangeEnd);
                     mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
+                    pending=pendingAfterCommit(writeDb,rangeStart,rangeEnd);
                     phase="done";
                     try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException refreshError){android.util.Log.e("FollowMoney","Imported data; refresh unavailable: "+refreshError.getClass().getSimpleName());}
                     publish(true);
