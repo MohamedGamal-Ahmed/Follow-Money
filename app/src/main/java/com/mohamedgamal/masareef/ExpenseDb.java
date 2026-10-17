@@ -20,10 +20,7 @@ import java.util.Set;
 
 public final class ExpenseDb extends SQLiteOpenHelper {
     private final CaptureTransaction capture = new CaptureTransaction(this);
-    private static final String[] TRANSACTION_COLUMNS = {
-            "id", "occurred_at", "amount_minor", "currency", "merchant", "category", "source", "payment_source_id", "card_last4", "kind", "destination_source_id", "note", "needs_review", "time_precision"
-    };
-
+    private final TransactionRepository transactionRows = new TransactionRepository(this);
     public ExpenseDb(Context context) {
         super(context, "masareef.db", null, 23);
     }
@@ -1357,41 +1354,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         getWritableDatabase().delete("debts", "id=?", new String[]{Long.toString(id)});
     }
 
-    public List<Transaction> transactions() {
-        List<Transaction> result = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
-                null, null, null, null, "occurred_at DESC", "500")) {
-            while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
-                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
-                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
-        }
-        return result;
-    }
+    public List<Transaction> transactions() { return transactionRows.transactions(); }
 
-    /**
-     * Expenses from the last year, newest first: recurring-payment suggestions only compare payments
-     * about a month apart, so they never need the whole ledger.
-     */
-    public List<Transaction> recurringCandidateTransactions() {
-        List<Transaction> result = new ArrayList<>();
-        long since = java.time.LocalDate.now().minusMonths(12).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
-        try (Cursor cursor = getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
-                "kind='expense' AND occurred_at>=?", new String[]{Long.toString(since)}, null, null, "occurred_at DESC", null)) {
-            while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
-                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
-                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
-        }
-        return result;
-    }
+    public List<Transaction> recurringCandidateTransactions() { return transactionRows.recurringCandidateTransactions(); }
 
     /** Uncapped ledger count; UI lists intentionally show only the latest 500 rows. */
-    public long transactionCount() {
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM transactions",null)) {
-            c.moveToFirst();return c.getLong(0);
-        }
-    }
+    public long transactionCount() { return transactionRows.transactionCount(); }
 
     /**
      * SQLite's per-connection change counter. Every local write bumps it, so a cached suggestion set can
@@ -1403,58 +1371,18 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
     }
 
-    /** The row inserted most recently, used for the instant capture notification. */
-    public Transaction latestInserted() {
-        return transactionWhere(null, null, "id DESC");
-    }
+    public Transaction latestInserted() { return transactionRows.latestInserted(); }
 
-    public Transaction transactionById(long id) {
-        return transactionWhere("id=?", new String[]{Long.toString(id)}, null);
-    }
+    public Transaction transactionById(long id) { return transactionRows.transactionById(id); }
 
-    private Transaction transactionWhere(String where, String[] args, String order) {
-        try (Cursor cursor = getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
-                where, args, null, null, order, "1")) {
-            if (!cursor.moveToFirst()) return null;
-            return new Transaction(cursor.getLong(0), cursor.getLong(1),
-                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
-                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13));
-        }
-    }
-
-    public List<Transaction> transactionsForMonth(LocalDate month) {
-        long start = month.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        long end = month.plusMonths(1).withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        List<Transaction> result = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
-                "occurred_at>=? AND occurred_at<?", new String[]{Long.toString(start), Long.toString(end)},
-                null, null, "occurred_at DESC")) {
-            while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
-                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
-                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
-        }
-        return result;
-    }
+    public List<Transaction> transactionsForMonth(LocalDate month) { return transactionRows.transactionsForMonth(month); }
 
     public List<Transaction> transactionsBetween(LocalDate startDate, LocalDate endExclusive) {
-        return transactionsBetween(startDate,endExclusive,ZoneId.systemDefault());
+        return transactionRows.transactionsBetween(startDate,endExclusive);
     }
 
     public List<Transaction> transactionsBetween(LocalDate startDate, LocalDate endExclusive,ZoneId zone) {
-        long start = startDate.atStartOfDay(zone).toInstant().toEpochMilli();
-        long end = endExclusive.atStartOfDay(zone).toInstant().toEpochMilli();
-        List<Transaction> result = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
-                "occurred_at>=? AND occurred_at<?", new String[]{Long.toString(start), Long.toString(end)},
-                null, null, "occurred_at DESC,id DESC")) {
-            while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
-                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
-                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
-        }
-        return result;
+        return transactionRows.transactionsBetween(startDate,endExclusive,zone);
     }
 
     public List<String> months() {
