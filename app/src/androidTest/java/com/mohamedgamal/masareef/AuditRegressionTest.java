@@ -182,6 +182,23 @@ final class AuditRegressionTest {
         ok(db.lastCaptureEvent()!=null);ok(db.lastCaptureEvent().cancelled());ok(db.lastCaptured()==null);
     }
 
+    public void testCaptureResultMatchesLegacyAccessorsForEveryOutcome(){
+        long t=at(LocalDate.now(),10);
+        CaptureResult fresh=db.captureNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t);
+        ok(fresh.dbChanged);ok(fresh.transaction!=null);eq(db.lastCaptured().id,fresh.transaction.id);ok(fresh.event==null);
+        CaptureResult duplicate=db.captureNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t);
+        ok(!duplicate.dbChanged);ok(duplicate.transaction==null);ok(duplicate.event==null);
+        long rows=db.transactionCount();
+        CaptureResult merged=db.captureSms("BANK","Card purchase EGP 100 at QA SHOP",t+2000);
+        ok(merged.dbChanged);ok(merged.transaction!=null);eq(db.lastCaptured().id,merged.transaction.id);eq(rows,db.transactionCount());ok(db.transactionById(merged.transaction.id)!=null);
+        long cancelAt=t+3600000;
+        ok(db.captureSms("BANK",CANCEL_DEBIT,cancelAt).dbChanged);
+        CaptureResult cancelled=db.captureSms("BANK",CANCEL_NOTICE,cancelAt+3000);
+        ok(cancelled.dbChanged);ok(cancelled.transaction==null);ok(cancelled.event!=null&&cancelled.event.cancelled());eq(db.lastCaptureEvent().id,cancelled.event.id);
+        CaptureResult otp=db.captureSms("BANK","Your OTP is 123456 for payment EGP 227",cancelAt+4000);
+        ok(!otp.dbChanged);ok(otp.transaction==null);ok(otp.event==null);
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;

@@ -56,14 +56,15 @@ public final class PaymentNotificationListener extends NotificationListenerServi
             catch (Exception ignored) { label = packageName; }
             try (ExpenseDb db = new ExpenseDb(context)) {
                 ExpenseDb.Transaction before = db.latestInserted();
-                boolean added = db.addNotification(packageName, label, body, item.getPostTime());
+                CaptureResult result = db.captureNotification(packageName, label, body, item.getPostTime());
+                boolean added = result.dbChanged;
                 if (added || CommitmentHint.parse(label, body, item.getPostTime()) != null ||
                         CommitmentHint.completedPlanKey(label, body) != null)
                     SmsReceiver.notifyDataChanged(context);
                 else DailyRefreshReceiver.refresh(context);
-                if(System.currentTimeMillis()-item.getPostTime()<10*60*1000)CaptureNotifier.notifyEvent(context,db.lastCaptureEvent());
+                if(System.currentTimeMillis()-item.getPostTime()<10*60*1000)CaptureNotifier.notifyEvent(context,result.event);
                 if (added) {
-                    ExpenseDb.Transaction after = db.lastCaptured();
+                    ExpenseDb.Transaction after = result.transaction;
                     // Notifications already on screen when access is granted are old; only announce new ones.
                     if (after != null && (before == null || after.id > before.id) &&
                             System.currentTimeMillis() - item.getPostTime() < 10 * 60 * 1000)

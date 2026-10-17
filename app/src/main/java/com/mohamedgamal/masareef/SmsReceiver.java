@@ -58,11 +58,12 @@ public final class SmsReceiver extends BroadcastReceiver {
             for (SmsParts.Message message : parts.messages.values()) {
                 String sender=message.sender,body=message.body.toString();
                 ExpenseDb.Transaction before = db.latestInserted();
-                boolean added = db.addSms(sender,body,message.when);
+                CaptureResult result = db.captureSms(sender,body,message.when);
+                boolean added = result.dbChanged;
                 changed |= added || CommitmentHint.parse(sender, body,message.when) != null ||
                         CommitmentHint.completedPlanKey(sender, body) != null;
-                CaptureNotifier.notifyEvent(context,db.lastCaptureEvent());
-                ExpenseDb.Transaction after = added ? db.lastCaptured() : null;
+                CaptureNotifier.notifyEvent(context,result.event);
+                ExpenseDb.Transaction after = result.transaction;
                 if (after != null && (before == null || after.id > before.id)) CaptureNotifier.notify(context, after);
             }
         }
