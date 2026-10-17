@@ -200,6 +200,63 @@ final class AuditRegressionTest {
         eq(10000,db.transactionById(id).amountMinor);eq(0,db.merchantRules().size());
     }
 
+    private void assertReviewedSourceRejected(){
+        try{new SourceMutation(db).createReviewed("HSBC","حساب","9988");throw new AssertionError("Incomplete source reported as saved");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(0,scalar("SELECT COUNT(*) FROM payment_sources"));eq(0,scalar("SELECT COUNT(*) FROM source_aliases"));
+    }
+
+    public void testReviewedSourceAliasFailureRollsBackAndCanBeRetried(){
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_alias_abort BEFORE INSERT ON source_aliases BEGIN SELECT RAISE(ABORT,'qa alias fault'); END");
+        assertReviewedSourceRejected();
+        db.getWritableDatabase().execSQL("DROP TRIGGER qa_alias_abort");
+        long id=new SourceMutation(db).createReviewed("HSBC","حساب","9988");
+        ok(id>0);ok(db.paymentSource(id).reviewed);eq(1,db.sourceAliasCount(id));eq(1,db.paymentSources().size());
+    }
+
+    public void testReviewedSourceRefusedAliasRollsBack(){
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_alias_ignore BEFORE INSERT ON source_aliases BEGIN SELECT RAISE(IGNORE); END");
+        assertReviewedSourceRejected();
+    }
+
+    public void testReviewedSourceProfileFailureRollsBackRowAndAlias(){
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_profile_abort BEFORE UPDATE ON payment_sources BEGIN SELECT RAISE(ABORT,'qa profile fault'); END");
+        assertReviewedSourceRejected();
+    }
+
+    public void testReviewedSourceRefusedProfileRollsBackRowAndAlias(){
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_profile_ignore BEFORE UPDATE ON payment_sources BEGIN SELECT RAISE(IGNORE); END");
+        assertReviewedSourceRejected();
+    }
+
+    public void testReviewedSourceRefusedInsertNeverReportsAnId(){
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_source_ignore BEFORE INSERT ON payment_sources BEGIN SELECT RAISE(IGNORE); END");
+        assertReviewedSourceRejected();
+    }
+
+    public void testReviewedSourceDuplicateIdentityKeepsItsExistingOwner(){
+        long existing=db.addPaymentSource("HSBC","حساب","9988");
+        long id=new SourceMutation(db).createReviewed("HSBC","بطاقة","9988");
+        ok(id>0&&id!=existing);ok(db.paymentSource(id).reviewed);eq(2,db.paymentSources().size());
+        eq(1,db.sourceAliasCount(existing));eq(0,db.sourceAliasCount(id));
+    }
+
+    public void testReviewedSourceWithoutIdentityIsAllowed(){
+        long id=new SourceMutation(db).createReviewed("QA cash","كاش",null);
+        ExpenseDb.PaymentSource source=db.paymentSource(id);ok(source!=null&&source.reviewed);ok(source.last4==null);
+        eq(0,db.sourceAliasCount(id));
+    }
+
+    public void testReviewedSourceCannotReportSuccessInsideAnotherTransaction(){
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try{
+            try{new SourceMutation(db).createReviewed("HSBC","حساب","9988");throw new AssertionError("Source ID escaped before caller commit");}
+            catch(IllegalStateException expected){}
+        }finally{sql.endTransaction();}
+        eq(0,db.paymentSources().size());eq(0,scalar("SELECT COUNT(*) FROM source_aliases"));
+    }
+
     public void testCaptureOutcomeNewDuplicateCancellationAndMergeFollowed(){
         long t=at(LocalDate.now(),10);
         // New: one row, no event.

@@ -167,9 +167,19 @@ final class AccountRepository {
     }
 
     void updateSourceProfile(long id,String displayName,boolean archived,boolean reviewed) {
+        updateSourceProfileRow(id,displayName,archived,reviewed);
+    }
+
+    int updateSourceProfileRow(long id,String displayName,boolean archived,boolean reviewed) {
         ContentValues values=new ContentValues();values.put("display_name",displayName==null?"":displayName.trim());
         values.put("archived",archived?1:0);values.put("reviewed",reviewed?1:0);
-        db.getWritableDatabase().update("payment_sources",values,"id=?",new String[]{Long.toString(id)});
+        return db.getWritableDatabase().update("payment_sources",values,"id=?",new String[]{Long.toString(id)});
+    }
+
+    boolean hasSourceAlias(String identity) {
+        try(Cursor cursor=db.getReadableDatabase().rawQuery("SELECT 1 FROM source_aliases WHERE identity=?",new String[]{identity})) {
+            return cursor.moveToFirst();
+        }
     }
 
     void deletePaymentSource(long id) {
