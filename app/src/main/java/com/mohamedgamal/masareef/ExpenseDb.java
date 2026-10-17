@@ -1893,10 +1893,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 String bank="البنك";for(PaymentSource source:paymentSources()) if(source.id==from) bank=source.name;
                 boolean added=insertEntry("fee:"+debitId,debit.when,fee,debit.currency,"رسوم تحويل "+bank,"رسوم تحويل",
                         "رسوم من العملية",null,null,from,"expense",null,"رسوم مؤكدة من فرق الخصم وأصل التحويل");
-                if(added) {
-                    ContentValues related=new ContentValues();related.put("fee_parent_id",debitId);related.put("user_edited",1);
-                    writable.update("transactions",related,"unique_key=?",new String[]{"fee:"+debitId});
-                }
+                // The debit was already rewritten to the principal: a fee that is not saved must undo the whole split.
+                if(!added) throw new IllegalArgumentException("Fee could not be saved; transfer left unchanged");
+                ContentValues related=new ContentValues();related.put("fee_parent_id",debitId);related.put("user_edited",1);
+                if(writable.update("transactions",related,"unique_key=?",new String[]{"fee:"+debitId})!=1)
+                    throw new IllegalArgumentException("Fee could not be linked; transfer left unchanged");
             }
             writable.setTransactionSuccessful();
         } finally {writable.endTransaction();}
