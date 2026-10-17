@@ -4,8 +4,11 @@ import java.util.Locale;
 /** Logos are presentation only; aliases never merge banks, accounts or transactions. */
 final class BrandCatalog {
     private static final class Entry {
-        final String id; final boolean bank; final String[] aliases;
-        Entry(String id,boolean bank,String[] aliases){this.id=id;this.bank=bank;this.aliases=aliases;}
+        final String id; final boolean bank; final boolean wholeName; final String[] aliases;
+        Entry(String id,boolean bank,String[] aliases){this(id,bank,false,aliases);}
+        /** wholeName: the alias may only match the complete name, never a longer merchant descriptor. */
+        Entry(String id,boolean bank,boolean wholeName,String[] aliases){
+            this.id=id;this.bank=bank;this.wholeName=wholeName;this.aliases=aliases;}
     }
     private static final Entry[] ENTRIES={
         new Entry("bank_misr",true,new String[]{"BM","BM-Online","Bank Misr","بنك مصر","Banque Misr","BM Online"}),
@@ -23,7 +26,9 @@ final class BrandCatalog {
         new Entry("carrefour",false,new String[]{"Carrefour","كارفور"}),
         new Entry("mcdonalds",false,new String[]{"McDonald's","ماكدونالدز","MCDONALD","McDonalds","McDonald s","ماكدونالد"}),
         new Entry("kfc",false,new String[]{"KFC","كنتاكي"}),
+        new Entry("ubereats",false,new String[]{"Uber Eats","UberEats"}),
         new Entry("uber",false,new String[]{"Uber","أوبر"}),
+        new Entry("claude",false,new String[]{"Claude","Anthropic"}),
         new Entry("netflix",false,new String[]{"Netflix","نتفليكس"}),
         new Entry("spotify",false,new String[]{"Spotify","سبوتيفاي"}),
         new Entry("ikea",false,new String[]{"IKEA","إيكيا"}),
@@ -36,8 +41,8 @@ final class BrandCatalog {
         new Entry("vodafone",false,new String[]{"Vodafone","فودافون"}),
         new Entry("orange",false,new String[]{"Orange","أورنج"}),
         new Entry("paypal",false,new String[]{"PayPal","بايبال"}),
-        new Entry("visa",false,new String[]{"Visa","فيزا"}),
-        new Entry("mastercard",false,new String[]{"MasterCard","ماستركارد"}),
+        new Entry("visa",false,true,new String[]{"Visa","فيزا"}),
+        new Entry("mastercard",false,true,new String[]{"MasterCard","ماستركارد"}),
         new Entry("talabat",false,new String[]{"TALABAT","طلبات","Talabat"}),
         new Entry("cleopatra",false,new String[]{"CLEOPATRA HOSPITAL","كليوباترا","مستشفيات كليوباترا","Cleopatra Hospitals Group"}),
         new Entry("espressolab",false,new String[]{"Espressolab","Espresso Lab","إسبريسو لاب","اسبرسو لاب"}),
@@ -51,8 +56,8 @@ final class BrandCatalog {
         for(Entry e:ENTRIES)if(e.bank==bank)for(String raw:e.aliases) {
             String alias=normalize(raw);
             if(value.equals(alias))return e.id;
-            // Only strong aliases can accept branch/service suffixes. Short codes require exact match.
-            if(alias.length()>=4&&value.startsWith(alias+" "))return e.id;
+            // Only strong aliases can accept branch/service suffixes. Short codes and card networks require the whole name.
+            if(!e.wholeName&&alias.length()>=4&&value.startsWith(alias+" "))return e.id;
         }
         return null;
     }

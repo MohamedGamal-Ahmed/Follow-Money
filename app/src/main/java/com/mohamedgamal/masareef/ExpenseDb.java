@@ -20,11 +20,11 @@ import java.util.Set;
 
 public final class ExpenseDb extends SQLiteOpenHelper {
     private static final String[] TRANSACTION_COLUMNS = {
-            "id", "occurred_at", "amount_minor", "currency", "merchant", "category", "source", "payment_source_id", "card_last4", "kind", "destination_source_id", "note", "needs_review"
+            "id", "occurred_at", "amount_minor", "currency", "merchant", "category", "source", "payment_source_id", "card_last4", "kind", "destination_source_id", "note", "needs_review", "time_precision"
     };
 
     public ExpenseDb(Context context) {
-        super(context, "masareef.db", null, 20);
+        super(context, "masareef.db", null, 23);
     }
 
     @Override public void onCreate(SQLiteDatabase db) {
@@ -32,7 +32,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 "occurred_at INTEGER NOT NULL, received_at INTEGER NOT NULL, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL, " +
                 "merchant TEXT NOT NULL, category TEXT NOT NULL, source TEXT NOT NULL, message_hash TEXT, " +
                 "payment_source_id INTEGER, card_last4 TEXT, kind TEXT NOT NULL DEFAULT 'expense', " +
-                "destination_source_id INTEGER, note TEXT, user_edited INTEGER NOT NULL DEFAULT 0, needs_review INTEGER NOT NULL DEFAULT 0, fee_parent_id INTEGER)");
+                "destination_source_id INTEGER, note TEXT, user_edited INTEGER NOT NULL DEFAULT 0, needs_review INTEGER NOT NULL DEFAULT 0, fee_parent_id INTEGER, " +
+                "time_precision TEXT CHECK(time_precision IN ('exact','date_only')))");
         db.execSQL("CREATE INDEX transaction_date ON transactions(occurred_at DESC)");
         db.execSQL("CREATE INDEX transaction_message_hash ON transactions(message_hash, occurred_at)");
         db.execSQL("CREATE TABLE excluded_messages (unique_key TEXT PRIMARY KEY)");
@@ -61,6 +62,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         createRepairTables(db);
         createReimbursements(db);
         db.execSQL("ALTER TABLE recurring ADD COLUMN last_paid_due TEXT");
+        CardSettlements.create(db);CaptureEvents.create(db);createImportReceipts(db);
     }
 
     /** v20: an incoming payment that returns money spent on someone else's behalf, linked to that purchase. */
@@ -185,6 +187,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             createReimbursements(db);
             db.execSQL("ALTER TABLE recurring ADD COLUMN last_paid_due TEXT");
         }
+        if(oldVersion<21)db.execSQL("ALTER TABLE transactions ADD COLUMN time_precision TEXT CHECK(time_precision IN ('exact','date_only'))");
+        if(oldVersion<22){CardSettlements.create(db);CaptureEvents.create(db);}
+        if(oldVersion<23){CaptureEvents.ensureTimeline(db);createImportReceipts(db);}
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
@@ -228,6 +233,15 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 "PRIMARY KEY(plan_id,category))");
     }
 
+    private static void createImportReceipts(SQLiteDatabase sql){sql.execSQL("CREATE TABLE IF NOT EXISTS sms_import_receipts(unique_key TEXT PRIMARY KEY)");}
+    /** Historical cancellation is evidence for explicit review; it must not archive a debit unattended. */
+    boolean addHistoricalSms(SmsPreview row){
+        lastCaptureEvent=null;lastCapturedId=-1;
+        if(smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe)!=0)return false;
+        boolean added=addAutomaticCapture(row.sender,row.sender,row.body,row.captureAt,"SMS",row.receiptKeySafe?row.receivedAt:row.captureAt,false);
+        ContentValues receipt=new ContentValues();receipt.put("unique_key",sha256(row.sender+"\n"+row.captureAt+"\n"+row.body));getWritableDatabase().insertWithOnConflict("sms_import_receipts",null,receipt,SQLiteDatabase.CONFLICT_IGNORE);
+        return added;
+    }
     public boolean addSms(String sender, String body, long when) {
         return addAutomatic(sender, sender, body, when, "SMS");
     }
@@ -276,6 +290,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 "SELECT 1 FROM excluded_messages WHERE unique_key IN (?,?)", new String[]{key,legacyKey})) {
             if (c.moveToFirst()) return 2;
         }
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM sms_import_receipts WHERE unique_key IN (?,?) UNION ALL SELECT 1 FROM capture_events WHERE event_key IN (?,?) AND source='SMS' LIMIT 1",new String[]{key,legacyKey,key,legacyKey})){if(c.moveToFirst())return 1;}
         return 0;
     }
 
@@ -295,11 +310,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     private long lastCapturedId = -1;
+    private CaptureEvents.Event lastCaptureEvent;
+    CaptureEvents.Event lastCaptureEvent(){return lastCaptureEvent;}
 
     /** The row the latest automatic capture created, followed through any merge the repair made right after it. */
     public Transaction lastCaptured() { return lastCapturedId < 0 ? null : transactionById(lastCapturedId); }
 
     private boolean addAutomaticCapture(String sourceKey, String label, String body, long receivedAt, String channel, long legacyReceivedAt) {
+        return addAutomaticCapture(sourceKey,label,body,receivedAt,channel,legacyReceivedAt,true);
+    }
+    private boolean addAutomaticCapture(String sourceKey,String label,String body,long receivedAt,String channel,long legacyReceivedAt,boolean automaticCancellation){
+        lastCaptureEvent=null;lastCapturedId=-1;
         if (body == null || ExpenseParser.isVerificationMessage(body)) return false;
         SQLiteDatabase writable = getWritableDatabase();
         writable.beginTransaction();
@@ -310,15 +331,18 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 if(excluded.moveToFirst()) {writable.setTransactionSuccessful();return false;}
             }
             String hash = sha256(sourceKey + "\n" + body.trim());
-            long eventAt = ExpenseParser.eventTime(body, receivedAt);
+            ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(body,receivedAt);
+            long eventAt = event.when;
             if (ExpenseParser.isFutureOnly(body)) {
                 markRejectedCaptureForReview(hash, eventAt);
                 writable.setTransactionSuccessful();
                 return false;
             }
-            if (ExpenseParser.isUnsuccessful(body)) {
+            if (ExpenseParser.isUnsuccessful(body) || CaptureNotice.parse(label,body)!=null) {
                 markRejectedCaptureForReview(hash, eventAt);
-                boolean cancelled = applyCancellation(label, body, receivedAt);
+                CaptureNotice notice=CaptureNotice.parse(label,body);
+                if(notice!=null)lastCaptureEvent=new CaptureEvents(this).record(label,channel,body,receivedAt,key,notice,automaticCancellation);
+                boolean cancelled=lastCaptureEvent!=null;
                 writable.setTransactionSuccessful();
                 return cancelled;
             }
@@ -339,6 +363,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 boolean paid = service != null && markServicePaid(service, receivedAt);
                 writable.setTransactionSuccessful(); return paid;
             }
+            if(CaptureNotice.cardRepayment(body))parsed=new ExpenseParser.Parsed(parsed.amountMinor,parsed.currency,parsed.merchant,parsed.category,ExpenseParser.debitAccountLast4(body));
             Long account = autoSource(label, parsed.cardLast4, body);
             String normalized = CaptureIdentity.normalized(label, body);
             String reference = CaptureIdentity.reference(label, body);
@@ -347,18 +372,22 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if (existing < 0 && !key.equals(legacyKey)) existing = rowForKey(legacyKey);
             long prefixRow = "SMS".equals(channel) ? legacyTruncatedRow(sourceKey,body,eventAt,parsed,direction,account,reference) : -1;
             if (prefixRow >= 0 && compatibleReference(prefixRow, reference)) {
-                if (existing >= 0 && existing != prefixRow) mergeEntries(prefixRow, existing, "same SMS: abbreviated and complete source");
-                existing = prefixRow;
+                if (existing < 0 || existing == prefixRow || mergeEntries(prefixRow, existing, "same SMS: abbreviated and complete source"))
+                    existing = prefixRow;
             }
             boolean added = false;
-            if (existing >= 0) syncAutomatic(existing, parsed, direction, account, body, eventAt);
+            if (existing >= 0) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision);
             else {
                 String kind = transfer != null && isOwnHandle(transfer.counterpart) ? "transfer" : direction;
                 added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
                         "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
                         "transfer".equals(kind) && "income".equals(direction) ? null : account, kind,
                         "transfer".equals(kind) && "income".equals(direction) ? account : null, null, receivedAt);
-                if (added) { existing = latestInserted().id; lastCapturedId = existing; }
+                if (added) {
+                    existing = latestInserted().id; lastCapturedId = existing;
+                    ContentValues precision=new ContentValues();precision.put("time_precision",event.precision);
+                    writable.update("transactions",precision,"id=?",new String[]{Long.toString(existing)});
+                }
             }
             if (existing >= 0) {
                 ContentValues evidence = new ContentValues();
@@ -367,9 +396,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 evidence.put("source", channel); evidence.put("sender", label); evidence.put("received_at", receivedAt);
                 evidence.put("direction", direction); evidence.put("encrypted_body", EvidenceVault.encrypt(body));
                 writable.insertWithOnConflict("capture_evidence", null, evidence, SQLiteDatabase.CONFLICT_REPLACE);
-                if (added && "expense".equals(direction) && !linkTransferToCommitment(existing))
+                if (added && !CaptureNotice.cardRepayment(body) && "expense".equals(direction) && !linkTransferToCommitment(existing))
                     advanceRecurring(parsed.merchant, parsed.amountMinor, parsed.currency, receivedAt);
             }
+            if(automaticCancellation&&existing>=0){CaptureEvents.Event resolved=new CaptureEvents(this).reconcilePending(existing);if(resolved!=null)lastCaptureEvent=resolved;}
             writable.setTransactionSuccessful(); return added;
         } finally { writable.endTransaction(); }
     }
@@ -426,14 +456,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return -1;
     }
 
-    private void syncAutomatic(long id, ExpenseParser.Parsed parsed, String direction, Long account, String body, long eventAt) {
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT merchant,amount_minor,currency,kind,user_edited,category,payment_source_id,destination_source_id " +
+    private void syncAutomatic(long id, ExpenseParser.Parsed parsed, String direction, Long account, String body, long eventAt,String timePrecision) {
+        if(new CardSettlements(this).related(id)) return;
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT merchant,amount_minor,currency,kind,user_edited,category,payment_source_id,destination_source_id,time_precision " +
                 "FROM transactions WHERE id=?", new String[]{Long.toString(id)})) {
             if (!c.moveToFirst()) return;
             String oldMerchant=c.getString(0), oldKind=c.getString(3); long oldAmount=c.getLong(1);
             ContentValues values=new ContentValues();
             if (c.getInt(4)==0) {
                 values.put("occurred_at",eventAt);
+                // Never infer precision for legacy rows, even when re-importing their evidence.
+                if(!c.isNull(8))values.put("time_precision",timePrecision);
                 ExpenseParser.Balance balance=ExpenseParser.parseBalance(body);
                 boolean correction = oldAmount==parsed.amountMinor || oldAmount==parsed.amountMinor*10 ||
                         balance!=null && oldAmount==balance.amountMinor || !c.getString(2).equals(parsed.currency);
@@ -467,13 +500,43 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 new String[]{oldMerchant,Long.toString(oldAmount),currency,account==null?"-1":Long.toString(account)});
     }
 
-    private void archiveEntry(long id,String reason,boolean exclude) {
+    /** A row's live dependents share its life: bank-fee children and reimbursement links must go with it. */
+    private void deleteDependentRows(long id) {
         SQLiteDatabase writable=getWritableDatabase();
+        CardSettlements.removeRelations(writable,id);
+        writable.delete("transactions","fee_parent_id=?",new String[]{Long.toString(id)});
+        writable.delete("reimbursements","income_id=? OR expense_id=?",new String[]{Long.toString(id),Long.toString(id)});
+    }
+
+    void archiveEntry(long id,String reason,boolean exclude) {
+        SQLiteDatabase writable=getWritableDatabase();
+        boolean own=!writable.inTransaction();
+        if(own) writable.beginTransaction();
+        try {
+            // Bank-fee children share the parent's life. They are archived with it, never hard-deleted,
+            // so the archive keeps the whole story in the same transaction.
+            java.util.List<Long> fees=new java.util.ArrayList<>();
+            try(Cursor c=writable.rawQuery("SELECT id FROM transactions WHERE fee_parent_id=? ORDER BY id",
+                    new String[]{Long.toString(id)})) {
+                while(c.moveToNext()) fees.add(c.getLong(0));
+            }
+            for(long fee:fees) archiveRow(writable,fee,reason,exclude);
+            archiveRow(writable,id,reason,exclude);
+            if(own) writable.setTransactionSuccessful();
+        } finally {
+            if(own) writable.endTransaction();
+        }
+    }
+
+    private void archiveRow(SQLiteDatabase writable,long id,String reason,boolean exclude) {
         try (Cursor c=writable.rawQuery("SELECT * FROM transactions WHERE id=?",new String[]{Long.toString(id)})) {
             if (!c.moveToFirst()) return;
             org.json.JSONObject payload=new org.json.JSONObject();
             try {
                 for (int i=0;i<c.getColumnCount();i++) payload.put(c.getColumnName(i),c.isNull(i)?org.json.JSONObject.NULL:c.getString(i));
+                // The row's live reimbursement links disappear with it; keep them in the payload for review.
+                payload.put("removed_reimbursements",removedReimbursements(writable,id));
+                payload.put("card_settlement",new CardSettlements(this).history(id));
                 if (exclude) {
                     // Keep the (still encrypted) source messages with the archived row, so a correction stays provable.
                     org.json.JSONArray evidence=new org.json.JSONArray();
@@ -497,22 +560,86 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?",new Object[]{id});
                 writable.delete("capture_evidence","transaction_id=?",new String[]{Long.toString(id)});
             }
+            deleteDependentRows(id);
             writable.delete("transactions","id=?",new String[]{Long.toString(id)});
         }
     }
 
-    private void mergeEntries(long keep,long remove,String reason) {
-        if (keep==remove) return;
-        if (lastCapturedId==remove) lastCapturedId=keep;
-        Transaction kept=transactionById(keep), removed=transactionById(remove);
-        if (kept==null || removed==null) return;
-        ContentValues values=new ContentValues();
-        if (kept.paymentSourceId==null && removed.paymentSourceId!=null) values.put("payment_source_id",removed.paymentSourceId);
-        if (kept.destinationSourceId==null && removed.destinationSourceId!=null) values.put("destination_source_id",removed.destinationSourceId);
-        if ("transfer".equals(removed.kind)) { values.put("kind","transfer");values.put("category","تحويلات"); }
-        if (values.size()>0) getWritableDatabase().update("transactions",values,"id=?",new String[]{Long.toString(keep)});
-        getWritableDatabase().execSQL("UPDATE capture_evidence SET transaction_id=? WHERE transaction_id=?",new Object[]{keep,remove});
-        archiveEntry(remove,reason,false);
+    /** The reimbursement links that vanish with the row, captured before deleteDependentRows removes them. */
+    private static org.json.JSONArray removedReimbursements(SQLiteDatabase writable,long id) {
+        org.json.JSONArray rows=new org.json.JSONArray();
+        try(Cursor c=writable.rawQuery("SELECT income_id,expense_id,amount_minor FROM reimbursements WHERE income_id=? OR expense_id=? ORDER BY income_id",
+                new String[]{Long.toString(id),Long.toString(id)})) {
+            while(c.moveToNext()) {
+                org.json.JSONObject row=new org.json.JSONObject();
+                try {
+                    row.put("income_id",c.getLong(0)); row.put("expense_id",c.getLong(1)); row.put("amount_minor",c.getLong(2));
+                } catch(org.json.JSONException error) { throw new IllegalStateException(error); }
+                rows.put(row);
+            }
+        }
+        return rows;
+    }
+
+    private boolean mergeEntries(long keep,long remove,String reason) {
+        if (keep==remove) return true;
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        try {
+            Transaction kept=transactionById(keep), removed=transactionById(remove);
+            if (kept==null || removed==null) {sql.setTransactionSuccessful();return false;}
+            if(new CardSettlements(this).related(keep)||new CardSettlements(this).related(remove)){markMergeReview(keep,remove);sql.setTransactionSuccessful();return false;}
+            boolean linked=hasReimbursement(keep)||hasReimbursement(remove);
+            long[] keptLink=reimbursementLink(keep),removedLink=reimbursementLink(remove);
+            boolean conflict=linked && (!kept.kind.equals(removed.kind) || !kept.currency.equals(removed.currency) ||
+                    "transfer".equals(kept.kind));
+            if(keptLink!=null && removedLink!=null && (keptLink[0]!=removedLink[0] || keptLink[1]!=removedLink[1])) conflict=true;
+            if(removedLink!=null && removedLink[1]>kept.amountMinor) conflict=true;
+            try(Cursor c=sql.rawQuery("SELECT COALESCE(SUM(amount_minor),0) FROM reimbursements WHERE expense_id IN (?,?)",
+                    new String[]{Long.toString(keep),Long.toString(remove)})) {
+                if(c.moveToFirst() && c.getLong(0)>kept.amountMinor)conflict=true;
+            }
+            Long keptParent=feeParent(keep),removedParent=feeParent(remove);
+            if(java.util.Objects.equals(keptParent,remove)||java.util.Objects.equals(removedParent,keep)||
+                    keptParent!=null&&removedParent!=null&&!keptParent.equals(removedParent))conflict=true;
+            if(conflict) {markMergeReview(keep,remove);sql.setTransactionSuccessful();return false;}
+            ContentValues values=new ContentValues();
+            if (kept.paymentSourceId==null && removed.paymentSourceId!=null) values.put("payment_source_id",removed.paymentSourceId);
+            if (kept.destinationSourceId==null && removed.destinationSourceId!=null) values.put("destination_source_id",removed.destinationSourceId);
+            if ("transfer".equals(removed.kind)) { values.put("kind","transfer");values.put("category","تحويلات"); }
+            if(keptParent==null&&removedParent!=null)values.put("fee_parent_id",removedParent);
+            if (values.size()>0) sql.update("transactions",values,"id=?",new String[]{Long.toString(keep)});
+            if(removedLink!=null) {
+                if(keptLink!=null)sql.delete("reimbursements","income_id=?",new String[]{Long.toString(remove)});
+                else sql.execSQL("UPDATE reimbursements SET income_id=? WHERE income_id=?",new Object[]{keep,remove});
+            }
+            sql.execSQL("UPDATE reimbursements SET expense_id=? WHERE expense_id=?",new Object[]{keep,remove});
+            sql.execSQL("UPDATE transactions SET fee_parent_id=? WHERE fee_parent_id=?",new Object[]{keep,remove});
+            sql.execSQL("UPDATE recurring SET origin_transaction_id=? WHERE origin_transaction_id=?",new Object[]{keep,remove});
+            sql.execSQL("UPDATE capture_evidence SET transaction_id=? WHERE transaction_id=?",new Object[]{keep,remove});
+            archiveEntry(remove,reason,false);
+            sql.setTransactionSuccessful();
+            if(lastCapturedId==remove)lastCapturedId=keep;
+            return true;
+        }finally {sql.endTransaction();}
+    }
+
+    private boolean hasReimbursement(long id) {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM reimbursements WHERE income_id=? OR expense_id=? LIMIT 1",
+                new String[]{Long.toString(id),Long.toString(id)})) {return c.moveToFirst();}
+    }
+
+    private long[] reimbursementLink(long income) {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT expense_id,amount_minor FROM reimbursements WHERE income_id=?",
+                new String[]{Long.toString(income)})) {return c.moveToFirst()?new long[]{c.getLong(0),c.getLong(1)}:null;}
+    }
+
+    private Long feeParent(long id) {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT fee_parent_id FROM transactions WHERE id=?",
+                new String[]{Long.toString(id)})) {return c.moveToFirst()&&!c.isNull(0)?c.getLong(0):null;}
+    }
+
+    private void markMergeReview(long first,long second) {
+        getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id IN (?,?)",new Object[]{first,second});
     }
 
     /** A full SMS may have been captured once as a prefix. Suggest, never merge without confirmation. */
@@ -525,6 +652,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             while(c.moveToNext()) {
                 long id=c.getLong(0);boolean prefix=false;
                 for(SourceEvidence part:sourceEvidence(id))for(SourceEvidence whole:full) {
+                    if(part.body==null||whole.body==null)continue;
                     if(!"SMS".equals(part.source)||!"SMS".equals(whole.source)||Math.abs(part.receivedAt-whole.receivedAt)>120000)continue;
                     String partBank=SourceIdentity.bank(part.sender),wholeBank=SourceIdentity.bank(whole.sender);
                     if(!java.util.Objects.equals(partBank==null?part.sender:partBank,wholeBank==null?whole.sender:wholeBank))continue;
@@ -542,8 +670,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         try {
             boolean found=false;for(Transaction candidate:abbreviatedSmsCopies(completeId))if(candidate.id==partialId)found=true;
             if(!found)throw new IllegalArgumentException("Source copy is not a matching prefix");
-            mergeEntries(completeId,partialId,"user confirmed abbreviated/full SMS of one purchase");
-            sql.execSQL("UPDATE recurring SET origin_transaction_id=? WHERE origin_transaction_id=?",new Object[]{completeId,partialId});
+            if(!mergeEntries(completeId,partialId,"user confirmed abbreviated/full SMS of one purchase"))
+                throw new IllegalArgumentException("Related records conflict; review before merging");
             ContentValues kept=new ContentValues();kept.put("user_edited",1);sql.update("transactions",kept,"id=?",new String[]{Long.toString(completeId)});
             sql.setTransactionSuccessful();
         } finally {sql.endTransaction();}
@@ -555,21 +683,6 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (id<0) return;
         ContentValues values=new ContentValues();values.put("needs_review",1);
         getWritableDatabase().update("transactions",values,"id=? AND user_edited=0",new String[]{Long.toString(id)});
-    }
-
-    private boolean applyCancellation(String sender,String body,long receivedAt) {
-        if (!body.matches("(?is).*تم\\s*(?:الغاء|إلغاء)\\s*تحويل.*")) return false;
-        ExpenseParser.Parsed parsed=ExpenseParser.parse(sender,body.replaceAll("(?:الغاء|إلغاء)",""));
-        if (parsed==null || parsed.cardLast4==null) return false;
-        Long account=autoSource(sender,parsed.cardLast4,body);
-        if (account==null) return false;
-        try (Cursor c=getReadableDatabase().rawQuery("SELECT id FROM transactions WHERE kind='expense' AND user_edited=0 " +
-                "AND payment_source_id=? AND amount_minor=? AND currency=? AND received_at BETWEEN ? AND ?",
-                new String[]{Long.toString(account),Long.toString(parsed.amountMinor),parsed.currency,
-                        Long.toString(receivedAt-120000),Long.toString(receivedAt)})) {
-            if (c.getCount()!=1 || !c.moveToFirst()) return false;
-            archiveEntry(c.getLong(0),"bank confirmed cancellation",true); return true;
-        }
     }
 
     private void recordHint(String sender,String body,long when) {
@@ -724,23 +837,29 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public List<SourceEvidence> sourceEvidence(long id) {
         List<SourceEvidence> rows=new ArrayList<>();
+        try(Cursor manual=getReadableDatabase().rawQuery("SELECT note,received_at FROM transactions WHERE id=? AND unique_key LIKE 'card-statement-fee:%'",new String[]{Long.toString(id)})){
+            if(manual.moveToFirst()){rows.add(new SourceEvidence("وصف يدوي من كشف البطاقة","تأكيد المستخدم",manual.getLong(1),manual.getString(0)));return rows;}
+        }
         try(Cursor parent=getReadableDatabase().rawQuery("SELECT fee_parent_id FROM transactions WHERE id=?",new String[]{Long.toString(id)})) {
             if(parent.moveToFirst() && !parent.isNull(0)) id=parent.getLong(0);
         }
         try (Cursor c=getReadableDatabase().rawQuery("SELECT source,sender,received_at,encrypted_body FROM capture_evidence " +
                 "WHERE transaction_id=? ORDER BY encrypted_body IS NULL,received_at DESC",new String[]{Long.toString(id)})) {
             while(c.moveToNext()) {
-                String body=EvidenceVault.decrypt(c.getString(3));
-                if(body!=null) rows.add(new SourceEvidence(c.getString(0),c.getString(1),c.getLong(2),body));
+                EvidenceVault.Read body=EvidenceVault.read(c.getString(3));
+                if(body.body!=null || body.failed) rows.add(new SourceEvidence(c.getString(0),c.getString(1),c.getLong(2),body.body,body.failed));
             }
         }
         return rows;
     }
 
     public static final class SourceEvidence {
-        public final String source,sender,body; public final long receivedAt;
+        public final String source,sender,body; public final long receivedAt; public final boolean failed;
         SourceEvidence(String source,String sender,long receivedAt,String body) {
-            this.source=source;this.sender=sender;this.receivedAt=receivedAt;this.body=body;
+            this(source,sender,receivedAt,body,false);
+        }
+        SourceEvidence(String source,String sender,long receivedAt,String body,boolean failed) {
+            this.source=source;this.sender=sender;this.receivedAt=receivedAt;this.body=body;this.failed=failed;
         }
     }
 
@@ -789,8 +908,16 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public boolean addCsvEntry(String fileHash, CsvImport.Row row) {
         long when = row.date.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        return insertEntry("csv:" + fileHash + ":" + row.line, when, row.amountMinor, row.currency,
-                row.merchant, row.category, "CSV", null, null, null, row.kind, null, row.note);
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        try {
+            String key="csv:"+fileHash+":"+row.line;
+            boolean added=insertEntry(key,when,row.amountMinor,row.currency,row.merchant,row.category,"CSV",null,null,null,row.kind,null,row.note);
+            if(added) {
+                ContentValues values=new ContentValues();values.put("time_precision","date_only");
+                sql.update("transactions",values,"unique_key=?",new String[]{key});
+            }
+            sql.setTransactionSuccessful();return added;
+        }finally {sql.endTransaction();}
     }
 
     private boolean insertEntry(String key, long when, long amount, String currency,
@@ -880,7 +1007,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private static String sourceKind(String body) {
         if (body == null) return null;
         String value = body.toLowerCase(Locale.ROOT);
-        if (value.contains("البطاقة الائتمانية") || value.contains("credit card")) return "بطاقة ائتمان";
+        if(CaptureNotice.cardRepayment(body))return "حساب";
+        if (value.matches("(?s).*(?:بطاق|كارت).{0,45}ائتمان.*") || value.contains("credit card")) return "بطاقة ائتمان";
         if (value.contains("بطاق") || value.contains("كارت") || value.contains("card")) return "بطاقة";
         if (value.contains("حساب") || value.contains("account")) return "حساب";
         return null;
@@ -1040,7 +1168,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             for (String table : new String[]{"transactions", "excluded_messages", "recurring", "source_aliases", "payment_sources",
                     "budgets", "balance_snapshots", "merchant_rules", "budget_plan_categories", "budget_plans",
                     "assets", "debts", "own_handles", "capture_evidence", "transaction_archive", "commitment_suggestions", "commitment_observations",
-                    "reimbursements", "dismissed_patterns", "repair_log"}) db.delete(table, null, null);
+                    "reimbursements", "dismissed_patterns", "repair_log", "sms_import_receipts", "capture_events", "card_settlement_allocations", "card_settlements"}) db.delete(table, null, null);
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }
     }
@@ -1206,9 +1334,43 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
                     cursor.getLong(2), cursor.getString(3), cursor.getString(4),
                     cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0));
+                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
         }
         return result;
+    }
+
+    /**
+     * Expenses from the last year, newest first: recurring-payment suggestions only compare payments
+     * about a month apart, so they never need the whole ledger.
+     */
+    public List<Transaction> recurringCandidateTransactions() {
+        List<Transaction> result = new ArrayList<>();
+        long since = java.time.LocalDate.now().minusMonths(12).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        try (Cursor cursor = getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
+                "kind='expense' AND occurred_at>=?", new String[]{Long.toString(since)}, null, null, "occurred_at DESC", null)) {
+            while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
+                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
+                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
+                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
+        }
+        return result;
+    }
+
+    /** Uncapped ledger count; UI lists intentionally show only the latest 500 rows. */
+    public long transactionCount() {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM transactions",null)) {
+            c.moveToFirst();return c.getLong(0);
+        }
+    }
+
+    /**
+     * SQLite's per-connection change counter. Every local write bumps it, so a cached suggestion set can
+     * tell that the ledger moved without enumerating each add/edit/delete call site.
+     */
+    long changes() {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT total_changes()",null)) {
+            return c.moveToFirst()?c.getLong(0):-1;
+        }
     }
 
     /** The row inserted most recently, used for the instant capture notification. */
@@ -1227,7 +1389,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             return new Transaction(cursor.getLong(0), cursor.getLong(1),
                     cursor.getLong(2), cursor.getString(3), cursor.getString(4),
                     cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0);
+                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13));
         }
     }
 
@@ -1241,7 +1403,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
                     cursor.getLong(2), cursor.getString(3), cursor.getString(4),
                     cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0));
+                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
         }
         return result;
     }
@@ -1260,7 +1422,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
                     cursor.getLong(2), cursor.getString(3), cursor.getString(4),
                     cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
-                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0));
+                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
         }
         return result;
     }
@@ -1312,6 +1474,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public void updateCategory(long id, String category) {
+        if(new CardSettlements(this).isSettlement(id))return;
         ContentValues values = new ContentValues();
         values.put("category", category);
         getWritableDatabase().update("transactions", values, "id=?", new String[]{Long.toString(id)});
@@ -1325,7 +1488,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             ContentValues values=new ContentValues();values.put("category",category);
             values.put("user_edited",1);values.put("needs_review",0);
             for(Long id:new java.util.LinkedHashSet<>(ids))
-                changed+=sql.update("transactions",values,"id=? AND kind='expense'",new String[]{Long.toString(id)});
+                if(!new CardSettlements(this).related(id))changed+=sql.update("transactions",values,"id=? AND kind='expense'",new String[]{Long.toString(id)});
             sql.setTransactionSuccessful();return changed;
         } finally {sql.endTransaction();}
     }
@@ -1361,6 +1524,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                                   String category, Long sourceId, String kind, Long destinationId,
                                   String note, Long occurredAt) {
         if (amountMinor <= 0 || merchant.isBlank()) return;
+        if(new CardSettlements(this).related(id))throw new IllegalArgumentException("Undo card repayment links before editing");
+        try(Cursor fee=getReadableDatabase().rawQuery("SELECT p.currency,p.payment_source_id FROM transactions f JOIN transactions p ON p.id=f.fee_parent_id WHERE f.id=? AND f.unique_key LIKE 'card-statement-fee:%'",new String[]{Long.toString(id)})){
+            if(fee.moveToFirst()&&(!currency.equals(fee.getString(0))||sourceId==null||fee.isNull(1)||sourceId!=fee.getLong(1)||kind!=null&&!"expense".equals(kind)))throw new IllegalArgumentException("Statement fee must keep the purchase currency and card");
+        }
         ContentValues values = new ContentValues();
         values.put("amount_minor", amountMinor);
         values.put("currency", currency);
@@ -1399,6 +1566,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public void mergeSources(long keepId, long removeId) {
+        if(new CardSettlements(this).sourceRelated(keepId)||new CardSettlements(this).sourceRelated(removeId))throw new IllegalArgumentException("Undo card repayment allocations before merging accounts");
         if (keepId == removeId) return;
         if(!linkedCards(keepId).isEmpty() || !linkedCards(removeId).isEmpty() || accountId(keepId)!=keepId || accountId(removeId)!=removeId)
             throw new IllegalArgumentException("Unlink cards before merging message identities");
@@ -1532,6 +1700,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public void deletePaymentSource(long id) {
+        if(new CardSettlements(this).sourceRelated(id))throw new IllegalArgumentException("Undo card repayment allocations before deleting accounts");
         ContentValues values = new ContentValues(); values.putNull("payment_source_id");
         getWritableDatabase().update("transactions", values, "payment_source_id=?", new String[]{Long.toString(id)});
         getWritableDatabase().delete("balance_snapshots", "payment_source_id=?", new String[]{Long.toString(id)});
@@ -1637,6 +1806,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public void deleteTransaction(long id) {
+        if(new CardSettlements(this).related(id))throw new IllegalArgumentException("Undo card repayment allocations before deleting");
         SQLiteDatabase writable = getWritableDatabase();
         writable.beginTransaction();
         try (Cursor cursor = writable.rawQuery("SELECT unique_key FROM transactions WHERE id=?",
@@ -1646,8 +1816,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 values.put("unique_key", cursor.getString(0));
                 writable.insertWithOnConflict("excluded_messages", null, values, SQLiteDatabase.CONFLICT_IGNORE);
             }
-            writable.delete("transactions", "fee_parent_id=?", new String[]{Long.toString(id)});
-            writable.delete("reimbursements", "income_id=? OR expense_id=?", new String[]{Long.toString(id), Long.toString(id)});
+            deleteDependentRows(id);
             writable.delete("transactions", "id=?", new String[]{Long.toString(id)});
             writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?", new Object[]{id});
             writable.delete("capture_evidence", "transaction_id=?", new String[]{Long.toString(id)});
@@ -1669,6 +1838,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         try {
             Transaction debit=transactionById(debitId);
             if(debit==null || principal<=0 || fee<0 || accountId(from)==accountId(to) || "income".equals(debit.kind)) throw new IllegalArgumentException("Invalid transfer");
+            if(new CardSettlements(this).related(debitId))throw new IllegalArgumentException("Undo card repayment links first");
+            if(hasReimbursement(debitId))throw new IllegalArgumentException("Unlink repayment before changing to own transfer");
+            for(long receiptId:receiptIds)if(hasReimbursement(receiptId))
+                throw new IllegalArgumentException("Unlink repayment before changing to own transfer");
             long existingFee=0;
             try(Cursor c=writable.rawQuery("SELECT COALESCE(SUM(amount_minor),0) FROM transactions WHERE fee_parent_id=?",new String[]{Long.toString(debitId)})) {if(c.moveToFirst()) existingFee=c.getLong(0);}
             if(existingFee>0 && existingFee!=fee) throw new IllegalArgumentException("Existing fee differs; review its source");
@@ -1680,7 +1853,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 if(receipt==null) continue;
                 if(!receipt.currency.equals(debit.currency) || receipt.amountMinor!=principal || "expense".equals(receipt.kind))
                     throw new IllegalArgumentException("Receipt does not match principal");
-                mergeEntries(debitId,receiptId,"user confirmed receipt of own transfer");
+                if(!mergeEntries(debitId,receiptId,"user confirmed receipt of own transfer"))
+                    throw new IllegalArgumentException("Related records conflict; review before merging");
             }
             ContentValues values=new ContentValues();values.put("amount_minor",principal);values.put("kind","transfer");values.put("category","تحويلات");
             values.put("payment_source_id",from);values.put("destination_source_id",to);values.put("user_edited",1);values.put("needs_review",0);
@@ -1703,21 +1877,25 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         SQLiteDatabase writable=getWritableDatabase();writable.beginTransaction();
         try {
             Transaction income=transactionById(keepId);
-            if(income==null) throw new IllegalArgumentException("Missing incoming payment");
+            if(income==null||"expense".equals(income.kind)) throw new IllegalArgumentException("Not an incoming payment");
             Long account=income.paymentSourceId==null?income.destinationSourceId:income.paymentSourceId;
             for(long receiptId:receiptIds) {
                 Transaction receipt=transactionById(receiptId);
                 if(receipt==null || receiptId==keepId) continue;
                 if(!receipt.currency.equals(income.currency) || receipt.amountMinor!=income.amountMinor || "expense".equals(receipt.kind))
                     throw new IllegalArgumentException("Different incoming payment");
-                mergeEntries(keepId,receiptId,"user confirmed bank and notification receipt");
+                if(!mergeEntries(keepId,receiptId,"user confirmed bank and notification receipt"))
+                    throw new IllegalArgumentException("Related records conflict; review before merging");
             }
             ContentValues values=new ContentValues();values.put("kind","income");values.put("category","دخل");
             values.put("merchant",income.merchant.replaceAll("رقم\\s*مرجعي.*","").trim());
-            for(SourceEvidence evidence:sourceEvidence(keepId)) if("SMS".equals(evidence.source)) {
+            for(SourceEvidence evidence:sourceEvidence(keepId)) if("SMS".equals(evidence.source) && evidence.body!=null) {
                 ExpenseParser.Parsed parsed=ExpenseParser.parseIncome(evidence.sender,evidence.body);
                 if(parsed!=null && parsed.amountMinor==income.amountMinor && parsed.currency.equals(income.currency)) {
-                    values.put("occurred_at",ExpenseParser.eventTime(evidence.body,evidence.receivedAt));break;
+                    ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(evidence.body,evidence.receivedAt);
+                    values.put("occurred_at",event.when);
+                    if(income.timePrecision!=null)values.put("time_precision",event.precision);
+                    break;
                 }
             }
             if(account==null) values.putNull("payment_source_id");else values.put("payment_source_id",account);
@@ -2006,13 +2184,22 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         java.util.Map<Long,Long> offsets=reimbursementOffsets();
         LocalDate day=Instant.ofEpochMilli(income.when).atZone(ZoneId.systemDefault()).toLocalDate();
         for (Transaction tx:transactionsBetween(older?LocalDate.of(1970,1,1):day,older?day:day.plusDays(1)))
-            if ("expense".equals(tx.kind) && tx.currency.equals(income.currency) && tx.when<=income.when+60_000 &&
+            if ("expense".equals(tx.kind) && tx.currency.equals(income.currency) && reimbursementPrecedes(tx,income) &&
                     effectiveAmount(tx,offsets)>0 && MoneyFlow.bucket(tx.kind,tx.category)!=MoneyFlow.Bucket.OPEN_TRANSFER) result.add(tx);
         result.sort((a,b)->{
             int byTime=Long.compare(b.when,a.when);
             return byTime!=0?byTime:Long.compare(b.id,a.id);
         });
         return result;
+    }
+
+    private static boolean reimbursementPrecedes(Transaction expense,Transaction income) {
+        if("date_only".equals(expense.timePrecision)||"date_only".equals(income.timePrecision)) {
+            ZoneId zone=ZoneId.systemDefault();
+            return !Instant.ofEpochMilli(expense.when).atZone(zone).toLocalDate()
+                    .isAfter(Instant.ofEpochMilli(income.when).atZone(zone).toLocalDate());
+        }
+        return expense.when<=income.when+60_000;
     }
 
     static final class ReimbursementPreview {
@@ -2029,7 +2216,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     ReimbursementPreview previewReimbursement(long incomeId,long expenseId) {
         Transaction income=transactionById(incomeId),expense=transactionById(expenseId);
         if(income==null || expense==null || !"income".equals(income.kind) || !"expense".equals(expense.kind) ||
-                !income.currency.equals(expense.currency) || expense.when>income.when+60_000 || reimbursedExpense(incomeId)!=null ||
+                !income.currency.equals(expense.currency) || !reimbursementPrecedes(expense,income) || reimbursedExpense(incomeId)!=null ||
                 MoneyFlow.bucket(expense.kind,expense.category)==MoneyFlow.Bucket.OPEN_TRANSFER)
             throw new IllegalArgumentException("Purchase or repayment changed");
         java.util.Map<Long,Long> offsets=reimbursementOffsets();
@@ -2041,7 +2228,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         MoneyTotals.Totals currencyTotals=totals.currencies.get(expense.currency);
         long spending=currencyTotals==null?0:currencyTotals.living;
         String fingerprint=income.when+":"+income.amountMinor+":"+income.currency+":"+income.merchant+":"+
-                expense.when+":"+expense.amountMinor+":"+expense.category+":"+expense.merchant+":"+left+":"+spending;
+                expense.when+":"+expense.amountMinor+":"+expense.category+":"+expense.merchant+":"+left+":"+spending+":"+
+                income.timePrecision+":"+expense.timePrecision;
         return new ReimbursementPreview(income,expense,applied,left-applied,
                 spending-(MoneyFlow.bucket(expense.kind,expense.category)==MoneyFlow.Bucket.LIVING?applied:0),fingerprint);
     }
@@ -2091,7 +2279,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public static final int REPAIR_VERSION = 2;
 
     public static final class RepairReport {
-        public int promotions, duplicates, ownTransfers, commitments, recategorized;
+        public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures;
         public long movedMinor, feesMinor;
         public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized > 0; }
     }
@@ -2121,7 +2309,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         RepairReport report=new RepairReport();
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
-            report.promotions=archivePromotions();
+            report.promotions=archivePromotions(report);
             report.recategorized=recategorizeWithCurrentRules();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
@@ -2161,8 +2349,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 ContentValues name=new ContentValues();name.put("merchant",remove.merchant);
                 getWritableDatabase().update("transactions",name,"id=?",new String[]{Long.toString(keep.id)});
             }
-            mergeEntries(duplicate.keepId,duplicate.removeId,"same payment: bank SMS and app notification");
-            report.duplicates++;
+            if(mergeEntries(duplicate.keepId,duplicate.removeId,"same payment: bank SMS and app notification"))report.duplicates++;
         }
         rows.clear();
         for (RepairRules.Row row:repairRows(from,to)) if (!row.userEdited) rows.add(row);
@@ -2188,6 +2375,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     private boolean canReconcile(RepairRules.OwnTransfer own) {
         Transaction debit=transactionById(own.outId),receipt=transactionById(own.inId);
+        if(hasReimbursement(own.outId)||hasReimbursement(own.inId)){markMergeReview(own.outId,own.inId);return false;}
         if (debit==null || receipt==null || own.principal<=0 || own.fee<0 || "income".equals(debit.kind) || "expense".equals(receipt.kind)) return false;
         if (accountId(own.fromAccount)==accountId(own.toAccount)) return false;
         if (!receipt.currency.equals(debit.currency) || receipt.amountMinor!=own.principal) return false;
@@ -2217,21 +2405,26 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** Re-checks stored source messages: a promotion that was booked by an older parser is archived with its evidence. */
-    private int archivePromotions() {
+    private int archivePromotions(RepairReport report) {
         java.util.Map<Long,Boolean> verdict=new java.util.LinkedHashMap<>();
+        java.util.Set<Long> unreadable=new java.util.HashSet<>();
         try (Cursor c=getReadableDatabase().rawQuery("SELECT e.transaction_id,e.encrypted_body FROM capture_evidence e " +
-                "JOIN transactions t ON t.id=e.transaction_id WHERE t.user_edited=0 AND t.fee_parent_id IS NULL",null)) {
+                "JOIN transactions t ON t.id=e.transaction_id WHERE t.user_edited=0 AND t.fee_parent_id IS NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM reimbursements r WHERE r.income_id=t.id OR r.expense_id=t.id)",null)) {
             while (c.moveToNext()) {
                 long id=c.getLong(0);
-                String body=c.isNull(1)?null:EvidenceVault.decrypt(c.getString(1));
-                // Unknown or unreadable evidence never archives a row.
-                boolean promotion=body!=null && ExpenseParser.isPromotion(body);
+                EvidenceVault.Read body=EvidenceVault.read(c.isNull(1)?null:c.getString(1));
+                // Evidence this device cannot open is reported, never used to delete a row.
+                if(body.failed) unreadable.add(id);
+                boolean promotion=body.body!=null && ExpenseParser.isPromotion(body.body);
                 verdict.put(id,verdict.getOrDefault(id,true) && promotion);
             }
         }
         int archived=0;
-        for (java.util.Map.Entry<Long,Boolean> entry:verdict.entrySet())
+        for (java.util.Map.Entry<Long,Boolean> entry:verdict.entrySet()) {
+            if(unreadable.contains(entry.getKey())) {report.evidenceFailures++;continue;}
             if (entry.getValue()) {archiveEntry(entry.getKey(),"promotional message, not a payment",true);archived++;}
+        }
         return archived;
     }
 
@@ -2401,6 +2594,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     /** Re-labels an expense or income as a move between the user's own accounts so it leaves spending totals. */
     public void markAsTransfer(long id) {
+        if(new CardSettlements(this).related(id))return;
         try (Cursor cursor = getReadableDatabase().rawQuery(
                 "SELECT kind, payment_source_id FROM transactions WHERE id=?", new String[]{Long.toString(id)})) {
             if (!cursor.moveToFirst()) return;
@@ -2445,8 +2639,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                         !other.paymentSourceId.equals(credit.destinationSourceId) && other.amountMinor==credit.amountMinor &&
                         other.currency.equals(credit.currency) && Math.abs(other.when-credit.when)<=120000) reverse++;
                 if(reverse!=1) continue;
+                if(apply&&!mergeEntries(debit.id,credit.id,"confirmed own transfer: debit and credit legs"))continue;
                 used.add(debit.id);used.add(credit.id);pairs++;lastRepairSum+=debit.amountMinor;
-                if(apply) mergeEntries(debit.id,credit.id,"confirmed own transfer: debit and credit legs");
             }
             if(apply) writable.setTransactionSuccessful();
             return pairs;
@@ -2527,13 +2721,18 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public static final class Transaction {
         public final long id, when, amountMinor;
-        public final String currency, merchant, category, source, cardLast4, kind, note;
+        public final String currency, merchant, category, source, cardLast4, kind, note, timePrecision;
         public final Long paymentSourceId, destinationSourceId;
         public final boolean needsReview;
 
         Transaction(long id, long when, long amountMinor, String currency, String merchant,
                     String category, String source, Long paymentSourceId, String cardLast4,
                     String kind, Long destinationSourceId, String note, boolean needsReview) {
+            this(id,when,amountMinor,currency,merchant,category,source,paymentSourceId,cardLast4,kind,destinationSourceId,note,needsReview,null);
+        }
+
+        Transaction(long id,long when,long amountMinor,String currency,String merchant,String category,String source,
+                    Long paymentSourceId,String cardLast4,String kind,Long destinationSourceId,String note,boolean needsReview,String timePrecision) {
             this.id = id;
             this.when = when;
             this.amountMinor = amountMinor;
@@ -2547,6 +2746,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             this.destinationSourceId = destinationSourceId;
             this.note = note;
             this.needsReview = needsReview;
+            this.timePrecision = timePrecision;
         }
     }
 

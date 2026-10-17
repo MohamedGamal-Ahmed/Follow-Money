@@ -313,5 +313,23 @@
     "preserved_existing": false,
     "source_page": "https://espressolab-eg.com/",
     "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "ubereats",
+    "resource": "brand_ubereats",
+    "original_sha256": "3c4f80f4eab7ed6d571202ddf4d2e8608c16781d4b77bd4e9e81f9117e0be11c",
+    "output_sha256": "843ba5dc8c1e37a2e2c0fe80284e252ab0b5c5d70cee0e7c4699f2cf3ba41715",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/ubereats.svg",
+    "rights_status": "review_brand_terms_before_release"
+  },
+  {
+    "entity_id": "claude",
+    "resource": "brand_claude",
+    "original_sha256": "2d6fda79eb18ddccca35b799eeb3cece0dfabc22520ce3b10abd25668df9fa93",
+    "output_sha256": "67d1c2d0db71b5819a81efc8fe6be64d152476fb282536f5f897aa52ae047c68",
+    "preserved_existing": false,
+    "source_page": "https://github.com/simple-icons/simple-icons/blob/develop/icons/claude.svg",
+    "rights_status": "review_brand_terms_before_release"
   }
 ]

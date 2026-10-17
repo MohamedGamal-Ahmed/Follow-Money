@@ -5,7 +5,9 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.view.View;
+import android.widget.ImageView;
 
 import java.util.Locale;
 
@@ -309,5 +311,40 @@ final class UiKit {
             if (Character.isLetterOrDigit(point)) return new String(Character.toChars(point)).toUpperCase(Locale.ROOT);
         }
         return "•";
+    }
+
+    /** Forest plate behind logos that are white on transparency; a white plate would hide them. */
+    static final int LOGO_PLATE_FOR_WHITE = 0xff0b3d2e;
+
+    /** Catalog assets drawn entirely in white. Keep in sync with docs/brand-catalog-2026-10-10/README.md. */
+    static boolean whiteOnlyLogo(String brandId) {
+        return "alexbank".equals(brandId) || "fabmisr".equals(brandId);
+    }
+
+    /**
+     * The one round logo plate used for banks, merchants and the SMS import preview, so a brand looks the
+     * same everywhere. {@code border} is 0 for none; light surfaces pass their divider color.
+     */
+    static ImageView logoBadge(Context context, int logo, String brandId, String description, int sizeDp, int border) {
+        float density = context.getResources().getDisplayMetrics().density;
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(logo);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        GradientDrawable plate = new GradientDrawable();
+        plate.setColor(whiteOnlyLogo(brandId) ? LOGO_PLATE_FOR_WHITE : 0xffffffff);
+        plate.setCornerRadius(sizeDp / 2f * density);
+        if (border != 0) plate.setStroke(Math.max(1, Math.round(density)), border);
+        icon.setBackground(plate);
+        int inset = Math.round(Math.max(4, sizeDp * 0.16f) * density);
+        icon.setPadding(inset, inset, inset, inset);
+        icon.setContentDescription(description);
+        icon.setImportantForAccessibility(description == null || description.isEmpty()
+                ? View.IMPORTANT_FOR_ACCESSIBILITY_NO : View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        return icon;
+    }
+
+    /** " •1234" for a known card/account suffix, nothing otherwise (never the text "null"). */
+    static String last4Suffix(String last4) {
+        return last4 == null || last4.isBlank() ? "" : " •" + last4.trim();
     }
 }

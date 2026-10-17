@@ -30,8 +30,20 @@ public final class DailyRefreshReceiver extends BroadcastReceiver {
     }
     @Override public void onReceive(Context context,Intent intent) {
         refresh(context);
+        // Normalization writes; the receiver runs on the main thread, so hand it to the one capture worker that
+        // also writes captures, and keep the broadcast alive until it is done.
+        final PendingResult pending = goAsync();
+        final Context app = context.getApplicationContext();
+        CaptureQueue.submit(() -> {
+            try (ExpenseDb db = new ExpenseDb(app)) { MainActivity.normalizeEarlyPaymentsOnWorker(db); }
+            catch (RuntimeException ignored) { }
+            finally {
+                // The activity must re-read the ledger only after this worker has finished writing.
+                app.sendBroadcast(new Intent(SmsReceiver.ACTION_DATA_CHANGED).setPackage(app.getPackageName()));
+                pending.finish();
+            }
+        });
         String action=intent.getAction();
         if(Intent.ACTION_TIME_CHANGED.equals(action)||Intent.ACTION_TIMEZONE_CHANGED.equals(action))ReminderReceiver.schedule(context);
-        context.sendBroadcast(new Intent(SmsReceiver.ACTION_DATA_CHANGED).setPackage(context.getPackageName()));
     }
 }

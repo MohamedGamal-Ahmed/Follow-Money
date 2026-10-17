@@ -23,7 +23,7 @@ public final class ExpenseParser {
             "(?i)(credited|deposit(?:ed)?|received|refund(?:ed)?|cashback|" +
             "تم\\s*(?:ايداع|إيداع|استلام|اضافة|إضافة|رد)|وارد|استرداد)");
     private static final Pattern NOT_COMPLETED = Pattern.compile(
-            "(?i)(declined|failed|unsuccessful|cancel(?:led|ed|lation)?|تم\\s*(?:الغاء|إلغاء)|" +
+            "(?i)(declined|failed|unsuccessful|reversed|تم\\s*رفض(?:ها)?|رفضت|cancel(?:led|ed|lation)?|تم\\s*(?:الغاء|إلغاء)|" +
                     "لم\\s*(?:يتم|تتم)|غير\\s*ناجح|مرفوض|فشل|تعذر)");
     private static final Pattern FUTURE_PAYMENT = Pattern.compile(
             "(?i)(\\bwill\\s+(?:be\\s+)?(?:processed|paid|debited|charged|deducted|transferred)|" +
@@ -36,9 +36,9 @@ public final class ExpenseParser {
     private static final Pattern ACCOUNT_CONTEXT = Pattern.compile(
             "(?i)(بطاق|كارت|حساب|رصيد|محفظ|ماكين|صراف|bank|card|account|atm|pos|balance)");
     private static final Pattern AMOUNT_AFTER_CURRENCY = Pattern.compile(
-            "(?i)(?<![A-Za-z])(EGP|LE|E£|ج\\.?م\\.?|جنيه|USD|EUR|GBP|دولار|يورو|جنيه\\s+استرليني)\\s*([0-9][0-9., ]*)");
+            "(?i)(?<![A-Za-z])(EGP|LE|E£|ج\\.?م\\.?|جنيه\\s+استرليني|جنيه|USD|EUR|GBP|دولار|يورو)\\s*([0-9][0-9., ]*)");
     private static final Pattern AMOUNT_BEFORE_CURRENCY = Pattern.compile(
-            "(?i)([0-9][0-9., ]*)\\s*(EGP|LE|E£|ج\\.?م\\.?|جنيه|USD|EUR|GBP|دولار|يورو)(?![A-Za-z])");
+            "(?i)([0-9][0-9., ]*)\\s*(EGP|LE|E£|ج\\.?م\\.?|جنيه\\s+استرليني|جنيه|USD|EUR|GBP|دولار|يورو)(?![A-Za-z])");
     private static final Pattern MERCHANT = Pattern.compile(
             "(?i)(?:\\b(?:at|from|to)\\b|لدى|عند|على|لصالح|الى|إلى|من)\\s+([^.,;\\n]{2,45})");
     private static final Pattern DATE_MERCHANT = Pattern.compile(
@@ -48,6 +48,11 @@ public final class ExpenseParser {
             "(?i)(?:card|visa|بطاقة|فيزا)[^\\n]{0,35}?(?:\\*{2,}|x{2,}|ending\\s+)(\\d{4})");
     private static final Pattern ACCOUNT_LAST_FOUR = Pattern.compile(
             "(?i)(?:account|acct|a/c|حساب)[^\\n]{0,35}?(?:\\*{2,}|x{2,}|ending\\s+|رقم\\s+)(\\d{3,4})(?!\\d)");
+    static String debitAccountLast4(String body){
+        if(body==null)return null;String normalized=normalizeDigits(body);
+        Matcher account=ACCOUNT_LAST_FOUR.matcher(normalized);if(account.find())return account.group(1);
+        Matcher masked=MASKED_ACCOUNT_TAIL.matcher(normalized);return masked.find()?masked.group(1):null;
+    }
     private static final Pattern MASKED_ACCOUNT_TAIL = Pattern.compile(
             "(?i)(?:from|من)\\s+\\d{2,4}-\\d{2,4}(?:\\*{2,}|x{2,})-(\\d{3,4})(?!\\d)");
     private static final Pattern IPN_RECEIVING_ACCOUNT = Pattern.compile(
@@ -288,7 +293,18 @@ public final class ExpenseParser {
 
     /** Uses a stated transaction date/time when available; otherwise keeps the message timestamp. */
     public static long eventTime(String body, long receivedAt) {
-        if (body == null) return receivedAt;
+        return eventTimeWithPrecision(body,receivedAt).when;
+    }
+
+    public static final class EventTime {
+        public final long when;
+        public final String precision;
+        EventTime(long when,String precision){this.when=when;this.precision=precision;}
+    }
+
+    /** Precision of the chosen timestamp, not a claim that receipt time was stated by the bank. */
+    public static EventTime eventTimeWithPrecision(String body,long receivedAt) {
+        if (body == null) return new EventTime(receivedAt,"exact");
         Matcher match = EVENT_DATE.matcher(normalizeDigits(body));
         while (match.find()) {
             try {
@@ -303,7 +319,8 @@ public final class ExpenseParser {
                         : LocalTime.of(Integer.parseInt(match.group(7)), Integer.parseInt(match.group(8)));
                 long event = LocalDateTime.of(date, time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
-                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return event;
+                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000)
+                    return new EventTime(event,match.group(7)==null?"date_only":"exact");
             } catch (NumberFormatException | java.time.DateTimeException ignored) { }
         }
         Matcher textDate = EVENT_DATE_TEXT.matcher(normalizeDigits(body));
@@ -316,10 +333,10 @@ public final class ExpenseParser {
                 long event = LocalDate.of(year, month, day).atTime(12, 0)
                         .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
-                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return event;
+                        event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return new EventTime(event,"date_only");
             } catch (NumberFormatException | java.time.DateTimeException ignored) { }
         }
-        return receivedAt;
+        return new EventTime(receivedAt,"exact");
     }
 
     static String normalizeDigits(String text) {
@@ -349,6 +366,22 @@ public final class ExpenseParser {
         } catch (ArithmeticException | NumberFormatException e) {
             return -1;
         }
+    }
+
+    /**
+     * True when a hand-typed amount is ambiguous in a way {@link #parseMinor(String)} would
+     * silently absorb: a dot as the last separator with three or more digits after it, such as
+     * {@code 1.500} or {@code 12.345}. A thousands dot that is followed by a decimal part
+     * ({@code 1.500,00}) stays valid. Bank SMS parsing is deliberately left untouched.
+     */
+    static boolean manualAmountMisread(String raw) {
+        if (raw == null) return false;
+        String text = normalizeDigits(raw).replaceAll("\\s+", "").replaceAll("[.,]+$", "");
+        int dot = text.lastIndexOf('.');
+        if (dot < 0 || dot < text.lastIndexOf(',')) return false;
+        if (text.length() - dot - 1 < 3) return false;
+        for (int i = dot + 1; i < text.length(); i++) if (!Character.isDigit(text.charAt(i))) return false;
+        return true;
     }
 
     private static String currency(String raw) {

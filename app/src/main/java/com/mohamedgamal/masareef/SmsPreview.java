@@ -3,6 +3,7 @@ package com.mohamedgamal.masareef;
 /** Read-only interpretation for historical import. The original body stays in memory until approval. */
 final class SmsPreview {
     final String sender, body, title, category, currency, kind;
+    final String timePrecision;
     final long receivedAt, captureAt, eventAt, amountMinor;
     final boolean balanceIncluded, commitmentIncluded;
     boolean selected;
@@ -13,7 +14,9 @@ final class SmsPreview {
                        String currency, long amountMinor, String kind, boolean balance, boolean commitment) {
         this.sender=sender; this.body=body; this.receivedAt=receivedAt;
         this.captureAt=captureAt;
-        this.eventAt=ExpenseParser.eventTime(body, captureAt);
+        ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(body,captureAt);
+        this.eventAt=event.when;
+        this.timePrecision=event.precision;
         this.title=title; this.category=category; this.currency=currency;
         this.amountMinor=amountMinor; this.kind=kind;
         this.balanceIncluded=balance; this.commitmentIncluded=commitment;
@@ -60,6 +63,10 @@ final class SmsPreview {
     boolean isTransaction() { return "expense".equals(kind)||"income".equals(kind)||"transfer".equals(kind); }
     boolean canUseReceiptKey(java.util.Set<String> sentKeys) {
         return CaptureIdentity.receiptKeySafe(sender,body,receivedAt,captureAt,sentKeys);
+    }
+    /** Explicit cancellation uses the same conservative matcher as live capture; declines/future notices stay out. */
+    static void selectForImport(java.util.List<SmsPreview> rows){
+        for(SmsPreview row:rows)row.selected=row.captureStatus==0&&(!"correction".equals(row.kind)||CaptureNotice.parse(row.sender,row.body)!=null);
     }
     static void selectAll(java.util.List<SmsPreview> rows, boolean onlyNew) {
         for(SmsPreview row:rows)row.selected=row.captureStatus!=2&&(!onlyNew||row.captureStatus==0)&&!"correction".equals(row.kind);

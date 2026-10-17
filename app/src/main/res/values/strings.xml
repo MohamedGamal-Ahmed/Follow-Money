@@ -3,7 +3,8 @@
     <string name="widget_description">ميزانية اليوم مع إضافة عملية وفتح العمليات</string>
     <string name="widget_small_description">المتبقي والصرف اليومي في مساحة صغيرة</string>
     <string name="widget_large_description">ميزانية اليوم وصرف الأسبوع والشهر</string>
-    <string name="widget_lock_description">المتبقي من ميزانية اليوم بخلفية شفافة ومساحة صغيرة؛ الموضع يحدده تطبيق شاشة القفل</string>
+    <string name="widget_lock_description">المتبقي من ميزانية اليوم بخلفية شفافة؛ قد يظهر المبلغ لأي شخص يرى شاشة القفل. يمكنك إخفاء الأرقام من إعدادات الميزانية.</string>
+    <string name="widget_lock_privacy_notice">لو أضفت الويدجت لشاشة القفل، المبلغ الظاهر يقدر يشوفه أي حد ماسك الموبايل. فعّل «أرقام الويدجت: مخفية» لإخفاء المبالغ في الويدجت والإشعارات.</string>
     <string name="widget_lock_preview">متبقي اليوم · EGP</string>
     <string name="widget_lock_unavailable">—</string>
 </resources>

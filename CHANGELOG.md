@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add an owner-requested private tester APK variant with a separate Beta package, labels, signature permission and dedicated local signing key; preserve production app data and identity.
+
+- Prepare versionCode 3 signed distribution artifacts; add an explicit lock-widget privacy notice and review clean points screenshots plus white-background widget readability. Keep oldest-Android and actual Samsung lock-screen acceptance open.
+
+- Verify an installed APK update from `53b4682` (schema v20) to v21 with synthetic ledger, repayment, evidence and points snapshots. Add native light/dark visual checks and improve points-dialog action text contrast in dark mode.
+
+- Preserve reimbursement endpoints, fee parents and commitment origins during transaction merges; leave conflicting automatic merges for review and reject own-transfer conversion of linked repayments.
+- Count historical-import ledger growth without the 500-row display cap, and recognize Arabic sterling before generic Egyptian-pound tokens.
+- Respect amount hiding in capture notifications, provide a generic lock-screen public version, and prefix formula-like CSV text cells with an apostrophe while retaining numeric amount cells.
+- Add nullable v21 transaction time precision. Preserve unknown precision on legacy rows; label new date-only captures/imports and compare reimbursement eligibility by day when either endpoint has date-only precision.
+
 - Add the owner's explicitly requested compact transparent lock-screen widget variant, reusing daily-summary calculations and privacy settings; keep home widget layouts unchanged and leave placement to the host.
 
 - Freeze the existing feature scope on 14 October 2026; restrict the publication cycle to defect fixes, validation and Google Play preparation. Record known issues and verification limits in the release checkpoint.

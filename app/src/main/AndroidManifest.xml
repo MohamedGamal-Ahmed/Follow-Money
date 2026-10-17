@@ -6,8 +6,8 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
-    <permission android:name="com.mohamedgamal.masareef.INTERNAL_BROADCAST" android:protectionLevel="signature" />
-    <uses-permission android:name="com.mohamedgamal.masareef.INTERNAL_BROADCAST" />
+    <permission android:name="${applicationId}.INTERNAL_BROADCAST" android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.INTERNAL_BROADCAST" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -15,7 +15,7 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
-    <application android:allowBackup="false" android:label="Follow Money"
+    <application android:allowBackup="false" android:label="${appLabel}"
         android:enableOnBackInvokedCallback="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
@@ -42,21 +42,21 @@
         <receiver android:name=".ReminderReceiver" android:exported="false">
             <intent-filter><action android:name="com.mohamedgamal.masareef.MARK_PAID" /></intent-filter>
         </receiver>
-        <receiver android:name=".SummaryWidget" android:label="Follow Money · متوسط" android:exported="true">
+        <receiver android:name=".SummaryWidget" android:label="${appLabel} · متوسط" android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_summary_info" />
         </receiver>
-        <receiver android:name=".SmallSummaryWidget" android:label="Follow Money · صغير" android:exported="true">
+        <receiver android:name=".SmallSummaryWidget" android:label="${appLabel} · صغير" android:exported="true">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_summary_small_info" />
         </receiver>
-        <receiver android:name=".LargeSummaryWidget" android:label="Follow Money · كبير" android:exported="true">
+        <receiver android:name=".LargeSummaryWidget" android:label="${appLabel} · كبير" android:exported="true">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_summary_large_info" />
         </receiver>
-        <receiver android:name=".LockSummaryWidget" android:label="Follow Money · قفل شفاف" android:exported="true">
+        <receiver android:name=".LockSummaryWidget" android:label="${appLabel} · قفل شفاف" android:exported="true">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_lock_transparent_info" />
         </receiver>

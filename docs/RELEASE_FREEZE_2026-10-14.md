@@ -4,7 +4,7 @@ The owner closed new-feature work for this publication cycle. The remaining scop
 
 Limited owner-approved exception on 15 October: add a compact transparent presentation of the existing daily remaining amount for LockStar/compatible hosts. This does not change financial rules or reopen other feature work. The implementation requires device/host acceptance testing; compilation is not proof of actual lock-screen placement.
 
-Owner-provided screenshot on 15 October confirms that the transparent widget is visible in the chosen lower lock-screen position while notifications remain visible above it. This validates that pictured arrangement only; background refresh, additional notification load, AOD, hidden amounts and other device/host versions still require testing. The screenshot and personal wallpaper are not included in the repository. Claude's audit was received and checked on 15 October; see [audit triage](CLAUDE_AUDIT_TRIAGE_2026-10-15.md). Audit fixes and structural changes are not implemented at this checkpoint.
+Owner-provided screenshot on 15 October confirms that the transparent widget is visible in the chosen lower lock-screen position while notifications remain visible above it. This validates that pictured arrangement only; background refresh, additional notification load, AOD, hidden amounts and other device/host versions still require testing. The screenshot and personal wallpaper are not included in the repository. Claude's audit was received and checked on 15 October; the owner subsequently approved five focused defect fixes, including v21 time precision. Their implementation and validation are recorded in the [audit triage](CLAUDE_AUDIT_TRIAGE_2026-10-15.md). Broad refactoring remains deferred.
 
 ## Frozen scope
 
@@ -14,9 +14,17 @@ Owner-provided screenshot on 15 October confirms that the transparent widget is 
 - Optional points rounded per day, with a confirmed balance, yesterday/today summary and non-monetary 100-point milestones. Today remains provisional; coverage confirmation and original-purchase-date refund effects remain required.
 - The muted opening video uses `AUDIOFOCUS_NONE` so it does not request focus from music applications. Playback alongside Spotify on the owner's phone has not been verified.
 
-The application remains version **0.2.0 / versionCode 2**, minimum API 26 and target API 36. No upload has occurred; assign distinct version codes to future uploaded builds.
+The application is now version **0.2.0 / versionCode 3**, minimum API 26 and target API 36. Local signed APK/AAB artifacts were built and verified on 15 October; no upload has occurred. Assign distinct version codes to future uploaded builds.
+
+The owner subsequently requested a shareable APK for friends. Packaging-only `beta` uses a separate application ID, launcher/widget labels and signing key; it does not change financial rules or reopen feature work. Beta data does not migrate automatically into production. API 26 runtime and real-device security/lock-screen acceptance are still required before treating tester distribution as release approval.
+
+The signed Beta APK (0.2.0-beta / code 3) built offline, passed signature/actual APK manifest/Dex/privacy-asset checks and lint (0 errors, 66 warnings). Its signer matched the dedicated local Beta certificate and differed from the upload certificate. It installed and remained running beside the original on the API 36.1 emulator with distinct app IDs/data directories; original package identity/version/install timestamps were unchanged. No original package update, phone install or Play upload occurred. This is a packaging/launch smoke check, not an API 26 or comprehensive Beta acceptance pass.
 
 ## Validation at this checkpoint
+
+- After the owner-approved audit fixes on 15 October: 412 JVM checks across 14 suites, 10 focused native Android regressions, production debug/instrumentation APK builds, lint (0 errors, 66 warnings) and repository preflight passed. The original freeze evidence below is retained for context; broader UI/device acceptance remains separate.
+
+- Subsequent QA on the owner's running Medium Phone emulator: 69 native Android tests passed (18 base, 14 phase, 27 features, 10 audit); the installed v20→v21 APK update retained synthetic data/evidence/budgets/points; 61 journey UI checks passed. The latest visual/notification run passed 46 checks, including a white-background widget preview and points screenshots without the export toast. White widget text remains weak on white backgrounds; the grey day-confirmation button remains a deferred cosmetic item. Release lint passed with 0 errors and 66 warnings. See the audit triage for signing evidence and remaining host/lock-screen limits.
 
 - 401 standalone JVM checks passed across 14 suites, including 21 points checks for signed rounding boundaries, provisional/review exclusions and balance/history agreement.
 - Debug app and instrumentation APK builds passed; Android lint reported **0 errors and 66 warnings**. `tools/run-checks.ps1` completed successfully on 14 October.
@@ -26,11 +34,10 @@ The application remains version **0.2.0 / versionCode 2**, minimum API 26 and ta
 
 ## Known issues and remaining acceptance checks
 
-- Confirmed audit defects remain open: merges do not preserve every transaction relationship, historical-import counts use a 500-row list, Arabic sterling amounts can be classified as EGP, and capture notifications ignore amount hiding. CSV text fields also need spreadsheet-formula protection. Resolve these with synthetic regressions before publication; see the audit triage for evidence and limits.
-- Date-only HSBC text such as `14OCT26` still receives an artificial noon timestamp. Fix/label time provenance before publication; the message timestamp is not a bank-confirmed transaction time.
-- Check the points dialog visually in light/dark mode, confirmed/pending/negative states, history/help, confirmation and Back navigation.
+- The five approved audit fixes have focused synthetic regressions, including a successful v20→v21 upgrade test. Legacy time precision remains unknown: no heuristic relabeling of historical noon timestamps or automatic real-device rescan was performed. New date-only captures display a date-only label rather than the placeholder clock.
+- Points and reimbursement journeys were reviewed on the Medium Phone emulator, including light/dark summaries, confirmed/provisional/negative states, history/help, confirmation, undo and Back. Physical-device/large-font acceptance remains separate.
 - Verify opening playback with background music, new SMS/selected notifications while closed, permission denial/revocation, historical import deduplication, widgets and battery-constrained daily/monthly refresh.
-- Re-run synthetic Android database/reconciliation tests on a working disposable emulator and test the signed release and an update path on the oldest supported Android version.
+- The broader Android reconciliation suites subsequently passed on the owner's Medium Phone emulator with SystemUI active. The signed release, oldest-supported-Android update path, actual lock-screen notifications and Samsung LockStar/AOD still require acceptance testing; this emulator did not enter a showing keyguard state.
 - Keep user-edited records and original financial evidence intact. Any real-device financial export/repair requires an explicit separate scope.
 
 ## Google Play gates
@@ -43,3 +50,10 @@ The application remains version **0.2.0 / versionCode 2**, minimum API 26 and ta
 - The public privacy URL returned HTTP 200 on 14 October; confirm the final policy and artifact remain consistent before upload.
 
 See [Google Play preparation](GOOGLE_PLAY_RELEASE.md) and [Arabic usage](USAGE_AR.md). Publication and restricted-SMS approval remain subject to Google's review.
+
+
+## Owner-approved cancellation/repayment repair, 16 October
+
+The owner authorized a separate PR to address visible cancellation history, corrected notifications, explicit credit-card repayment review/undo, optional allocations and confirmed statement fees after a real incident. This is a scoped exception to the feature freeze. Implementation uses additive schema v22 and synthetic emulator fixtures; it does not authorize rewriting the owner's ledger, rescanning the phone, replacing the appealed APK, signing a release, or merging this PR. The owner will review and merge. Current accounting contracts and validation are described in ARCHITECTURE.md and the PR.
+
+The owner subsequently expanded the same PR to standardize app-defined selectors and action menus throughout the UI, including transaction categories and account actions. This reuses existing tokens and Android widgets; no dependency, permission, accounting-schema or release-artifact change is added by the menu work.

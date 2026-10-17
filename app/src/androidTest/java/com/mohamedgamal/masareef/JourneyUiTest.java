@@ -29,7 +29,14 @@ final class JourneyUiTest {
     private interface Action{void run()throws Exception;}
     private void main(Action action){runner.runOnMainSync(()->{try{action.run();}catch(Exception e){throw new RuntimeException(e);}});idle();}
     private void idle(){runner.waitForIdleSync();try{runner.getUiAutomation().waitForIdle(500,3000);}catch(java.util.concurrent.TimeoutException e){throw new AssertionError("UI never became idle",e);}}
-    private boolean has(String text){AccessibilityNodeInfo root=runner.getUiAutomation().getRootInActiveWindow();return root!=null&&!root.findAccessibilityNodeInfosByText(text).isEmpty();}
+    private boolean has(String text){return containsVisibleText(runner.getUiAutomation().getRootInActiveWindow(),plain(text));}
+    private String plain(CharSequence text){return text==null?"":text.toString().replaceAll("[\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]","");}
+    private boolean containsVisibleText(AccessibilityNodeInfo node,String text){
+        if(node==null)return false;
+        if(node.getText()!=null&&plain(node.getText()).contains(text))return true;
+        for(int i=0;i<node.getChildCount();i++)if(containsVisibleText(node.getChild(i),text))return true;
+        return false;
+    }
     private boolean purchaseChecked(String name) {
         for(AccessibilityNodeInfo node:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText(name)) {
             if(node.getText()==null||!node.getText().toString().equals(name))continue;
