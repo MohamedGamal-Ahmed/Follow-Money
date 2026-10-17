@@ -111,6 +111,11 @@ final class SelectionUiTest {
                 new ExpenseDb.SourceEvidence("SMS","QA BANK",System.currentTimeMillis()+1000,"تم الغاء التحويل بمبلغ 227 جنيه — رسالة اختبار فقط"));
             main(()->invoke("showOriginalMessages",new Class<?>[]{List.class},evidence));ok(has("الرسالة الأصلية"));ok(has("تم خصم"));ok(has("تم الغاء"));screen("05-bank-message");click("إغلاق");
             main(()->invoke("showOriginalMessages",new Class<?>[]{List.class},java.util.Collections.emptyList()));ok(has("مصدر نصي غير متاح"));click("إغلاق");
+            ExpenseDb.Transaction stale=db.transactionById(id);
+            main(()->invoke("editTransactionDialog",new Class<?>[]{ExpenseDb.Transaction.class},stale));
+            db.deleteTransaction(id);
+            click("افتكر التصنيف للتاجر ده في العمليات الجديدة");click("حفظ");
+            ok(has("تعديل المعاملة"));ok(db.merchantRules().isEmpty());ok(db.transactionCount()==0);click("إلغاء");
             result.putString("stream","Selection UI checks passed: "+checked+"; failed: 0; dark="+dark+"; fontScale="+fontScale+"\nCaptures: "+captures+"\n");
         }catch(Throwable error){status=0;try{screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Selection UI FAILED: "+trace+"\n");}
         finally{try{if(activity!=null)main(()->{if(originalConfiguration!=null)activity.getResources().updateConfiguration(originalConfiguration,activity.getResources().getDisplayMetrics());activity.finish();});if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){status=0;result.putString("stream",result.getString("stream","")+error);}runner.finish(status,result);}

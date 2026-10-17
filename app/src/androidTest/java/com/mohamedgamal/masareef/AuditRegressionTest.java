@@ -177,6 +177,29 @@ final class AuditRegressionTest {
         ok("صحة".equals(db.merchantRules().get(0).category));
     }
 
+    public void testMissingEditedTransactionNeverLearnsMerchant(){
+        MutationResult result=new TransactionMutation(db).update(999999,5500,"EGP","QA MISSING","صحة",null,"expense",null,"reviewed",at(LocalDate.now(),10),true);
+        ok(!result.changed());ok(result.outcome==MutationResult.Outcome.NOT_FOUND);eq(999999,result.transactionId);
+        eq(0,db.transactionCount());eq(0,db.merchantRules().size());
+    }
+
+    public void testRefusedEditNeverLearnsMerchantOrClaimsAnUpdatedRow(){
+        long t=at(LocalDate.now(),10),id=manual(t,10000,"expense");
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_edit_refusal BEFORE UPDATE ON transactions BEGIN SELECT RAISE(IGNORE); END");
+        MutationResult result=new TransactionMutation(db).update(id,5500,"EGP","QA REFUSED","صحة",null,"expense",null,"reviewed",t,true);
+        ok(!result.changed());ok(result.outcome==MutationResult.Outcome.NOT_APPLIED);eq(10000,db.transactionById(id).amountMinor);eq(0,db.merchantRules().size());
+    }
+
+    public void testEditOutcomeCannotEscapeAnUncommittedCallerTransaction(){
+        long t=at(LocalDate.now(),10),id=manual(t,10000,"expense");
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try{
+            try{new TransactionMutation(db).update(id,5500,"EGP","QA OWNER","صحة",null,"expense",null,"reviewed",t,true);throw new AssertionError("Outcome escaped before the caller's commit");}
+            catch(IllegalStateException expected){}
+        }finally{sql.endTransaction();}
+        eq(10000,db.transactionById(id).amountMinor);eq(0,db.merchantRules().size());
+    }
+
     public void testCaptureOutcomeNewDuplicateCancellationAndMergeFollowed(){
         long t=at(LocalDate.now(),10);
         // New: one row, no event.

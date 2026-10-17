@@ -1210,12 +1210,18 @@ public final class MainActivity extends Activity {
                     if(learn && !ExpenseDb.canRememberMerchant(merchant.getText().toString(),category.getSelectedItem().toString())) {
                         toast("حفظ التصنيف متاح للمشتريات، مش التحويلات أو الأقساط");return;
                     }
-                    new TransactionMutation(db).update(item.id, minor, currency.getSelectedItem().toString(),
+                    MutationResult result=new TransactionMutation(db).update(item.id, minor, currency.getSelectedItem().toString(),
                             merchant.getText().toString(), "income".equals(type) ? "دخل" :
                                     "transfer".equals(type) ? "تحويلات" : category.getSelectedItem().toString(),
                             from, type, "transfer".equals(type) ? to : null, note.getText().toString(),
                             day.atTime(Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalTime())
                                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),learn);
+                    if(!result.changed()){
+                        toast(result.outcome==MutationResult.Outcome.NOT_FOUND
+                                ? "العملية دي لم تعد موجودة؛ لم نحفظ تعديل أو قاعدة تاجر."
+                                : "لم يتم تطبيق التعديل؛ راجع العملية وحاول مرة أخرى.");
+                        return;
+                    }
                 } catch (RuntimeException error) { toast("تعذر الحفظ؛ راجع التاريخ والبيانات"); return; }
                 dialog.dismiss();
                 if (selectedTab == 10) selectedTransaction=db.transactionById(item.id);
