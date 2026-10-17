@@ -499,10 +499,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     /** A row's live dependents share its life: bank-fee children and reimbursement links must go with it. */
     private void deleteDependentRows(long id) {
-        SQLiteDatabase writable=getWritableDatabase();
-        CardSettlements.removeRelations(writable,id);
-        writable.delete("transactions","fee_parent_id=?",new String[]{Long.toString(id)});
-        writable.delete("reimbursements","income_id=? OR expense_id=?",new String[]{Long.toString(id),Long.toString(id)});
+        transactionRows.deleteDependentRows(id);
     }
 
     void archiveEntry(long id,String reason,boolean exclude) {
@@ -1488,30 +1485,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     int updateTransactionRow(long id, long amountMinor, String currency, String merchant,
                              String category, Long sourceId, String kind, Long destinationId,
                              String note, Long occurredAt) {
-        if (amountMinor <= 0 || merchant.isBlank()) return 0;
-        if(new CardSettlements(this).related(id))throw new IllegalArgumentException("Undo card repayment links before editing");
-        try(Cursor fee=getReadableDatabase().rawQuery("SELECT p.currency,p.payment_source_id FROM transactions f JOIN transactions p ON p.id=f.fee_parent_id WHERE f.id=? AND f.unique_key LIKE 'card-statement-fee:%'",new String[]{Long.toString(id)})){
-            if(fee.moveToFirst()&&(!currency.equals(fee.getString(0))||sourceId==null||fee.isNull(1)||sourceId!=fee.getLong(1)||kind!=null&&!"expense".equals(kind)))throw new IllegalArgumentException("Statement fee must keep the purchase currency and card");
-        }
-        ContentValues values = new ContentValues();
-        values.put("amount_minor", amountMinor);
-        values.put("currency", currency);
-        values.put("merchant", merchant.trim());
-        values.put("category", category);
-        values.put("user_edited", 1);
-        values.put("needs_review", 0);
-        if (sourceId == null) values.putNull("payment_source_id"); else values.put("payment_source_id", sourceId);
-        if (kind != null) values.put("kind", kind);
-        if (destinationId == null) values.putNull("destination_source_id");
-        else values.put("destination_source_id", destinationId);
-        if (note != null) values.put("note", note.trim());
-        if (occurredAt != null) values.put("occurred_at", occurredAt);
-        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
-        try {
-            int affected=sql.update("transactions", values, "id=?", new String[]{Long.toString(id)});
-            sql.setTransactionSuccessful();
-            return affected;
-        } finally { sql.endTransaction(); }
+        return transactionRows.update(id,amountMinor,currency,merchant,category,sourceId,kind,destinationId,note,occurredAt);
     }
 
     public long addPaymentSource(String name, String kind, String last4) {
@@ -1772,24 +1746,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public void deleteTransaction(long id) {
-        if(new CardSettlements(this).related(id))throw new IllegalArgumentException("Undo card repayment allocations before deleting");
-        SQLiteDatabase writable = getWritableDatabase();
-        writable.beginTransaction();
-        try (Cursor cursor = writable.rawQuery("SELECT unique_key FROM transactions WHERE id=?",
-                new String[]{Long.toString(id)})) {
-            if (cursor.moveToFirst() && !cursor.getString(0).startsWith("manual:")) {
-                ContentValues values = new ContentValues();
-                values.put("unique_key", cursor.getString(0));
-                writable.insertWithOnConflict("excluded_messages", null, values, SQLiteDatabase.CONFLICT_IGNORE);
-            }
-            deleteDependentRows(id);
-            writable.delete("transactions", "id=?", new String[]{Long.toString(id)});
-            writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?", new Object[]{id});
-            writable.delete("capture_evidence", "transaction_id=?", new String[]{Long.toString(id)});
-            writable.setTransactionSuccessful();
-        } finally {
-            writable.endTransaction();
-        }
+        transactionRows.delete(id);
     }
 
     public long transferFee(long id) {

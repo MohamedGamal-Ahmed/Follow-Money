@@ -1,13 +1,15 @@
 package com.mohamedgamal.masareef;
 
+import android.content.ContentValues;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import com.mohamedgamal.masareef.ExpenseDb.Transaction;
 
-/** Read queries on the caller's connection; preserves existing bounds, ordering, row mapping and list limits. */
+/** Transaction storage on the caller's connection; preserves existing guards, queries and transaction policy. */
 final class TransactionRepository {
     private final ExpenseDb db;
 
@@ -105,6 +107,63 @@ final class TransactionRepository {
                     cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
         }
         return result;
+    }
+
+    int update(long id, long amountMinor, String currency, String merchant,
+                             String category, Long sourceId, String kind, Long destinationId,
+                             String note, Long occurredAt) {
+        if (amountMinor <= 0 || merchant.isBlank()) return 0;
+        if(new CardSettlements(db).related(id))throw new IllegalArgumentException("Undo card repayment links before editing");
+        try(Cursor fee=db.getReadableDatabase().rawQuery("SELECT p.currency,p.payment_source_id FROM transactions f JOIN transactions p ON p.id=f.fee_parent_id WHERE f.id=? AND f.unique_key LIKE 'card-statement-fee:%'",new String[]{Long.toString(id)})){
+            if(fee.moveToFirst()&&(!currency.equals(fee.getString(0))||sourceId==null||fee.isNull(1)||sourceId!=fee.getLong(1)||kind!=null&&!"expense".equals(kind)))throw new IllegalArgumentException("Statement fee must keep the purchase currency and card");
+        }
+        ContentValues values = new ContentValues();
+        values.put("amount_minor", amountMinor);
+        values.put("currency", currency);
+        values.put("merchant", merchant.trim());
+        values.put("category", category);
+        values.put("user_edited", 1);
+        values.put("needs_review", 0);
+        if (sourceId == null) values.putNull("payment_source_id"); else values.put("payment_source_id", sourceId);
+        if (kind != null) values.put("kind", kind);
+        if (destinationId == null) values.putNull("destination_source_id");
+        else values.put("destination_source_id", destinationId);
+        if (note != null) values.put("note", note.trim());
+        if (occurredAt != null) values.put("occurred_at", occurredAt);
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try {
+            int affected=sql.update("transactions", values, "id=?", new String[]{Long.toString(id)});
+            sql.setTransactionSuccessful();
+            return affected;
+        } finally { sql.endTransaction(); }
+    }
+
+    void delete(long id) {
+        if(new CardSettlements(db).related(id))throw new IllegalArgumentException("Undo card repayment allocations before deleting");
+        SQLiteDatabase writable = db.getWritableDatabase();
+        writable.beginTransaction();
+        try (Cursor cursor = writable.rawQuery("SELECT unique_key FROM transactions WHERE id=?",
+                new String[]{Long.toString(id)})) {
+            if (cursor.moveToFirst() && !cursor.getString(0).startsWith("manual:")) {
+                ContentValues values = new ContentValues();
+                values.put("unique_key", cursor.getString(0));
+                writable.insertWithOnConflict("excluded_messages", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+            }
+            deleteDependentRows(id);
+            writable.delete("transactions", "id=?", new String[]{Long.toString(id)});
+            writable.execSQL("INSERT OR IGNORE INTO excluded_messages SELECT unique_key FROM capture_evidence WHERE transaction_id=?", new Object[]{id});
+            writable.delete("capture_evidence", "transaction_id=?", new String[]{Long.toString(id)});
+            writable.setTransactionSuccessful();
+        } finally {
+            writable.endTransaction();
+        }
+    }
+
+    void deleteDependentRows(long id) {
+        SQLiteDatabase writable=db.getWritableDatabase();
+        CardSettlements.removeRelations(writable,id);
+        writable.delete("transactions","fee_parent_id=?",new String[]{Long.toString(id)});
+        writable.delete("reimbursements","income_id=? OR expense_id=?",new String[]{Long.toString(id),Long.toString(id)});
     }
 
 }
