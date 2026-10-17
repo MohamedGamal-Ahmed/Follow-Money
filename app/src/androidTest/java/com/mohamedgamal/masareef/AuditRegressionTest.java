@@ -160,6 +160,28 @@ final class AuditRegressionTest {
         ok(!ReminderReceiver.markPaid(context,id+999,LocalDate.now()),"A missing commitment was reported as paid");
     }
 
+    private static final String CANCEL_DEBIT="تم تحويل مبلغ 227 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222";
+    private static final String CANCEL_NOTICE="تم الغاء التحويل بمبلغ 227 جنيه من حساب رقم 1111";
+
+    public void testCaptureOutcomeNewDuplicateCancellationAndMergeFollowed(){
+        long t=at(LocalDate.now(),10);
+        // New: one row, no event.
+        ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
+        ExpenseDb.Transaction fresh=db.lastCaptured();ok(fresh!=null);eq(10000,fresh.amountMinor);ok(db.lastCaptureEvent()==null);
+        // Duplicate: nothing saved, nothing to report.
+        ok(!db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
+        ok(db.lastCaptured()==null);ok(db.lastCaptureEvent()==null);
+        // Merge-followed: the bank copy merges into the existing row and the result follows it.
+        long rows=db.transactionCount();
+        ok(db.addSms("BANK","Card purchase EGP 100 at QA SHOP",t+2000));
+        ExpenseDb.Transaction merged=db.lastCaptured();ok(merged!=null);eq(10000,merged.amountMinor);eq(rows,db.transactionCount());ok(db.transactionById(merged.id)!=null);
+        // Cancellation: the debit is archived, an event is reported and no row is returned.
+        long cancelAt=t+3600000;
+        ok(db.addSms("BANK",CANCEL_DEBIT,cancelAt));ok(db.lastCaptured()!=null);
+        ok(db.addSms("BANK",CANCEL_NOTICE,cancelAt+3000));
+        ok(db.lastCaptureEvent()!=null);ok(db.lastCaptureEvent().cancelled());ok(db.lastCaptured()==null);
+    }
+
     public void testAutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));long note=db.latestInserted().id;
