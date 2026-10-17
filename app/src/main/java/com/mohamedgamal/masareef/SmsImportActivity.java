@@ -24,26 +24,11 @@ import java.util.*;
 public final class SmsImportActivity extends Activity {
     /** One approved batch; the returned net ledger increase is independent of list pagination. */
     static long applySelected(ExpenseDb db,List<SmsPreview> selected) {
-        android.database.sqlite.SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
-        try {
-            long before=db.transactionCount();
-            for(SmsPreview row:selected)db.addHistoricalSms(row);
-            long added=db.transactionCount()-before;
-            sql.setTransactionSuccessful();return added;
-        }finally {sql.endTransaction();}
+        return new ImportBatch(db).applySelected(selected);
     }
-    /** One approved import: the batch and the repair around it share one transaction owned here. Returns the net ledger increase. */
+    /** Compatibility facade for the import use case; its return follows the batch commit. */
     static long applyBatchWithRepair(ExpenseDb db,List<SmsPreview> selected) {
-        android.database.sqlite.SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
-        try {
-            long before=db.transactionCount();applySelected(db,selected);
-            // Do not run a global transfer repair here: unselected history must stay untouched.
-            long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
-            for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}
-            db.repairBetweenInCallerTransaction(first-86_400_000L,last+86_400_000L);
-            long added=db.transactionCount()-before;
-            sql.setTransactionSuccessful();return added;
-        }finally {sql.endTransaction();}
+        return new ImportBatch(db).execute(selected);
     }
     /** The review list is a read after the commit: failing to read it must never turn a saved import into a reported failure. */
     static List<CaptureEvents.Event> pendingAfterCommit(ExpenseDb db,long start,long end) {
@@ -319,7 +304,7 @@ public final class SmsImportActivity extends Activity {
             if(selected.isEmpty()){processed=0;added=0;try(ExpenseDb read=new ExpenseDb(app)){pending=pendingAfterCommit(read,rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
             new Thread(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
-                    added=applyBatchWithRepair(writeDb,selected);processed=selected.size();
+                    added=new ImportBatch(writeDb).execute(selected);processed=selected.size();
                     mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
                     pending=pendingAfterCommit(writeDb,rangeStart,rangeEnd);
                     phase="done";
