@@ -926,10 +926,28 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         CsvBatchResult(int saved, int duplicates) { this.saved=saved; this.duplicates=duplicates; }
     }
 
+    /**
+     * One CSV file, one transaction: any failing row throws and rolls back every row of the file.
+     * A row that was not inserted must already exist or be excluded; anything else is a failure, not a duplicate.
+     */
     public CsvBatchResult importCsvBatch(String fileHash, List<CsvImport.Row> rows) {
-        int saved=0, duplicates=0;
-        for (CsvImport.Row row : rows) { if (addCsvEntry(fileHash, row)) saved++; else duplicates++; }
-        return new CsvBatchResult(saved, duplicates);
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        try {
+            int saved=0, duplicates=0;
+            for (CsvImport.Row row : rows) {
+                if (addCsvEntry(fileHash, row)) saved++;
+                else if (csvRowKnown("csv:"+fileHash+":"+row.line)) duplicates++;
+                else throw new IllegalStateException("CSV row "+row.line+" was not saved");
+            }
+            sql.setTransactionSuccessful();
+            return new CsvBatchResult(saved, duplicates);
+        } finally { sql.endTransaction(); }
+    }
+
+    private boolean csvRowKnown(String key) {
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM transactions WHERE unique_key=? UNION ALL SELECT 1 FROM excluded_messages WHERE unique_key=? LIMIT 1",new String[]{key,key})) {
+            return c.moveToFirst();
+        }
     }
 
     private boolean insertEntry(String key, long when, long amount, String currency,

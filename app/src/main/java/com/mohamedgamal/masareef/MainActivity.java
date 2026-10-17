@@ -1014,10 +1014,15 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("استيراد CSV")
                         .setMessage(preview.toString())
                         .setPositiveButton("استيراد", (dialog, which) -> new Thread(() -> {
-                            int inserted = 0;
-                            for (CsvImport.Row row : rows) if (db.addCsvEntry(fileHash.toString(), row)) inserted++;
-                            int finalInserted = inserted;
-                            runOnUiThread(() -> { toast("تم استيراد " + finalInserted + " عملية جديدة"); render(); });
+                            try {
+                                ExpenseDb.CsvBatchResult result = db.importCsvBatch(fileHash.toString(), rows);
+                                String message = "تم استيراد " + result.saved + " عملية جديدة" + (result.duplicates > 0 ? "، وتخطينا " + result.duplicates + " مكررة" : "");
+                                runOnUiThread(() -> { toast(message); render(); });
+                            } catch (RuntimeException failed) {
+                                runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("تعذر استيراد CSV")
+                                        .setMessage("لم نحفظ أي سطر من الملف، وبياناتك زي ما كانت. أعد المحاولة، ولو تكررت المشكلة صدّر الملف تاني.")
+                                        .setPositiveButton("تمام", null).show());
+                            }
                         }).start())
                         .setNegativeButton("إلغاء", null).show());
             } catch (Exception error) {
