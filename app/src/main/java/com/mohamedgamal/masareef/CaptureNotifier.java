@@ -64,12 +64,15 @@ final class CaptureNotifier {
 
     /** The tap target of a "recorded" notification: opens the transaction, or its editor when edit is true. */
     static PendingIntent transactionIntent(Context context, long transactionId, boolean edit) {
-        int id = 3_000_000 + (int) (transactionId % 1_000_000);
+        // A PendingIntent is identified by request code and by intent data, never by extras: give each
+        // (transaction, action) its own of both so one notification can never retarget another's button.
+        int code = 3_000_000 + 2 * (int) (transactionId % 500_000);
         Intent open = new Intent(context, MainActivity.class)
                 .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .setData(android.net.Uri.parse("followmoney://transaction/" + transactionId + (edit ? "/edit" : "")))
                 .putExtra(EXTRA_TRANSACTION, transactionId);
         if (edit) open.putExtra(EXTRA_EDIT, true);
-        return PendingIntent.getActivity(context, edit ? id + 1 : id, open,
+        return PendingIntent.getActivity(context, edit ? code + 1 : code, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 

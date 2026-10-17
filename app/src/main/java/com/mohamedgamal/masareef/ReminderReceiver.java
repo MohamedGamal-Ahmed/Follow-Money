@@ -40,18 +40,24 @@ public final class ReminderReceiver extends BroadcastReceiver {
     /** Marks one commitment paid for the day. False when nothing changed (already paid, finished or missing). */
     static boolean markPaid(Context context, long id, LocalDate day) {
         try (ExpenseDb db = new ExpenseDb(context)) {
-            db.markRecurringPaid(id, day);
-            return true;
+            return db.markRecurringPaid(id, day);
         }
     }
 
     @Override public void onReceive(Context context, Intent intent) {
         if (ACTION_MARK_PAID.equals(intent.getAction())) {
             long id = intent.getLongExtra(EXTRA_ID, -1);
-            if (id >= 0) markPaid(context, id, LocalDate.now());
             NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            boolean changed;
+            try { changed = id >= 0 && markPaid(context, id, LocalDate.now()); }
+            catch (RuntimeException failed) {
+                // The payment was not recorded: keep the notification so the tap can be retried.
+                android.widget.Toast.makeText(context, "تعذر تسجيل الدفع. افتح التطبيق وجرّب تاني", android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
             if (manager != null) manager.cancel((int) id);
-            SmsReceiver.notifyDataChanged(context);
+            if (changed) SmsReceiver.notifyDataChanged(context);
+            else android.widget.Toast.makeText(context, "الدفع ده متسجل قبل كده", android.widget.Toast.LENGTH_LONG).show();
             return;
         }
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -80,6 +86,7 @@ public final class ReminderReceiver extends BroadcastReceiver {
                 PendingIntent content = PendingIntent.getActivity(context, (int) item.id, open,
                         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 Intent paid = new Intent(context, ReminderReceiver.class).setAction(ACTION_MARK_PAID)
+                        .setData(android.net.Uri.parse("followmoney://commitment/" + item.id + "/paid"))
                         .putExtra(EXTRA_ID, item.id);
                 PendingIntent markPaid = PendingIntent.getBroadcast(context, 10000 + (int) item.id, paid,
                         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
