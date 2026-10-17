@@ -243,7 +243,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return added;
     }
     public boolean addSms(String sender, String body, long when) {
-        return addAutomatic(sender, sender, body, when, "SMS");
+        return captureSms(sender, body, when).dbChanged;
+    }
+
+    CaptureResult captureSms(String sender, String body, long when) {
+        return resultOf(addAutomatic(sender, sender, body, when, "SMS"));
     }
 
     /** Receipt aliases are safe only if no other inbox SMS has that exact sender/body/sent-time identity. */
@@ -295,7 +299,16 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public boolean addNotification(String packageName, String appLabel, String body, long when) {
-        return addAutomatic(packageName, appLabel, body, when, "إشعار: " + appLabel);
+        return captureNotification(packageName, appLabel, body, when).dbChanged;
+    }
+
+    CaptureResult captureNotification(String packageName, String appLabel, String body, long when) {
+        return resultOf(addAutomatic(packageName, appLabel, body, when, "إشعار: " + appLabel));
+    }
+
+    /** Snapshot of the capture that just finished; read right after it, before another capture overwrites the fields. */
+    private CaptureResult resultOf(boolean added) {
+        return new CaptureResult(added, added ? lastCaptured() : null, lastCaptureEvent);
     }
 
     private boolean addAutomatic(String sourceKey, String label, String body, long receivedAt, String channel) {
