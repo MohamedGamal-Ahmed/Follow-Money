@@ -1893,10 +1893,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 String bank="البنك";for(PaymentSource source:paymentSources()) if(source.id==from) bank=source.name;
                 boolean added=insertEntry("fee:"+debitId,debit.when,fee,debit.currency,"رسوم تحويل "+bank,"رسوم تحويل",
                         "رسوم من العملية",null,null,from,"expense",null,"رسوم مؤكدة من فرق الخصم وأصل التحويل");
-                if(added) {
-                    ContentValues related=new ContentValues();related.put("fee_parent_id",debitId);related.put("user_edited",1);
-                    writable.update("transactions",related,"unique_key=?",new String[]{"fee:"+debitId});
-                }
+                // The debit was already rewritten to the principal: a fee that is not saved must undo the whole split.
+                if(!added) throw new IllegalArgumentException("Fee could not be saved; transfer left unchanged");
+                ContentValues related=new ContentValues();related.put("fee_parent_id",debitId);related.put("user_edited",1);
+                if(writable.update("transactions",related,"unique_key=?",new String[]{"fee:"+debitId})!=1)
+                    throw new IllegalArgumentException("Fee could not be linked; transfer left unchanged");
             }
             writable.setTransactionSuccessful();
         } finally {writable.endTransaction();}
@@ -2406,7 +2407,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 getWritableDatabase().update("transactions",note,"id=? AND note IS NULL",new String[]{Long.toString(own.outId)});
                 debitAmounts.add(debit);
                 report.ownTransfers++;report.movedMinor+=own.principal;report.feesMinor+=own.fee;
-            } catch (IllegalArgumentException skipped) {/* left for manual review */}
+            } catch (IllegalArgumentException unexpected) {
+                // canReconcile already screened every expected refusal. A throw here has doomed the surrounding
+                // transaction, so it must reach the owner (an import batch) instead of looking like a skipped pair.
+                throw new IllegalStateException("Own-transfer repair failed unexpectedly",unexpected);
+            }
         }
         // Generic "commitments" guessed from these movements (e.g. a monthly top-up between own accounts) are not obligations.
         for (Recurring item:recurring())
@@ -2422,7 +2427,19 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (!receipt.currency.equals(debit.currency) || receipt.amountMinor!=own.principal) return false;
         long existingFee=transferFee(own.outId);
         if (existingFee>0 && existingFee!=own.fee) return false;
+        if (own.fee>0 && existingFee==0 && !feeRowAvailable(own.outId,own.fromAccount)) return false;
         return debit.amountMinor==own.principal+own.fee || debit.amountMinor==own.principal && existingFee==own.fee;
+    }
+
+    /** The separate fee row reconcileOwnTransfer will insert must not be refused, or the pair is left for manual review. */
+    private boolean feeRowAvailable(long debitId,long fromAccount) {
+        String key="fee:"+debitId;
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM excluded_messages WHERE unique_key=? UNION ALL SELECT 1 FROM transactions WHERE unique_key=? LIMIT 1",new String[]{key,key})) {
+            if (c.moveToFirst()) return false;
+        }
+        String bank="البنك";for(PaymentSource source:paymentSources()) if(source.id==fromAccount) bank=source.name;
+        MerchantRule rule=matchingRule("رسوم تحويل "+bank);
+        return rule==null || !rule.ignored;
     }
 
     /** Uncategorized rows the user never touched get the category today's rules give their merchant (e.g. ChatGPT → اشتراكات). */
