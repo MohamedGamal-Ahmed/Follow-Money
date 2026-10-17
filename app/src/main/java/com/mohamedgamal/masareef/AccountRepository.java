@@ -1,13 +1,15 @@
 package com.mohamedgamal.masareef;
 
+import android.content.ContentValues;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import com.mohamedgamal.masareef.ExpenseDb.PaymentSource;
 import com.mohamedgamal.masareef.ExpenseDb.Transaction;
 
-/** Existing account/source reads and confirmed-parent grouping on the caller's borrowed connection. */
+/** Existing account/source storage primitives and confirmed-parent grouping on the caller's borrowed connection. */
 final class AccountRepository {
     private final ExpenseDb db;
 
@@ -99,5 +101,83 @@ final class AccountRepository {
         for(PaymentSource source:paymentSources())
             if(source.id==root || source.parentSourceId!=null && source.parentSourceId==root) last=Math.max(last,source.lastActivityAt);
         return last;
+    }
+
+    void addSourceAlias(String identity, long sourceId) {
+        ContentValues values = new ContentValues();
+        values.put("identity", identity);
+        values.put("payment_source_id", sourceId);
+        db.getWritableDatabase().insertWithOnConflict("source_aliases", null, values,
+                SQLiteDatabase.CONFLICT_IGNORE);
+    }
+
+    long addPaymentSource(String name, String kind, String last4) {
+        ContentValues values = new ContentValues();
+        values.put("name", name.trim()); values.put("kind", kind); values.put("last4", last4);
+        long id = db.getWritableDatabase().insert("payment_sources", null, values);
+        String identity = SourceIdentity.key(name, last4);
+        if (id > 0 && identity != null) addSourceAlias(identity, id);
+        return id;
+    }
+
+    void mergeSources(long keepId, long removeId) {
+        if(new CardSettlements(db).sourceRelated(keepId)||new CardSettlements(db).sourceRelated(removeId))throw new IllegalArgumentException("Undo card repayment allocations before merging accounts");
+        if (keepId == removeId) return;
+        if(!linkedCards(keepId).isEmpty() || !linkedCards(removeId).isEmpty() || accountId(keepId)!=keepId || accountId(removeId)!=removeId)
+            throw new IllegalArgumentException("Unlink cards before merging message identities");
+        SQLiteDatabase writable = db.getWritableDatabase();
+        writable.beginTransaction();
+        try {
+            try (Cursor cursor = writable.rawQuery("SELECT id FROM payment_sources WHERE id IN (?,?)",
+                    new String[]{Long.toString(keepId), Long.toString(removeId)})) {
+                if (cursor.getCount() != 2) return;
+            }
+            writable.execSQL("UPDATE transactions SET payment_source_id=? WHERE payment_source_id=?",
+                    new Object[]{keepId, removeId});
+            writable.execSQL("UPDATE transactions SET destination_source_id=? WHERE destination_source_id=?",
+                    new Object[]{keepId, removeId});
+            writable.execSQL("UPDATE balance_snapshots SET payment_source_id=? WHERE payment_source_id=?",
+                    new Object[]{keepId, removeId});
+            writable.execSQL("UPDATE source_aliases SET payment_source_id=? WHERE payment_source_id=?",
+                    new Object[]{keepId, removeId});
+            writable.delete("payment_sources", "id=?", new String[]{Long.toString(removeId)});
+            writable.setTransactionSuccessful();
+        } finally { writable.endTransaction(); }
+    }
+
+    void linkCardToAccount(long cardId, long accountId) {
+        PaymentSource card=paymentSource(cardId), account=paymentSource(accountId);
+        if (card==null || account==null || cardId==accountId || !"بطاقة".equals(card.kind) ||
+                !"حساب".equals(account.kind) || account.parentSourceId!=null || card.archived || account.archived ||
+                !java.util.Objects.equals(SourceIdentity.bank(card.name),SourceIdentity.bank(account.name)))
+            throw new IllegalArgumentException("Choose a debit card and its account in the same bank");
+        SQLiteDatabase writable=db.getWritableDatabase();writable.beginTransaction();
+        try {
+            ContentValues cardValues=new ContentValues();cardValues.put("parent_source_id",accountId);cardValues.put("reviewed",1);
+            writable.update("payment_sources",cardValues,"id=?",new String[]{Long.toString(cardId)});
+            ContentValues accountValues=new ContentValues();accountValues.put("reviewed",1);
+            writable.update("payment_sources",accountValues,"id=?",new String[]{Long.toString(accountId)});
+            writable.setTransactionSuccessful();
+        } finally { writable.endTransaction(); }
+    }
+
+    void unlinkCard(long cardId) {
+        ContentValues values=new ContentValues();values.putNull("parent_source_id");values.put("reviewed",0);
+        db.getWritableDatabase().update("payment_sources",values,"id=?",new String[]{Long.toString(cardId)});
+    }
+
+    void updateSourceProfile(long id,String displayName,boolean archived,boolean reviewed) {
+        ContentValues values=new ContentValues();values.put("display_name",displayName==null?"":displayName.trim());
+        values.put("archived",archived?1:0);values.put("reviewed",reviewed?1:0);
+        db.getWritableDatabase().update("payment_sources",values,"id=?",new String[]{Long.toString(id)});
+    }
+
+    void deletePaymentSource(long id) {
+        if(new CardSettlements(db).sourceRelated(id))throw new IllegalArgumentException("Undo card repayment allocations before deleting accounts");
+        ContentValues values = new ContentValues(); values.putNull("payment_source_id");
+        db.getWritableDatabase().update("transactions", values, "payment_source_id=?", new String[]{Long.toString(id)});
+        db.getWritableDatabase().delete("balance_snapshots", "payment_source_id=?", new String[]{Long.toString(id)});
+        db.getWritableDatabase().delete("source_aliases", "payment_source_id=?", new String[]{Long.toString(id)});
+        db.getWritableDatabase().delete("payment_sources", "id=?", new String[]{Long.toString(id)});
     }
 }

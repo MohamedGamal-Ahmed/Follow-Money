@@ -1020,13 +1020,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 new String[]{Long.toString(id), kind});
     }
 
-    private void addSourceAlias(String identity, long sourceId) {
-        ContentValues values = new ContentValues();
-        values.put("identity", identity);
-        values.put("payment_source_id", sourceId);
-        getWritableDatabase().insertWithOnConflict("source_aliases", null, values,
-                SQLiteDatabase.CONFLICT_IGNORE);
-    }
+    private void addSourceAlias(String identity, long sourceId) { accounts.addSourceAlias(identity,sourceId); }
 
     private static void mergeDuplicateAutomaticSources(SQLiteDatabase db) {
         java.util.Map<String, Long> primary = new java.util.HashMap<>();
@@ -1460,41 +1454,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return transactionRows.update(id,amountMinor,currency,merchant,category,sourceId,kind,destinationId,note,occurredAt);
     }
 
-    public long addPaymentSource(String name, String kind, String last4) {
-        ContentValues values = new ContentValues();
-        values.put("name", name.trim()); values.put("kind", kind); values.put("last4", last4);
-        long id = getWritableDatabase().insert("payment_sources", null, values);
-        String identity = SourceIdentity.key(name, last4);
-        if (id > 0 && identity != null) addSourceAlias(identity, id);
-        return id;
-    }
+    public long addPaymentSource(String name, String kind, String last4) { return accounts.addPaymentSource(name,kind,last4); }
 
     public int sourceAliasCount(long id) { return accounts.sourceAliasCount(id); }
 
-    public void mergeSources(long keepId, long removeId) {
-        if(new CardSettlements(this).sourceRelated(keepId)||new CardSettlements(this).sourceRelated(removeId))throw new IllegalArgumentException("Undo card repayment allocations before merging accounts");
-        if (keepId == removeId) return;
-        if(!linkedCards(keepId).isEmpty() || !linkedCards(removeId).isEmpty() || accountId(keepId)!=keepId || accountId(removeId)!=removeId)
-            throw new IllegalArgumentException("Unlink cards before merging message identities");
-        SQLiteDatabase writable = getWritableDatabase();
-        writable.beginTransaction();
-        try {
-            try (Cursor cursor = writable.rawQuery("SELECT id FROM payment_sources WHERE id IN (?,?)",
-                    new String[]{Long.toString(keepId), Long.toString(removeId)})) {
-                if (cursor.getCount() != 2) return;
-            }
-            writable.execSQL("UPDATE transactions SET payment_source_id=? WHERE payment_source_id=?",
-                    new Object[]{keepId, removeId});
-            writable.execSQL("UPDATE transactions SET destination_source_id=? WHERE destination_source_id=?",
-                    new Object[]{keepId, removeId});
-            writable.execSQL("UPDATE balance_snapshots SET payment_source_id=? WHERE payment_source_id=?",
-                    new Object[]{keepId, removeId});
-            writable.execSQL("UPDATE source_aliases SET payment_source_id=? WHERE payment_source_id=?",
-                    new Object[]{keepId, removeId});
-            writable.delete("payment_sources", "id=?", new String[]{Long.toString(removeId)});
-            writable.setTransactionSuccessful();
-        } finally { writable.endTransaction(); }
-    }
+    public void mergeSources(long keepId, long removeId) { accounts.mergeSources(keepId,removeId); }
 
     public List<PaymentSource> paymentSources() { return accounts.paymentSources(); }
 
@@ -1506,32 +1470,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public java.util.Map<Long,List<Transaction>> accountTransactionGroups(LocalDate from,LocalDate to,String currency) { return accounts.accountTransactionGroups(from,to,currency); }
 
     /** Keep card/SMS identities and all financial rows intact; only the confirmed relationship changes. */
-    public void linkCardToAccount(long cardId, long accountId) {
-        PaymentSource card=paymentSource(cardId), account=paymentSource(accountId);
-        if (card==null || account==null || cardId==accountId || !"بطاقة".equals(card.kind) ||
-                !"حساب".equals(account.kind) || account.parentSourceId!=null || card.archived || account.archived ||
-                !java.util.Objects.equals(SourceIdentity.bank(card.name),SourceIdentity.bank(account.name)))
-            throw new IllegalArgumentException("Choose a debit card and its account in the same bank");
-        SQLiteDatabase writable=getWritableDatabase();writable.beginTransaction();
-        try {
-            ContentValues cardValues=new ContentValues();cardValues.put("parent_source_id",accountId);cardValues.put("reviewed",1);
-            writable.update("payment_sources",cardValues,"id=?",new String[]{Long.toString(cardId)});
-            ContentValues accountValues=new ContentValues();accountValues.put("reviewed",1);
-            writable.update("payment_sources",accountValues,"id=?",new String[]{Long.toString(accountId)});
-            writable.setTransactionSuccessful();
-        } finally { writable.endTransaction(); }
-    }
+    public void linkCardToAccount(long cardId, long accountId) { accounts.linkCardToAccount(cardId,accountId); }
 
-    public void unlinkCard(long cardId) {
-        ContentValues values=new ContentValues();values.putNull("parent_source_id");values.put("reviewed",0);
-        getWritableDatabase().update("payment_sources",values,"id=?",new String[]{Long.toString(cardId)});
-    }
+    public void unlinkCard(long cardId) { accounts.unlinkCard(cardId); }
 
-    public void updateSourceProfile(long id,String displayName,boolean archived,boolean reviewed) {
-        ContentValues values=new ContentValues();values.put("display_name",displayName==null?"":displayName.trim());
-        values.put("archived",archived?1:0);values.put("reviewed",reviewed?1:0);
-        getWritableDatabase().update("payment_sources",values,"id=?",new String[]{Long.toString(id)});
-    }
+    public void updateSourceProfile(long id,String displayName,boolean archived,boolean reviewed) { accounts.updateSourceProfile(id,displayName,archived,reviewed); }
 
     public List<PaymentSource> accountSources(boolean includeArchived) { return accounts.accountSources(includeArchived); }
 
@@ -1543,14 +1486,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public long sourceLastActivity(long sourceId) { return accounts.sourceLastActivity(sourceId); }
 
-    public void deletePaymentSource(long id) {
-        if(new CardSettlements(this).sourceRelated(id))throw new IllegalArgumentException("Undo card repayment allocations before deleting accounts");
-        ContentValues values = new ContentValues(); values.putNull("payment_source_id");
-        getWritableDatabase().update("transactions", values, "payment_source_id=?", new String[]{Long.toString(id)});
-        getWritableDatabase().delete("balance_snapshots", "payment_source_id=?", new String[]{Long.toString(id)});
-        getWritableDatabase().delete("source_aliases", "payment_source_id=?", new String[]{Long.toString(id)});
-        getWritableDatabase().delete("payment_sources", "id=?", new String[]{Long.toString(id)});
-    }
+    public void deletePaymentSource(long id) { accounts.deletePaymentSource(id); }
 
     public void putBudget(LocalDate month, String category, String currency, long amountMinor) {
         ContentValues values = new ContentValues();
