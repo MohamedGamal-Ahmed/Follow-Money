@@ -163,6 +163,20 @@ final class AuditRegressionTest {
     private static final String CANCEL_DEBIT="تم تحويل مبلغ 227 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222";
     private static final String CANCEL_NOTICE="تم الغاء التحويل بمبلغ 227 جنيه من حساب رقم 1111";
 
+    public void testTransactionEditAndMerchantLearningRollBackTogether(){
+        long t=at(LocalDate.now(),10),id=manual(t,10000,"expense");
+        TransactionMutation mutation=new TransactionMutation(db);
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_rule_fault BEFORE INSERT ON merchant_rules BEGIN SELECT RAISE(ABORT,'qa rule fault'); END");
+        try{mutation.update(id,5500,"EGP","QA MUTATION","صحة",null,"expense",null,"reviewed",t,true);throw new AssertionError("Edit committed although merchant learning failed");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(10000,db.transactionById(id).amountMinor);ok("QA expense".equals(db.transactionById(id).merchant));eq(0,db.merchantRules().size());
+        db.getWritableDatabase().execSQL("DROP TRIGGER qa_rule_fault");
+        mutation.update(id,5500,"EGP","QA MUTATION","صحة",null,"expense",null,"reviewed",t,true);
+        eq(5500,db.transactionById(id).amountMinor);ok("صحة".equals(db.transactionById(id).category));eq(1,db.merchantRules().size());
+        ok("صحة".equals(db.merchantRules().get(0).category));
+    }
+
     public void testCaptureOutcomeNewDuplicateCancellationAndMergeFollowed(){
         long t=at(LocalDate.now(),10);
         // New: one row, no event.
