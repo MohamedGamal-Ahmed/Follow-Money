@@ -2330,6 +2330,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return repairBetween(when-86_400_000L,when+86_400_000L);
     }
 
+    /**
+     * For a caller that already owns the transaction (a batch import): repairs inside it and lets any failure reach that caller,
+     * which rolls the whole batch back. A swallowed failure here would doom the outer transaction while it still looked successful.
+     */
+    public RepairReport repairBetweenInCallerTransaction(long from,long to) {
+        if (!getWritableDatabase().inTransaction()) throw new IllegalStateException("Caller must own the transaction");
+        RepairReport report=new RepairReport();
+        repairWindow(from,to,report);
+        return report;
+    }
+
     public RepairReport repairBetween(long from,long to) {
         RepairReport report=new RepairReport();
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();

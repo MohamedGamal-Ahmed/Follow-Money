@@ -40,7 +40,7 @@ public final class SmsImportActivity extends Activity {
             // Do not run a global transfer repair here: unselected history must stay untouched.
             long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
             for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}
-            db.repairBetween(first-86_400_000L,last+86_400_000L);
+            db.repairBetweenInCallerTransaction(first-86_400_000L,last+86_400_000L);
             long added=db.transactionCount()-before;
             sql.setTransactionSuccessful();return added;
         }finally {sql.endTransaction();}
