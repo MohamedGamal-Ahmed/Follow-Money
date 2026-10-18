@@ -689,6 +689,45 @@ public final class ReconciliationTest extends Instrumentation {
         db.unlinkReimbursement(back);assertEquals(0,db.reimbursedOf(buy));
         db.linkReimbursement(back,buy);db.deleteTransaction(buy);assertNull(db.reimbursedExpense(back));
     }
+    public void testCommitmentStateKeepsMonthEndAnchorAndCompletionGuards() {
+        LocalDate january=LocalDate.of(2026,1,31),february=LocalDate.of(2026,2,28),march=LocalDate.of(2026,3,31);
+        long id=db.putCommitment(null,"QA month end",1200,"EGP",january,"monthly","installment",3,0,1,"QA month end",null);
+        db.markAlerted(id,january);long rows=db.transactionCount();
+        assertTrue(db.markRecurringPaid(id,january));
+        ExpenseDb.Recurring paid=db.recurringById(id);assertEquals(february,paid.nextDue);assertEquals(1,paid.paidCount);
+        assertEquals(31,paid.dueDay);assertEquals(january.toString(),paid.lastPaidDate);assertNull(paid.lastAlertDate);
+        try(Cursor c=db.getReadableDatabase().rawQuery("SELECT last_paid_due FROM recurring WHERE id=?",new String[]{Long.toString(id)})){
+            assertTrue(c.moveToFirst());assertEquals(january.toString(),c.getString(0));
+        }
+        long revision=db.changes();assertFalse(db.markRecurringPaid(id,january.plusDays(1)));assertEquals(revision,db.changes());
+        assertTrue(db.markRecurringPaid(id,february));assertEquals(march,db.recurringById(id).nextDue);
+        assertTrue(db.markRecurringPaid(id,march));assertEquals(3,db.recurringById(id).paidCount);assertTrue(db.recurringById(id).isDone());
+        assertFalse(db.reopenRecurring(id));assertFalse(db.finishRecurring(id,false));assertFalse(db.markRecurringPaid(id,march.plusMonths(1)));
+        assertFalse(db.markRecurringPaid(999999,january));assertFalse(db.finishRecurring(999999,true));assertFalse(db.reopenRecurring(999999));
+        assertEquals(rows,db.transactionCount());
+    }
+
+    public void testCommitmentStateNormalizationAndTransitionsBorrowOuterRollback() {
+        LocalDate due=LocalDate.of(2026,1,31),paidDay=due.minusDays(1),next=LocalDate.of(2026,2,28);
+        long id=db.putCommitment(null,"QA legacy early",2500,"EGP",due,"monthly","installment",4,1,1,"QA legacy early",null);
+        android.content.ContentValues legacy=new android.content.ContentValues();legacy.put("last_paid_date",paidDay.toString());
+        legacy.put("last_alert_date",paidDay.toString());db.getWritableDatabase().update("recurring",legacy,"id=?",new String[]{Long.toString(id)});
+        long revision=db.changes();SQLiteDatabase connection=db.getWritableDatabase();connection.beginTransaction();
+        try{
+            assertEquals(1,db.normalizeEarlyPayments());assertEquals(next,db.recurringById(id).nextDue);assertEquals(1,db.recurringById(id).paidCount);
+            assertEquals(0,db.normalizeEarlyPayments());assertTrue(db.markRecurringPaid(id,next));assertEquals(2,db.recurringById(id).paidCount);
+            assertTrue(db.finishRecurring(id,false));assertTrue(db.recurringById(id).isDone());assertEquals(2,db.recurringById(id).paidCount);
+            assertTrue(db.reopenRecurring(id));assertFalse(db.recurringById(id).isDone());
+        }finally{connection.endTransaction();} // Caller deliberately rolls back every transition.
+        assertTrue(connection.isOpen());assertFalse(connection.inTransaction());assertEquals(revision,db.changes());
+        ExpenseDb.Recurring original=db.recurringById(id);assertEquals(due,original.nextDue);assertEquals(1,original.paidCount);
+        assertEquals(paidDay.toString(),original.lastPaidDate);assertEquals(paidDay.toString(),original.lastAlertDate);assertFalse(original.isDone());
+        try(Cursor c=db.getReadableDatabase().rawQuery("SELECT last_paid_due FROM recurring WHERE id=?",new String[]{Long.toString(id)})){
+            assertTrue(c.moveToFirst());assertTrue(c.isNull(0));
+        }
+        assertEquals(0,db.transactionCount());
+    }
+
     public void testEarlyPaymentCoversNextDue() {
         long id=db.putCommitment(null,"قسط الشقة",5060000,"EGP",LocalDate.of(2026,10,1),"monthly","installment",66,15,1,"قسط الشقة",null);
         android.content.ContentValues paid=new android.content.ContentValues();paid.put("last_paid_date","2026-09-30");
