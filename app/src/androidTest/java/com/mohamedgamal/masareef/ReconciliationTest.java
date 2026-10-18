@@ -280,6 +280,64 @@ public final class ReconciliationTest extends Instrumentation {
         assertEquals(1,db.balanceHistory(account,"EGP",10).size());
         db.unlinkCard(card);assertNull(db.currentBalance(account,"EGP"));assertEquals(723001,db.currentBalance(card,"EGP").amountMinor);
     }
+    public void testManualBalanceHistoryKeepsZeroAndDeterministicAnchorOrder() {
+        long account=db.addPaymentSource("BM","حساب","7392"),card=db.addPaymentSource("BM","بطاقة","4636");
+        db.linkCardToAccount(card,account);
+        assertNull(db.latestBalance(card,"EGP"));assertNull(db.currentBalance(account,"USD"));
+        db.putManualBalance(account,"EGP",10000,AT);
+        db.putManualBalance(card,"EGP",0,AT);
+        db.putManualBalance(account,"USD",900,AT);
+        // Deliberately equal bank/receipt clocks: insertion order must resolve the two EGP anchors.
+        db.getWritableDatabase().execSQL("UPDATE balance_snapshots SET received_at=?",new Object[]{AT+100});
+        db.putManualBalance(card,"EGP",-1,AT+1000);
+        List<ExpenseDb.BalanceSnapshot> history=db.balanceHistory(account,"EGP",1);
+        assertEquals(1,history.size());assertEquals(0,history.get(0).amountMinor);
+        assertEquals(2,db.balanceHistory(card,"EGP",10).size());
+        ExpenseDb.BalanceSnapshot latest=db.latestBalance(account,"EGP");
+        assertEquals(0,latest.amountMinor);assertEquals(card,latest.anchorSourceId);
+        assertEquals(AT,latest.occurredAt);assertEquals(AT+100,latest.receivedAt);
+        assertEquals("يدوي",latest.source);assertFalse(latest.estimated);assertEquals(0,latest.movementCount);
+        assertEquals(0,db.currentBalance(card,"EGP").amountMinor);
+        assertEquals(900,db.currentBalance(account,"USD").amountMinor);
+        assertEquals(3,scalar("SELECT COUNT(*) FROM balance_snapshots"));assertEquals(0,db.transactionCount());
+    }
+
+    public void testBalanceCutoffUsesEventTimeThenReceiptWithoutCrossCurrencyLeak() {
+        long account=db.addPaymentSource("BM","حساب","7392"),card=db.addPaymentSource("BM","بطاقة","4636");
+        long other=db.addPaymentSource("HSBC","حساب","001");db.linkCardToAccount(card,account);
+        db.putManualBalance(card,"EGP",10000,AT);
+        long receipt=db.latestBalance(account,"EGP").receivedAt;
+        long[] clocks={receipt-1,receipt,receipt+1};long[] amounts={100,200,300};
+        for(int i=0;i<clocks.length;i++) {
+            assertTrue(db.addManualEntry(AT,amounts[i],"EGP","QA cutoff "+i,"تسوق",card,"expense",null,null));
+            db.getWritableDatabase().execSQL("UPDATE transactions SET received_at=? WHERE id=?",new Object[]{clocks[i],db.latestInserted().id});
+        }
+        assertTrue(db.addManualEntry(AT+2000,500,"EGP","QA later event","دخل",account,"income",null,null));
+        db.getWritableDatabase().execSQL("UPDATE transactions SET received_at=? WHERE id=?",new Object[]{receipt-1,db.latestInserted().id});
+        assertTrue(db.addManualEntry(AT+3000,700,"USD","QA other currency","تسوق",card,"expense",null,null));
+        assertTrue(db.addManualEntry(AT+4000,900,"EGP","QA other account","تسوق",other,"expense",null,null));
+        ExpenseDb.BalanceSnapshot current=db.currentBalance(card,"EGP");
+        assertEquals(10200,current.amountMinor);assertTrue(current.estimated);assertEquals(2,current.movementCount);
+        assertEquals(AT,current.occurredAt);assertEquals(receipt,current.receivedAt);assertEquals(AT+2000,current.updatedAt);
+        assertEquals(card,current.anchorSourceId);assertEquals("يدوي",current.source);
+        assertEquals(10000,db.latestBalance(account,"EGP").amountMinor);assertNull(db.currentBalance(card,"USD"));
+        assertEquals(6,db.transactionCount());assertEquals(1,db.balanceHistory(account,"EGP",10).size());
+    }
+
+    public void testBalanceWritesBorrowOuterTransactionAndRollBackWithItsLedger() {
+        long account=db.addPaymentSource("BM","حساب","7392");db.putManualBalance(account,"EGP",10000,AT);
+        SQLiteDatabase connection=db.getWritableDatabase();connection.beginTransaction();
+        try {
+            db.putManualBalance(account,"EGP",20000,AT+1000);
+            assertTrue(db.addManualEntry(AT+2000,1000,"EGP","QA rollback","تسوق",account,"expense",null,null));
+            assertEquals(19000,db.currentBalance(account,"EGP").amountMinor);
+            // The caller deliberately does not commit either its balance or its ledger row.
+        } finally {connection.endTransaction();}
+        assertTrue(connection.isOpen());assertFalse(connection.inTransaction());
+        assertEquals(10000,db.currentBalance(account,"EGP").amountMinor);assertFalse(db.currentBalance(account,"EGP").estimated);
+        assertEquals(1,db.balanceHistory(account,"EGP",10).size());assertEquals(0,db.transactionCount());
+    }
+
     public void testLinkGuardsAndReversibleArchive() {
         long account=db.addPaymentSource("Banque Misr","حساب","7392"),card=db.addPaymentSource("Banque Misr","بطاقة","4636");
         long other=db.addPaymentSource("HSBC","حساب","7392"),credit=db.addPaymentSource("Banque Misr","بطاقة ائتمان","2700");
