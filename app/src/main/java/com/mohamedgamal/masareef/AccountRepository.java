@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import com.mohamedgamal.masareef.ExpenseDb.PaymentSource;
+import com.mohamedgamal.masareef.ExpenseDb.BalanceSnapshot;
 import com.mohamedgamal.masareef.ExpenseDb.Transaction;
 
 /** Existing account/source storage primitives and confirmed-parent grouping on the caller's borrowed connection. */
@@ -189,5 +190,93 @@ final class AccountRepository {
         db.getWritableDatabase().delete("balance_snapshots", "payment_source_id=?", new String[]{Long.toString(id)});
         db.getWritableDatabase().delete("source_aliases", "payment_source_id=?", new String[]{Long.toString(id)});
         db.getWritableDatabase().delete("payment_sources", "id=?", new String[]{Long.toString(id)});
+    }
+
+    void putManualBalance(long sourceId, String currency, long balanceMinor, long occurredAt) {
+        putBalance(sourceId, currency, balanceMinor, occurredAt, System.currentTimeMillis(),
+                "يدوي", "manual-balance:" + java.util.UUID.randomUUID());
+    }
+
+    void putBalance(long sourceId, String currency, long balanceMinor, long occurredAt,
+                            long receivedAt, String source, String uniqueKey) {
+        if (balanceMinor < 0) return;
+        ContentValues values = new ContentValues();
+        values.put("payment_source_id", sourceId);
+        values.put("currency", currency);
+        values.put("balance_minor", balanceMinor);
+        values.put("occurred_at", occurredAt);
+        values.put("received_at", receivedAt);
+        values.put("source", source);
+        values.put("unique_key", uniqueKey);
+        SQLiteDatabase sql = db.getWritableDatabase();
+        if (sql.insertWithOnConflict("balance_snapshots", null, values, SQLiteDatabase.CONFLICT_IGNORE) == -1) {
+            ContentValues corrected = new ContentValues();
+            corrected.put("occurred_at", occurredAt);
+            corrected.put("received_at", receivedAt);
+            corrected.put("balance_minor", balanceMinor);
+            corrected.put("payment_source_id", sourceId);
+            corrected.put("currency", currency);
+            sql.update("balance_snapshots", corrected, "unique_key=?", new String[]{uniqueKey});
+        }
+    }
+
+    BalanceSnapshot latestBalance(long sourceId, String currency) {
+        sourceId = accountId(sourceId);
+        try (Cursor cursor = db.getReadableDatabase().rawQuery(
+                "SELECT balance_minor,occurred_at,received_at,source,payment_source_id FROM balance_snapshots " +
+                "WHERE payment_source_id IN (SELECT id FROM payment_sources WHERE COALESCE(parent_source_id,id)=CAST(? AS INTEGER)) " +
+                "AND currency=? ORDER BY occurred_at DESC,received_at DESC,id DESC LIMIT 1",
+                new String[]{Long.toString(sourceId), currency})) {
+            if (!cursor.moveToFirst()) return null;
+            return new BalanceSnapshot(cursor.getLong(0), cursor.getLong(1), cursor.getLong(2), cursor.getString(3),
+                    false, cursor.getLong(4), cursor.getLong(1), 0);
+        }
+    }
+
+    BalanceSnapshot currentBalance(long sourceId, String currency) {
+        sourceId = accountId(sourceId);
+        BalanceSnapshot anchor = latestBalance(sourceId, currency);
+        if (anchor == null) return null;
+        long amount = anchor.amountMinor;
+        int movements = 0;
+        long updatedAt = anchor.occurredAt;
+        try (Cursor cursor = db.getReadableDatabase().rawQuery(
+                "SELECT t.occurred_at,t.received_at,t.kind,COALESCE(p.parent_source_id,p.id),COALESCE(d.parent_source_id,d.id),t.amount_minor " +
+                        "FROM transactions t LEFT JOIN payment_sources p ON p.id=t.payment_source_id " +
+                        "LEFT JOIN payment_sources d ON d.id=t.destination_source_id " +
+                        "WHERE t.currency=? AND (COALESCE(p.parent_source_id,p.id)=CAST(? AS INTEGER) OR COALESCE(d.parent_source_id,d.id)=CAST(? AS INTEGER)) " +
+                        "AND (t.occurred_at>? OR (t.occurred_at=? AND t.received_at>?)) " +
+                        "ORDER BY t.occurred_at,t.received_at,t.id",
+                new String[]{currency, Long.toString(sourceId), Long.toString(sourceId),
+                        Long.toString(anchor.occurredAt), Long.toString(anchor.occurredAt),
+                        Long.toString(anchor.receivedAt)})) {
+            while (cursor.moveToNext()) {
+                if (!BalanceTimeline.after(cursor.getLong(0), cursor.getLong(1),
+                        anchor.occurredAt, anchor.receivedAt)) continue;
+                long delta = BalanceTimeline.delta(cursor.getString(2),
+                        cursor.isNull(3) ? -1 : cursor.getLong(3),
+                        cursor.isNull(4) ? -1 : cursor.getLong(4), sourceId, cursor.getLong(5));
+                if (delta == 0) continue;
+                amount += delta;
+                movements++;
+                updatedAt = Math.max(updatedAt, cursor.getLong(0));
+            }
+        }
+        return movements == 0 ? anchor : new BalanceSnapshot(amount, anchor.occurredAt,
+                anchor.receivedAt, anchor.source, true, anchor.anchorSourceId, updatedAt, movements);
+    }
+
+    List<BalanceSnapshot> balanceHistory(long sourceId, String currency, int limit) {
+        sourceId = accountId(sourceId);
+        List<BalanceSnapshot> result = new ArrayList<>();
+        try (Cursor cursor = db.getReadableDatabase().rawQuery(
+                "SELECT balance_minor,occurred_at,received_at,source FROM balance_snapshots " +
+                "WHERE payment_source_id IN (SELECT id FROM payment_sources WHERE COALESCE(parent_source_id,id)=CAST(? AS INTEGER)) " +
+                "AND currency=? ORDER BY occurred_at DESC,received_at DESC,id DESC LIMIT ?",
+                new String[]{Long.toString(sourceId), currency, Integer.toString(limit)})) {
+            while (cursor.moveToNext()) result.add(new BalanceSnapshot(cursor.getLong(0), cursor.getLong(1),
+                    cursor.getLong(2), cursor.getString(3)));
+        }
+        return result;
     }
 }
