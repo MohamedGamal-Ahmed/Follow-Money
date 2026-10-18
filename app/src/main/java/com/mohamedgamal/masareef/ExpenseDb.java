@@ -24,6 +24,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final EvidenceRepository captureEvidence = new EvidenceRepository(this);
     private final AccountRepository accounts = new AccountRepository(this);
     private final CommitmentRepository commitments = new CommitmentRepository(this);
+    private final ReimbursementRepository reimbursements = new ReimbursementRepository(this);
     public ExpenseDb(Context context) {
         super(context, "masareef.db", null, 23);
     }
@@ -615,15 +616,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }finally {sql.endTransaction();}
     }
 
-    private boolean hasReimbursement(long id) {
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM reimbursements WHERE income_id=? OR expense_id=? LIMIT 1",
-                new String[]{Long.toString(id),Long.toString(id)})) {return c.moveToFirst();}
-    }
+    private boolean hasReimbursement(long id) { return reimbursements.hasReimbursement(id); }
 
-    private long[] reimbursementLink(long income) {
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT expense_id,amount_minor FROM reimbursements WHERE income_id=?",
-                new String[]{Long.toString(income)})) {return c.moveToFirst()?new long[]{c.getLong(0),c.getLong(1)}:null;}
-    }
+    private long[] reimbursementLink(long income) { return reimbursements.reimbursementLink(income); }
 
     private Long feeParent(long id) {
         try(Cursor c=getReadableDatabase().rawQuery("SELECT fee_parent_id FROM transactions WHERE id=?",
@@ -1786,28 +1781,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     // ---- Reimbursements: money that came back for something bought on someone else's behalf ----
 
     /** What each linked row should be reduced by: the purchase by what came back, the incoming payment by the part it repaid. */
-    public java.util.Map<Long,Long> reimbursementOffsets() {
-        java.util.Map<Long,Long> offsets=new java.util.HashMap<>();
-        java.util.Map<Long,Long> remaining=new java.util.HashMap<>();
-        try (Cursor c=getReadableDatabase().rawQuery("SELECT r.income_id,r.expense_id,r.amount_minor,i.amount_minor,e.amount_minor," +
-                "i.kind,e.kind,i.currency,e.currency FROM reimbursements r " +
-                "LEFT JOIN transactions i ON i.id=r.income_id LEFT JOIN transactions e ON e.id=r.expense_id " +
-                "ORDER BY i.occurred_at,r.income_id",null)) {
-            while (c.moveToNext()) {
-                long incomeId=c.getLong(0),expenseId=c.getLong(1);
-                boolean valid="income".equals(c.getString(5)) && "expense".equals(c.getString(6)) &&
-                        c.getString(7)!=null && c.getString(7).equals(c.getString(8));
-                long left=remaining.getOrDefault(expenseId,c.getLong(4));
-                long applied=valid?Math.max(0,Math.min(c.getLong(2),Math.min(c.getLong(3),left))):0;
-                if (applied>0) {
-                    offsets.merge(incomeId,applied,Long::sum);
-                    offsets.merge(expenseId,applied,Long::sum);
-                }
-                remaining.put(expenseId,Math.max(0,left-applied));
-            }
-        }
-        return offsets;
-    }
+    public java.util.Map<Long,Long> reimbursementOffsets() { return reimbursements.reimbursementOffsets(); }
 
     /** The amount a row contributes to spending/inflow after reimbursements; never negative. */
     public static long effectiveAmount(Transaction tx,java.util.Map<Long,Long> offsets) {
@@ -1815,24 +1789,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return offset==null?tx.amountMinor:Math.max(0,tx.amountMinor-offset);
     }
 
-    public long reimbursedOf(long expenseId) {
-        return reimbursementOffsets().getOrDefault(expenseId,0L);
-    }
+    public long reimbursedOf(long expenseId) { return reimbursements.reimbursedOf(expenseId); }
 
     /** The purchase an incoming payment repaid, or null. */
-    public Transaction reimbursedExpense(long incomeId) {
-        try (Cursor c=getReadableDatabase().rawQuery("SELECT expense_id FROM reimbursements WHERE income_id=?",new String[]{Long.toString(incomeId)})) {
-            return c.moveToFirst()?transactionById(c.getLong(0)):null;
-        }
-    }
+    public Transaction reimbursedExpense(long incomeId) { return reimbursements.reimbursedExpense(incomeId); }
 
-    public List<Transaction> reimbursingIncomes(long expenseId) {
-        List<Transaction> result=new ArrayList<>();
-        try (Cursor c=getReadableDatabase().rawQuery("SELECT income_id FROM reimbursements WHERE expense_id=?",new String[]{Long.toString(expenseId)})) {
-            while (c.moveToNext()) { Transaction tx=transactionById(c.getLong(0)); if (tx!=null) result.add(tx); }
-        }
-        return result;
-    }
+    public List<Transaction> reimbursingIncomes(long expenseId) { return reimbursements.reimbursingIncomes(expenseId); }
 
     /** Default to the incoming payment's day; older purchases are an explicit second choice. */
     public List<Transaction> reimbursementCandidates(Transaction income) {
@@ -1907,32 +1869,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** Undo this exact link only; never erase a replacement or another incoming repayment. */
-    boolean undoReimbursement(long incomeId,long expenseId,long amount) {
-        return getWritableDatabase().delete("reimbursements","income_id=? AND expense_id=? AND amount_minor=?",
-                new String[]{Long.toString(incomeId),Long.toString(expenseId),Long.toString(amount)})==1;
-    }
+    boolean undoReimbursement(long incomeId,long expenseId,long amount) { return reimbursements.undoReimbursement(incomeId,expenseId,amount); }
 
     /** Links an incoming payment to the purchase it repaid. Only the part up to what is left of the purchase counts. */
-    public long linkReimbursement(long incomeId,long expenseId) {
-        Transaction income=transactionById(incomeId),expense=transactionById(expenseId);
-        if (income==null || expense==null || !"income".equals(income.kind) || !"expense".equals(expense.kind) ||
-                !income.currency.equals(expense.currency)) throw new IllegalArgumentException("Not a purchase and its repayment");
-        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
-        try {
-            sql.delete("reimbursements","income_id=?",new String[]{Long.toString(incomeId)});
-            long left=expense.amountMinor-reimbursedOf(expenseId);
-            long applied=Math.min(income.amountMinor,Math.max(0,left));
-            if (applied<=0) throw new IllegalArgumentException("Purchase already repaid");
-            ContentValues values=new ContentValues();values.put("income_id",incomeId);values.put("expense_id",expenseId);values.put("amount_minor",applied);
-            sql.insertOrThrow("reimbursements",null,values);
-            sql.setTransactionSuccessful();
-            return applied;
-        } finally {sql.endTransaction();}
-    }
+    public long linkReimbursement(long incomeId,long expenseId) { return reimbursements.linkReimbursement(incomeId,expenseId); }
 
-    public void unlinkReimbursement(long transactionId) {
-        getWritableDatabase().delete("reimbursements","income_id=? OR expense_id=?",new String[]{Long.toString(transactionId),Long.toString(transactionId)});
-    }
+    public void unlinkReimbursement(long transactionId) { reimbursements.unlinkReimbursement(transactionId); }
 
     // ---- Data repair: promotions, double captures, own transfers (see RepairRules) ----
 
