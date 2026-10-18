@@ -127,6 +127,7 @@ final class AuditRegressionTest {
         eq(1,SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(sms)));
         eq(rows+1,db.transactionCount());
         ok("expense".equals(db.transactionById(out).kind));eq(10050,db.transactionById(out).amountMinor);eq(0,db.transferFee(out));ok(db.transactionById(in)!=null);
+        ok(db.transactionById(out).needsReview,"TR2: skipped debit has no visible review marker");
     }
 
     public void testUnexpectedRepairFailureFailsTheWholeSmsImport(){
