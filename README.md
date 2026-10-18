@@ -90,11 +90,13 @@ python tools/check-repo.py
 .\tools\run-checks.ps1
 # Additional database/widget/feature checks on a disposable emulator:
 .\tools\run-checks.ps1 -Android -Device emulator-5554
+# Isolated Activity/DB/worker lifetime regression (separate emulator QA app)
+.\tools\run-resource-lifetime.ps1 -Device emulator-5554
 ```
 
-The script runs the standalone JVM suites, assembles the app and instrumentation APK, and runs Android lint. `-Android` also installs both APKs and runs four instrumentation groups (base, phase, features and focused audit regressions). Use an emulator with synthetic data: these checks exercise writes and repairs. They are deliberately blocked on physical device IDs. Additional installed-update and visual checks use separate QA packages so existing emulator data is preserved.
+The script runs the standalone JVM suites, assembles the app and instrumentation APK, and runs Android lint. `-Android` also installs both APKs and runs five instrumentation groups (base, phase, features, focused audit regressions and card/cancellation). Use an emulator with synthetic data: these checks exercise writes and repairs. They are deliberately blocked on physical device IDs. Additional installed-update, lifetime and visual checks use separate QA packages so existing emulator data is preserved.
 
-GitHub Actions uses the same checks for pushes and pull requests to `main`; emulator instrumentation remains a local step. No CI pass or production readiness is implied by the presence of the workflow.
+GitHub Actions runs the JVM/build/lint checks, SQLite emulator groups and isolated resource-lifetime regression for pushes and pull requests to `main`. No CI pass or production readiness is implied by the presence of the workflow.
 
 ## Project map
 

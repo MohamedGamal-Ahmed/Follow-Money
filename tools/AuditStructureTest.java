@@ -25,7 +25,7 @@ public final class AuditStructureTest {
                 "onResume must schedule the off-thread ledger pass");
         String normalize = body(main, "private void refreshLedger(final boolean rerender)");
         check(normalize.contains("CaptureQueue.submit("), "the ledger pass must run on the one capture worker");
-        check(normalize.contains("runOnUiThread"), "the ledger pass must return to the UI thread to re-render");
+        check(normalize.contains("postUi"), "the ledger pass must return to the UI thread to re-render");
         check(normalize.contains("canRedrawNow()"),
                 "the delayed redraw must re-check the current screen, not the page that requested the refresh");
         check(normalize.contains("ledgerSnapshotIsCurrent("),

@@ -274,7 +274,7 @@ public final class SmsImportActivity extends Activity {
             startLabel=start==null?"كل الرسائل":start.toString();
             long since=start==null?0:start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
             long until=System.currentTimeMillis();rangeStart=since;rangeEnd=Long.MAX_VALUE;pending=java.util.Collections.emptyList();
-            new Thread(()->{
+            AppResources.read(()->{
                 List<SmsPreview> candidates=new ArrayList<>();
                 // A receipt timestamp can equal another SMS's sent timestamp. Never treat that key as a legacy alias.
                 Set<String> sentKeys;
@@ -295,14 +295,14 @@ public final class SmsImportActivity extends Activity {
                     synchronized(this){if(cancelled||token!=generation)return;items.addAll(candidates);phase="ready";if(!reviewBeforeImport){SmsPreview.selectForImport(items);apply();}}
                     publish(true);
                 } catch(RuntimeException e){if(token==generation){error="تعذر الفحص. راجع إذن SMS وأعد المحاولة؛ لم نحفظ بيانات الفحص.";phase="error";publish(true);}}
-            },"sms-preview").start();
+            });
         }
         synchronized void apply() {
             if(!"ready".equals(phase))return;
             List<SmsPreview> selected=new ArrayList<>();for(SmsPreview r:items)if(r.selected&&r.captureStatus!=2)selected.add(r);
             skipped=items.size()-selected.size();
             if(selected.isEmpty()){processed=0;added=0;try(ExpenseDb read=new ExpenseDb(app)){pending=pendingAfterCommit(read,rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
-            new Thread(()->{
+            CaptureQueue.submit(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
                     added=new ImportBatch(writeDb).execute(selected);processed=selected.size();
                     mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
@@ -311,7 +311,7 @@ public final class SmsImportActivity extends Activity {
                     try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException refreshError){android.util.Log.e("FollowMoney","Imported data; refresh unavailable: "+refreshError.getClass().getSimpleName());}
                     publish(true);
                 } catch(RuntimeException e){error="تعذر اعتماد المحدد؛ تم التراجع عن دفعة الحفظ. راجع الإذن وأعد الفحص.";phase="error";publish(true);}
-            },"sms-apply").start();
+            });
         }
     }
 }
