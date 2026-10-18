@@ -182,7 +182,7 @@ public final class MainActivity extends Activity {
         int systemBars = dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
         if (!dark && Build.VERSION.SDK_INT >= 27) systemBars |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         getWindow().getDecorView().setSystemUiVisibility(systemBars);
-        db = new ExpenseDb(this);
+        db = AppResources.database(this);
         boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
         introStep=state==null?0:Math.min(3,state.getInt("intro_step",0));
@@ -299,9 +299,9 @@ public final class MainActivity extends Activity {
         long[] ids=new long[bulkSelected.size()];int i=0;for(long id:bulkSelected)ids[i++]=id;out.putLongArray("bulk_ids",ids);
     }
 
-    @Override protected void onDestroy() {
-        db.close();
-        super.onDestroy();
+    /** A completed job may outlive this screen; only a live owner can receive its UI result. */
+    private void postUi(Runnable work) {
+        runOnUiThread(() -> {if(!isFinishing()&&!isDestroyed())work.run();});
     }
 
     private void sourcesScreen() {
@@ -994,7 +994,7 @@ public final class MainActivity extends Activity {
     }
 
     private void previewCsvImport(Uri uri) {
-        new Thread(() -> {
+        AppResources.read(() -> {
             try (InputStream input = getContentResolver().openInputStream(uri)) {
                 if (input == null) throw new IllegalArgumentException("تعذر فتح الملف");
                 ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -1014,26 +1014,26 @@ public final class MainActivity extends Activity {
                     preview.append("\n").append(row.date).append(" · ").append(row.merchant)
                             .append(" · ").append(money(row.amountMinor, row.currency));
                 }
-                runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("استيراد CSV")
+                postUi(() -> new ChoiceDialogBuilder().setTitle("استيراد CSV")
                         .setMessage(preview.toString())
-                        .setPositiveButton("استيراد", (dialog, which) -> new Thread(() -> {
+                        .setPositiveButton("استيراد", (dialog, which) -> CaptureQueue.submit(() -> {
                             try {
                                 ExpenseDb.CsvBatchResult result = db.importCsvBatch(fileHash.toString(), rows);
                                 String message = "تم استيراد " + result.saved + " عملية جديدة" + (result.duplicates > 0 ? "، وتخطينا " + result.duplicates + " مكررة" : "");
-                                runOnUiThread(() -> { toast(message); render(); });
+                                postUi(() -> { toast(message); render(); });
                             } catch (RuntimeException failed) {
-                                runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("تعذر استيراد CSV")
+                                postUi(() -> new ChoiceDialogBuilder().setTitle("تعذر استيراد CSV")
                                         .setMessage("لم نحفظ أي سطر من الملف، وبياناتك زي ما كانت. أعد المحاولة، ولو تكررت المشكلة صدّر الملف تاني.")
                                         .setPositiveButton("تمام", null).show());
                             }
-                        }).start())
+                        }))
                         .setNegativeButton("إلغاء", null).show());
             } catch (Exception error) {
-                runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("تعذر استيراد CSV")
+                postUi(() -> new ChoiceDialogBuilder().setTitle("تعذر استيراد CSV")
                         .setMessage(error.getMessage() == null ? "راجع صيغة الملف" : error.getMessage())
                         .setPositiveButton("تمام", null).show());
             }
-        }).start();
+        });
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -1240,13 +1240,13 @@ public final class MainActivity extends Activity {
         SharedPreferences prefs=getPreferences(MODE_PRIVATE);
         if(prefs.getInt("merchant_catalog_version",0)>=1) return;
         Context app=getApplicationContext();
-        new Thread(()->{
+        CaptureQueue.submit(()->{
             try(ExpenseDb catalogDb=new ExpenseDb(app)) {
                 int count=catalogDb.refreshMerchantCategories();
                 prefs.edit().putInt("merchant_catalog_version",1).apply();
-                runOnUiThread(()->{if(!isFinishing() && !isDestroyed()){render();if(count>0)toast("اتحسن تصنيف "+count+" عمليات تلقائية");}});
+                postUi(()->{if(!isFinishing() && !isDestroyed()){render();if(count>0)toast("اتحسن تصنيف "+count+" عمليات تلقائية");}});
             } catch(RuntimeException error) {android.util.Log.e("FollowMoney","Merchant categories skipped: "+error.getClass().getSimpleName());}
-        },"merchant-catalog").start();
+        });
     }
 
     private void offerPastMerchantCategory(String merchant,String category) {
@@ -2096,7 +2096,7 @@ public final class MainActivity extends Activity {
             try { snapshot = readLedgerSnapshot(db, version); }
             catch (RuntimeException ignored) { }
             final LedgerSnapshot ready = snapshot;
-            runOnUiThread(() -> {
+            postUi(() -> {
                 boolean repeat = ledgerRefreshPending;
                 ledgerRefreshPending = false;
                 refreshingLedger.set(false);
@@ -6011,7 +6011,7 @@ public final class MainActivity extends Activity {
             toast("محتاج إذن قراءة الرسائل الأول"); return;
         }
         toast("بجهّز العينات...");
-        new Thread(() -> {
+        AppResources.read(() -> {
             Map<String, int[]> income = new LinkedHashMap<>();
             Map<String, int[]> sent = new LinkedHashMap<>();
             try (Cursor cursor = getContentResolver().query(Telephony.Sms.Inbox.CONTENT_URI,
@@ -6031,14 +6031,14 @@ public final class MainActivity extends Activity {
                     bucket.computeIfAbsent(masked, k -> new int[1])[0]++;
                 }
             } catch (Exception error) {
-                runOnUiThread(() -> toast("تعذر قراءة الرسائل"));
+                postUi(() -> toast("تعذر قراءة الرسائل"));
                 return;
             }
             StringBuilder text = new StringBuilder("عينات Follow Money (الأرقام مخفية)\n");
             appendSamples(text, "رسائل دخل", income);
             appendSamples(text, "تحويلات خارجة", sent);
             String result = text.toString();
-            runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("راجعها قبل ما تبعتها")
+            postUi(() -> new ChoiceDialogBuilder().setTitle("راجعها قبل ما تبعتها")
                     .setMessage(result)
                     .setPositiveButton("مشاركة", (dialog, which) -> {
                         Intent share = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, result);
@@ -6050,7 +6050,7 @@ public final class MainActivity extends Activity {
                         toast("اتنسخت");
                     })
                     .setNegativeButton("إغلاق", null).show());
-        }).start();
+        });
     }
 
     private static String maskMessage(String text) {
@@ -6069,31 +6069,31 @@ public final class MainActivity extends Activity {
     }
 
     private void repairTransfersDialog() {
-        new Thread(() -> {
+        CaptureQueue.submit(() -> {
             int found = db.repairOwnTransfers(false);
-            runOnUiThread(() -> {
+            postUi(() -> {
                 if (found == 0) { toast("مفيش تحويلات قديمة بين حساباتك محتاجة تتصلح"); return; }
                 new ChoiceDialogBuilder().setTitle("لقينا " + found + " تحويل بين حساباتك")
                         .setMessage("كل واحد منهم مبلغ خرج من حساب ودخل حساب تاني ليك في خلال 10 دقايق. " +
                                 "اتسجلوا قبل كده صرف ودخل، فكانوا بيكبّروا الأرقام. نعلّمهم تحويل بين حساباتك؟")
-                        .setPositiveButton("أيوه، صلّحهم", (dialog, which) -> new Thread(() -> {
+                        .setPositiveButton("أيوه، صلّحهم", (dialog, which) -> CaptureQueue.submit(() -> {
                             int fixed = db.repairOwnTransfers(true);
-                            runOnUiThread(() -> { toast("اتصلّح " + fixed + " تحويل"); render(); });
-                        }).start())
+                            postUi(() -> { toast("اتصلّح " + fixed + " تحويل"); render(); });
+                        }))
                         .setNegativeButton("لأ", null).show();
             });
-        }).start();
+        });
     }
 
     private void diagnosticsDialog() {
         toast("بجهّز التقرير...");
-        new Thread(() -> {
+        AppResources.read(() -> {
             LocalDate start = LocalDate.now().withDayOfYear(1);
             String report;
             try { report = db.diagnostics(start, LocalDate.now().plusDays(1)); }
             catch (RuntimeException error) { report = "تعذر عمل التقرير: " + error.getMessage(); }
             String result = report;
-            runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("تقرير الأرقام")
+            postUi(() -> new ChoiceDialogBuilder().setTitle("تقرير الأرقام")
                     .setMessage(result)
                     .setPositiveButton("مشاركة", (dialog, which) -> {
                         Intent share = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, result);
@@ -6105,7 +6105,7 @@ public final class MainActivity extends Activity {
                         toast("اتنسخ");
                     })
                     .setNegativeButton("إغلاق", null).show());
-        }).start();
+        });
     }
 
     /**
@@ -6178,16 +6178,16 @@ public final class MainActivity extends Activity {
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         if (!manual && prefs.getInt("repair_version", 0) >= ExpenseDb.REPAIR_VERSION) return;
         if (manual) toast("بفحص البيانات...");
-        new Thread(() -> {
+        CaptureQueue.submit(() -> {
             ExpenseDb.RepairReport report;
             try { report = db.repairAll(); }
             catch (RuntimeException error) {
                 android.util.Log.e("FollowMoney", "Data repair failed: " + error.getClass().getSimpleName());
-                if (manual) runOnUiThread(() -> toast("تعذر فحص البيانات"));
+                if (manual) postUi(() -> toast("تعذر فحص البيانات"));
                 return;
             }
-            runOnUiThread(() -> {
-                prefs.edit().putInt("repair_version", ExpenseDb.REPAIR_VERSION).apply();
+            prefs.edit().putInt("repair_version", ExpenseDb.REPAIR_VERSION).apply();
+            postUi(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 render();
                 if (!report.changed()) { if (manual) toast("البيانات سليمة، مفيش حاجة تتصلح"); return; }
@@ -6207,7 +6207,7 @@ public final class MainActivity extends Activity {
                         .setNeutralButton("افتح التحليلات", (d, w) -> { selectedTab = 4; render(); }).show();
                 if (openingDialog != null && openingDialog.isShowing()) afterOpening = show; else show.run();
             });
-        }).start();
+        });
     }
 
     private void reviewToolsDialog() {
@@ -6232,7 +6232,7 @@ public final class MainActivity extends Activity {
             toast("محتاج إذن قراءة الرسائل الأول"); return;
         }
         toast("براجع الرسائل المسجلة...");
-        new Thread(() -> {
+        AppResources.read(() -> {
             int scanned = 0, captured = 0, excluded = 0, missing = 0, completedReview = 0, otherReview = 0;
             Map<String, int[]> missingSamples = new LinkedHashMap<>();
             Map<String, int[]> reviewSamples = new LinkedHashMap<>();
@@ -6282,13 +6282,13 @@ public final class MainActivity extends Activity {
                 appendSamples(report, "عمليات محتملة للمراجعة", reviewSamples);
                 result = report.toString();
             }
-            runOnUiThread(() -> new ChoiceDialogBuilder().setTitle("تغطية رسائل SMS")
+            postUi(() -> new ChoiceDialogBuilder().setTitle("تغطية رسائل SMS")
                     .setMessage(result)
                     .setPositiveButton("نسخ", (dialog, which) -> {
                         android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                         if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("sms coverage", result));
                         toast("اتنسخ؛ راجع العينات قبل مشاركتها");
                     }).setNegativeButton("إغلاق", null).show());
-        }).start();
+        });
     }
 }

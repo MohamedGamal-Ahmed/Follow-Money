@@ -105,7 +105,9 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
           disable-animations: true
-          script: bash -o pipefail -c "pwsh -NoProfile -File tools/run-checks.ps1 -Online -Android -Device emulator-5554 2>&1 | tee .tmp/ci/instrumentation.txt"
+          script: |
+            bash -o pipefail -c "pwsh -NoProfile -File tools/run-checks.ps1 -Online -Android -Device emulator-5554 2>&1 | tee .tmp/ci/instrumentation.txt"
+            bash -o pipefail -c "pwsh -NoProfile -File tools/run-resource-lifetime.ps1 -Online -Device emulator-5554 2>&1 | tee .tmp/ci/lifetime.txt"
       - name: Upload instrumentation output
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -115,4 +117,5 @@ jobs:
           if-no-files-found: warn
           path: |
             .tmp/ci/instrumentation.txt
+            .tmp/ci/lifetime.txt
             app/build/reports/lint-results-debug.*
