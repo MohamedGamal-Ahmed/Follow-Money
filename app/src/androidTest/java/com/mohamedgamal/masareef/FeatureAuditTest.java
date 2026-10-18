@@ -264,6 +264,51 @@ final class FeatureAuditTest {
         eq(50000, db.linkReimbursement(a, buy)); eq(61288, db.linkReimbursement(b, buy));
         eq(111288, db.reimbursedOf(buy)); eq(8712, ExpenseDb.effectiveAmount(db.transactionById(b), db.reimbursementOffsets()));
     }
+    public void testFailedReimbursementRelinkAndCallerRollbackKeepOriginalLinks() {
+        long t=at(LocalDate.now());
+        ok(db.addManual(t,10000,"EGP","QA original purchase","تسوق"));long original=db.latestInserted().id;
+        ok(db.addManual(t,5000,"EGP","QA fully repaid","تسوق"));long full=db.latestInserted().id;
+        ok(db.addManualEntry(t+1000,4000,"EGP","QA refund A","دخل",null,"income",null,null));long a=db.latestInserted().id;
+        ok(db.addManualEntry(t+2000,5000,"EGP","QA refund B","دخل",null,"income",null,null));long b=db.latestInserted().id;
+        eq(4000,db.linkReimbursement(a,original));eq(5000,db.linkReimbursement(b,full));
+        try{db.linkReimbursement(a,full);throw new AssertionError("Relink to repaid purchase succeeded");}
+        catch(IllegalArgumentException expected){}
+        eq(original,db.reimbursedExpense(a).id);eq(4000,db.reimbursedOf(original));eq(5000,db.reimbursedOf(full));
+        eq(1,db.reimbursingIncomes(original).size());eq(a,db.reimbursingIncomes(original).get(0).id);
+        ok(db.reimbursedExpense(999999)==null);ok(db.reimbursingIncomes(999999).isEmpty());
+        SQLiteDatabase connection=db.getWritableDatabase();connection.beginTransaction();
+        try{
+            db.unlinkReimbursement(original);ok(db.undoReimbursement(b,full,5000));
+            ok(db.reimbursedExpense(a)==null);ok(db.reimbursedExpense(b)==null);
+            // The caller deliberately rolls back both removals.
+        }finally{connection.endTransaction();}
+        ok(connection.isOpen());ok(!connection.inTransaction());
+        eq(original,db.reimbursedExpense(a).id);eq(full,db.reimbursedExpense(b).id);
+        ok(!db.undoReimbursement(a,original,1));eq(4000,db.reimbursedOf(original));
+        ok(db.undoReimbursement(a,original,4000));eq(0,db.reimbursedOf(original));eq(5000,db.reimbursedOf(full));
+        eq(4,db.transactionCount());eq(10000,db.transactionById(original).amountMinor);eq(4000,db.transactionById(a).amountMinor);
+    }
+    public void testLegacyReimbursementProjectionSkipsInvalidLinksAndClipsChronologically() {
+        long t=at(LocalDate.now());
+        ok(db.addManual(t,10000,"EGP","QA purchase","تسوق"));long buy=db.latestInserted().id;
+        ok(db.addManualEntry(t+3000,6000,"EGP","QA later refund","دخل",null,"income",null,null));long later=db.latestInserted().id;
+        ok(db.addManualEntry(t+1000,5000,"EGP","QA earlier refund","دخل",null,"income",null,null));long earlier=db.latestInserted().id;
+        ok(db.addManualEntry(t+500,4000,"USD","QA wrong currency","دخل",null,"income",null,null));long currency=db.latestInserted().id;
+        ok(db.addManual(t+250,5000,"EGP","QA wrong kind","تسوق"));long kind=db.latestInserted().id;
+        ok(db.addManualEntry(t+750,1000,"EGP","QA negative link","دخل",null,"income",null,null));long negative=db.latestInserted().id;
+        // Legacy/malformed persisted links must not consume capacity or erase gross ledger rows.
+        long[][] links={{later,6000},{earlier,5000},{currency,4000},{kind,5000},{999999,10000},{negative,-5}};
+        for(long[] link:links)db.getWritableDatabase().execSQL("INSERT INTO reimbursements(income_id,expense_id,amount_minor) VALUES (?,?,?)",
+                new Object[]{link[0],buy,link[1]});
+        Map<Long,Long> offsets=db.reimbursementOffsets();eq(3,offsets.size());
+        eq(10000,offsets.get(buy));eq(5000,offsets.get(earlier));eq(5000,offsets.get(later));
+        ok(!offsets.containsKey(currency));ok(!offsets.containsKey(kind));ok(!offsets.containsKey(999999L));ok(!offsets.containsKey(negative));
+        eq(0,ExpenseDb.effectiveAmount(db.transactionById(buy),offsets));eq(1000,ExpenseDb.effectiveAmount(db.transactionById(later),offsets));
+        eq(6,db.transactionCount());eq(10000,db.transactionById(buy).amountMinor);
+        try(android.database.Cursor count=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM reimbursements",null)){
+            ok(count.moveToFirst());eq(6,count.getLong(0));
+        }
+    }
     public void testDifferentCurrencyRefundIsRejected() {
         long t = at(LocalDate.now()); db.addManual(t, 10000, "EGP", "QA SHOP", "تسوق"); long buy = db.latestInserted().id;
         db.addManualEntry(t + 1000, 10000, "USD", "QA friend", "دخل", null, "income", null, null); long back = db.latestInserted().id;
