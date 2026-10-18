@@ -99,4 +99,83 @@ final class CommitmentRepository {
         db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
     }
 
+    // Legacy payment-state writes; rule changes and settlement cycles remain separate work.
+    int normalizeEarlyPayments() {
+        int moved = 0;
+        java.util.Map<Long,String> coveredDue = new java.util.HashMap<>();
+        try (Cursor c = db.getReadableDatabase().rawQuery("SELECT id,last_paid_due FROM recurring WHERE last_paid_due IS NOT NULL", null)) {
+            while (c.moveToNext()) coveredDue.put(c.getLong(0), c.getString(1));
+        }
+        for (Recurring item : recurring()) {
+            if (item.isDone() || item.lastPaidDate == null) continue;
+            LocalDate paid;
+            try { paid = LocalDate.parse(item.lastPaidDate); } catch (RuntimeException invalid) { continue; }
+            LocalDate due = item.nextDue;
+            String known = coveredDue.get(item.id);
+            boolean covered;
+            if (known != null) {
+                // We know which due date the last payment settled: the next one must come after it.
+                covered = !due.isAfter(LocalDate.parse(known));
+            } else {
+                // Older rows: a payment shortly before the due date, or earlier in the same month for a monthly bill
+                // (e.g. a card statement paid on the 10th for the 26th), settles that due date.
+                long window = "weekly".equals(item.cycle) ? 2 : "yearly".equals(item.cycle) ? 15 : 7;
+                long early = java.time.temporal.ChronoUnit.DAYS.between(paid, due);
+                boolean sameMonth = "monthly".equals(item.cycle) && java.time.YearMonth.from(paid).equals(java.time.YearMonth.from(due));
+                covered = early >= 0 && (early <= window || sameMonth);
+            }
+            if (!covered) continue;
+            LocalDate next = item.nextAfter(due);
+            ContentValues values = new ContentValues();
+            values.put("next_due", next.toString());
+            values.put("last_paid_due", due.toString());
+            values.putNull("last_alert_date");
+            db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(item.id)});
+            moved++;
+        }
+        return moved;
+    }
+
+    boolean markRecurringPaid(long id, LocalDate day) {
+        normalizeEarlyPayments();
+        Recurring item = recurringById(id);
+        if (item == null || item.isDone()) return false;
+        if (item.lastPaidDate != null) {
+            long gap = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.parse(item.lastPaidDate), day);
+            if (gap < ("weekly".equals(item.cycle) ? 4 : 15)) return false;
+        }
+        LocalDate next = item.nextAfter(item.nextDue);
+        while (!next.isAfter(day)) next = item.nextAfter(next);
+        int paid = item.paidCount + 1;
+        ContentValues values = new ContentValues();
+        values.put("last_paid_due", item.nextDue.toString());
+        values.put("next_due", next.toString());
+        values.put("paid_count", paid);
+        values.put("last_paid_date", day.toString());
+        values.putNull("last_alert_date");
+        if (item.totalCount != null && paid >= item.totalCount) values.put("status", "done");
+        db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
+        return true;
+    }
+
+    boolean finishRecurring(long id, boolean allInstallmentsPaid) {
+        Recurring item = recurringById(id);
+        if (item == null || item.isDone()) return false;
+        ContentValues values = new ContentValues();
+        values.put("status", "done");
+        values.putNull("last_alert_date");
+        if (allInstallmentsPaid && "installment".equals(item.kind) && item.totalCount != null)
+            values.put("paid_count", item.totalCount);
+        return db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)}) == 1;
+    }
+
+    boolean reopenRecurring(long id) {
+        Recurring item = recurringById(id);
+        if (item == null || !item.isDone() ||
+                item.totalCount != null && item.paidCount >= item.totalCount) return false;
+        ContentValues values = new ContentValues();
+        values.put("status", "active");
+        values.putNull("last_alert_date");
+        return db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)}) == 1;
+    }
 }
