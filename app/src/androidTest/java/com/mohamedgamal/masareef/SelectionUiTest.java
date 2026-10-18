@@ -148,6 +148,8 @@ final class SelectionUiTest {
             ok(db.addManualEntry(transferAt,10050,"EGP","QA TR2 debit","تحويلات",account,"expense",null,null));long debit=db.latestInserted().id;
             ok(db.addManualEntry(transferAt+1000,10000,"EGP","QA TR2 receipt","دخل",targetAccount,"income",null,null));long receipt=db.latestInserted().id;
             db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+debit});
+            db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{debit});
+            main(()->invoke("openRelatedTransaction",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(debit)));ok(has("تحويل محتاج ربط"));
             main(()->invoke("reconcileTransferDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(debit)));
             fill("أصل المبلغ المحوّل","100.00");fill("رسوم البنك","0.50");
             click("بدون وسيلة محددة");click(db.sourceLabel(targetAccount)+" · يحتاج مراجعة");
@@ -157,8 +159,8 @@ final class SelectionUiTest {
             }
             click("اربط المصادر وافصل الرسوم");
             ok(db.transactionById(debit).amountMinor==10050);ok(db.transactionById(receipt)!=null);
-            ok(has("الرسوم دي محذوفة أو عليها تجاهل"));ok(has("اربط بدون رسوم"));
-            click("اربط بدون رسوم");ok(has("0.50"));ok(has("مش هتتحسب في مصروفاتك"));
+            ok(has("الرسوم دي محذوفة أو عليها تجاهل"));ok(has("اربط بدون رسوم"));screen("06-tr2-fee-blocked");
+            click("اربط بدون رسوم");ok(has("0.50"));ok(has("مش هتتحسب في مصروفاتك"));screen("07-tr2-omission-confirmation");
             ok(db.transactionById(debit).amountMinor==10050);ok(db.transactionById(receipt)!=null);
             click("إلغاء");ok(db.transactionById(debit).amountMinor==10050);
             click("اربط بدون رسوم");click("تأكيد الربط بدون رسوم");

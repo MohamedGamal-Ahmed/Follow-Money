@@ -2741,7 +2741,7 @@ public final class MainActivity extends Activity {
         LinearLayout meta = new LinearLayout(this); meta.setGravity(Gravity.CENTER_VERTICAL);
         String categoryName = "income".equals(item.kind) ? "دخل" : "transfer".equals(item.kind) ? "تحويلات" : item.category;
         meta.addView(categoryPill(categoryName));
-        if(item.needsReview) meta.addView(label(" · للمراجعة",11,CORAL,true));
+        if(item.needsReview) meta.addView(label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?" · تحويل محتاج ربط":" · للمراجعة",11,CORAL,true));
         if (UiKit.isInstaPay(item.merchant)) {
             LinearLayout.LayoutParams ipaParams = new LinearLayout.LayoutParams(-2, -2); ipaParams.setMarginStart(dp(4));
             meta.addView(instaPayPill(), ipaParams);
@@ -2834,7 +2834,7 @@ public final class MainActivity extends Activity {
         String origin = "SMS".equals(item.source) ? "رسالة البنك تلقائيًا" : "يدوي".equals(item.source) ? "إضافة يدوية" :
                 "CSV".equals(item.source) ? "ملف CSV" : item.source;
         detailRow(details, "اتسجلت من", label(origin, 14, INK, true));
-        if(item.needsReview) detailRow(details,"حالة المراجعة",label("مصدر العملية يحتاج مراجعة؛ المبلغ ما زال محسوبًا",12,CORAL,false));
+        if(item.needsReview) detailRow(details,"حالة المراجعة",label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?"تحويل محتاج ربط؛ الخصم ما زال محسوبًا لحين مراجعتك":"مصدر العملية يحتاج مراجعة؛ المبلغ ما زال محسوبًا",12,CORAL,false));
         TextView original=label("عرض الرسالة الأصلية",14,ACCENT,true);
         original.setOnClickListener(v -> showOriginalMessages(db.sourceEvidence(item.id)));
         detailRow(details,"مصدر الرقم",original);
@@ -3347,20 +3347,40 @@ public final class MainActivity extends Activity {
                     "\n"+sourceDate(receipt.when)+" · "+receipt.source);
             check.setTextColor(INK);content.addView(check);candidates.add(receipt);checks.add(check);
         }
+        TextView feeFailure=label("",13,CORAL,false);content.addView(feeFailure);
         ScrollView scroll=new ScrollView(this);scroll.addView(content);
         AlertDialog dialog=new ChoiceDialogBuilder().setTitle("مطابقة تحويل بين حساباتك").setView(scroll)
-                .setPositiveButton("اربط المصادر وافصل الرسوم",null).setNegativeButton("إلغاء",null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                .setPositiveButton("اربط المصادر وافصل الرسوم",null).setNeutralButton("اربط بدون رسوم",null).setNegativeButton("إلغاء",null).create();
+        java.util.function.Consumer<Boolean> submit=omitFee -> {
             try {
                 Long source=selectedSource(from,accounts),destination=selectedSource(to,accounts);
                 if(source==null || destination==null) {toast("حدد حسابي التحويل");return;}
                 List<Long> receipts=new ArrayList<>();for(int i=0;i<checks.size();i++) if(checks.get(i).isChecked()) receipts.add(candidates.get(i).id);
                 if(rejectMisreadAmount(principal)||rejectMisreadAmount(fee))return;
-                db.reconcileOwnTransfer(item.id,ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(principal.getText().toString())),
-                        ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(fee.getText().toString())),source,destination,receipts);
-                dialog.dismiss();selectedTransaction=db.transactionById(item.id);render();
+                long amount=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(principal.getText().toString()));
+                long bankFee=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(fee.getText().toString()));
+                Runnable apply=()->{
+                    try {
+                        if(omitFee)db.reconcileOwnTransferWithoutFee(item.id,amount,bankFee,source,destination,receipts);
+                        else db.reconcileOwnTransfer(item.id,amount,bankFee,source,destination,receipts);
+                        dialog.dismiss();selectedTransaction=db.transactionById(item.id);render();
+                    } catch(ExpenseDb.TransferFeeUnavailable error) {
+                        feeFailure.setText(error.mayOmit()?"الرسوم دي محذوفة أو عليها تجاهل، فمش هنقدر نسجلها. تقدر تربط بدون رسوم بعد مراجعة المبلغ المستبعد.":"الرسوم دي مسجلة قبل كده؛ راجع العملية الأصلية قبل الربط.");
+                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setVisibility(error.mayOmit()?View.VISIBLE:View.GONE);
+                        scroll.post(()->scroll.fullScroll(View.FOCUS_DOWN));
+                    } catch(IllegalArgumentException error) {toast("راجع أصل التحويل والرسوم ورسائل الاستلام المختارة");}
+                };
+                if(omitFee)new ChoiceDialogBuilder().setTitle("تأكيد الربط بدون رسوم")
+                        .setMessage("هتربط أصل التحويل "+money(amount,item.currency)+". الـ "+money(bankFee,item.currency)+" رسوم مش هتتحسب في مصروفاتك. القرار هيتسجل في ملاحظة العملية.")
+                        .setPositiveButton("تأكيد الربط بدون رسوم",(d,w)->apply.run()).setNegativeButton("إلغاء",null).show();
+                else apply.run();
             } catch(IllegalArgumentException error) {toast("راجع أصل التحويل والرسوم ورسائل الاستلام المختارة");}
-        }));dialog.show();
+        };
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setVisibility(View.GONE);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->submit.accept(false));
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->submit.accept(true));
+        });dialog.show();
     }
 
     private void ownHandlesDialog() {
