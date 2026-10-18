@@ -127,6 +127,7 @@ final class AuditRegressionTest {
         eq(1,SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(sms)));
         eq(rows+1,db.transactionCount());
         ok("expense".equals(db.transactionById(out).kind));eq(10050,db.transactionById(out).amountMinor);eq(0,db.transferFee(out));ok(db.transactionById(in)!=null);
+        ok(db.transactionById(out).needsReview,"TR2: skipped debit has no visible review marker");
     }
 
     public void testUnexpectedRepairFailureFailsTheWholeSmsImport(){
@@ -141,6 +142,67 @@ final class AuditRegressionTest {
         catch(AssertionError wrong){throw wrong;}
         catch(RuntimeException expected){}
         eq(rows,db.transactionCount());ok("expense".equals(db.transactionById(out).kind));
+    }
+
+    private long[] tr2Pair(){
+        long t=at(LocalDate.now(),10),from=db.addPaymentSource("QA A","حساب","1111"),to=db.addPaymentSource("QA B","حساب","2222");
+        ok(db.addManualEntry(t,10050,"EGP","QA out","تحويلات",from,"expense",null,"QA original note"));long out=db.latestInserted().id;
+        ok(db.addManualEntry(t+60000,10000,"EGP","QA in","دخل",to,"income",null,null));long in=db.latestInserted().id;
+        return new long[]{from,to,out,in,t};
+    }
+
+    public void testExplicitExcludedFeeOmissionRecordsConsentAndDoesNotRepeat(){
+        long[] p=tr2Pair();db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+p[2]});
+        try{db.reconcileOwnTransfer(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));throw new AssertionError("TR1: fee silently omitted");}
+        catch(ExpenseDb.TransferFeeUnavailable expected){ok(expected.reason==ExpenseDb.FeeBlockReason.EXCLUDED);ok(expected.mayOmit());}
+        eq(10050,db.transactionById(p[2]).amountMinor);ok(db.transactionById(p[3])!=null);
+        db.reconcileOwnTransferWithoutFee(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));
+        ExpenseDb.Transaction linked=db.transactionById(p[2]);eq(10000,linked.amountMinor);ok("transfer".equals(linked.kind));ok(!linked.needsReview);
+        ok(linked.note.contains("QA original note")&&linked.note.contains("0.50 EGP")&&linked.note.contains("بموافقتك"));
+        eq(0,db.transferFee(p[2]));ok(db.transactionById(p[3])==null);eq(1,scalar("SELECT COUNT(*) FROM excluded_messages"));
+        try{db.reconcileOwnTransferWithoutFee(p[2],10000,50,p[0],p[1],Collections.emptyList());throw new AssertionError("Repeated omission accepted");}
+        catch(IllegalArgumentException expected){}eq(10000,db.transactionById(p[2]).amountMinor);
+    }
+
+    public void testIgnoredTransferFeeMarksAutoSkipAndCanBeExplicitlyOmitted(){
+        long[] p=tr2Pair();db.putMerchantRule("رسوم تحويل QA A","رسوم تحويل",true);
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0");db.repairAround(p[4]);
+        ok(db.transactionById(p[2]).needsReview);eq(10050,db.transactionById(p[2]).amountMinor);ok(db.transactionById(p[3])!=null);
+        try{db.reconcileOwnTransfer(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));throw new AssertionError("Ignored fee silently omitted");}
+        catch(ExpenseDb.TransferFeeUnavailable expected){ok(expected.reason==ExpenseDb.FeeBlockReason.IGNORED);ok(expected.mayOmit());}
+        db.reconcileOwnTransferWithoutFee(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));
+        eq(10000,db.transactionById(p[2]).amountMinor);eq(0,db.transferFee(p[2]));eq(1,db.merchantRules().size());
+    }
+
+    public void testStaleFeeOmissionCannotDiscardAnAvailableFee(){
+        long[] p=tr2Pair();
+        db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+p[2]});
+        try{db.reconcileOwnTransfer(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));throw new AssertionError("Expected unavailable fee");}
+        catch(ExpenseDb.TransferFeeUnavailable expected){}
+        db.getWritableDatabase().execSQL("DELETE FROM excluded_messages WHERE unique_key=?",new Object[]{"fee:"+p[2]});
+        try{db.reconcileOwnTransferWithoutFee(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));throw new AssertionError("Available fee omitted");}
+        catch(IllegalArgumentException expected){}
+        eq(10050,db.transactionById(p[2]).amountMinor);ok(db.transactionById(p[3])!=null);
+        db.reconcileOwnTransfer(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));eq(50,db.transferFee(p[2]));
+    }
+
+    public void testRecordedFeeCollisionCannotBeDeclaredUncounted(){
+        long[] p=tr2Pair();long other=entry(p[4],50,"QA existing fee");
+        db.getWritableDatabase().execSQL("UPDATE transactions SET unique_key=? WHERE id=?",new Object[]{"fee:"+p[2],other});
+        db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+p[2]});
+        try{db.reconcileOwnTransfer(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));throw new AssertionError("Recorded fee accepted");}
+        catch(ExpenseDb.TransferFeeUnavailable expected){ok(expected.reason==ExpenseDb.FeeBlockReason.RECORDED);ok(!expected.mayOmit());}
+        try{db.reconcileOwnTransferWithoutFee(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));throw new AssertionError("Recorded fee declared uncounted");}
+        catch(IllegalArgumentException expected){}
+        eq(10050,db.transactionById(p[2]).amountMinor);ok(db.transactionById(other)!=null&&db.transactionById(p[3])!=null);
+    }
+
+    public void testRefusedOmissionUpdateRollsBackReceiptMerge(){
+        long[] p=tr2Pair();db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+p[2]});
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_omit_refused BEFORE UPDATE OF amount_minor ON transactions WHEN OLD.id="+p[2]+" BEGIN SELECT RAISE(IGNORE); END");
+        try{db.reconcileOwnTransferWithoutFee(p[2],10000,50,p[0],p[1],Collections.singletonList(p[3]));throw new AssertionError("Refused update succeeded");}
+        catch(IllegalArgumentException expected){}
+        eq(10050,db.transactionById(p[2]).amountMinor);ok(db.transactionById(p[3])!=null);eq(0,db.transferFee(p[2]));
     }
 
     public void testTransactionNotificationActionsHaveDistinctIdentities(){

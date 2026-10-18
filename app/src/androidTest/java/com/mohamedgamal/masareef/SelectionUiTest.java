@@ -144,6 +144,28 @@ final class SelectionUiTest {
                 ExpenseDb.PaymentSource created=db.paymentSources().stream().filter(s->"HSBC".equals(s.name)&&"9988".equals(s.last4)).findFirst().orElseThrow(()->new AssertionError("Missing reviewed source"));
                 ok(created.reviewed);ok(db.sourceAliasCount(created.id)==1);
             }
+            long transferAt=System.currentTimeMillis()-60000,targetAccount=db.addPaymentSource("QA TR2 TARGET","حساب","7766");
+            ok(db.addManualEntry(transferAt,10050,"EGP","QA TR2 debit","تحويلات",account,"expense",null,null));long debit=db.latestInserted().id;
+            ok(db.addManualEntry(transferAt+1000,10000,"EGP","QA TR2 receipt","دخل",targetAccount,"income",null,null));long receipt=db.latestInserted().id;
+            db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+debit});
+            db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{debit});
+            main(()->invoke("openRelatedTransaction",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(debit)));ok(has("تحويل محتاج ربط"));
+            main(()->invoke("reconcileTransferDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(debit)));
+            fill("أصل المبلغ المحوّل","100.00");fill("رسوم البنك","0.50");
+            click("بدون وسيلة محددة");click(db.sourceLabel(targetAccount)+" · يحتاج مراجعة");
+            for(AccessibilityNodeInfo node:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText("QA TR2 receipt")){
+                while(node!=null&&!node.isCheckable())node=node.getParent();
+                if(node!=null){node.performAction(AccessibilityNodeInfo.ACTION_CLICK);idle();break;}
+            }
+            click("اربط المصادر وافصل الرسوم");
+            ok(db.transactionById(debit).amountMinor==10050);ok(db.transactionById(receipt)!=null);
+            ok(has("الرسوم دي محذوفة أو عليها تجاهل"));ok(has("اربط بدون رسوم"));screen("06-tr2-fee-blocked");
+            click("اربط بدون رسوم");ok(has("0.50"));ok(has("مش هتتحسب في مصروفاتك"));screen("07-tr2-omission-confirmation");
+            ok(db.transactionById(debit).amountMinor==10050);ok(db.transactionById(receipt)!=null);
+            click("إلغاء");ok(db.transactionById(debit).amountMinor==10050);
+            click("اربط بدون رسوم");click("تأكيد الربط بدون رسوم");
+            ok("transfer".equals(db.transactionById(debit).kind));ok(db.transactionById(debit).amountMinor==10000);
+            ok(db.transactionById(receipt)==null);ok(db.transferFee(debit)==0);ok(db.transactionById(debit).note.contains("0.50"));
             result.putString("stream","Selection UI checks passed: "+checked+"; failed: 0; dark="+dark+"; fontScale="+fontScale+"\nCaptures: "+captures+"\n");
         }catch(Throwable error){status=0;try{screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Selection UI FAILED: "+trace+"\n");}
         finally{try{if(activity!=null)main(()->{if(originalConfiguration!=null)activity.getResources().updateConfiguration(originalConfiguration,activity.getResources().getDisplayMetrics());activity.finish();});if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){status=0;result.putString("stream",result.getString("stream","")+error);}runner.finish(status,result);}

@@ -1601,6 +1601,22 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     /** User-confirmed reconciliation: one principal transfer and a separate expense for its bank fee. */
     public void reconcileOwnTransfer(long debitId,long principal,long fee,long from,long to,List<Long> receiptIds) {
+        reconcileOwnTransfer(debitId,principal,fee,from,to,receiptIds,false);
+    }
+
+    /** Explicit opt-in: the confirmed fee is deliberately omitted from spending, never silently discarded. */
+    public void reconcileOwnTransferWithoutFee(long debitId,long principal,long omittedFee,long from,long to,List<Long> receiptIds) {
+        reconcileOwnTransfer(debitId,principal,omittedFee,from,to,receiptIds,true);
+    }
+
+    enum FeeBlockReason { EXCLUDED, RECORDED, IGNORED }
+    static final class TransferFeeUnavailable extends IllegalArgumentException {
+        final FeeBlockReason reason;
+        TransferFeeUnavailable(FeeBlockReason reason) {super("Transfer fee is unavailable: "+reason);this.reason=reason;}
+        boolean mayOmit() {return reason!=FeeBlockReason.RECORDED;}
+    }
+
+    private void reconcileOwnTransfer(long debitId,long principal,long fee,long from,long to,List<Long> receiptIds,boolean omitFee) {
         SQLiteDatabase writable=getWritableDatabase();writable.beginTransaction();
         try {
             Transaction debit=transactionById(debitId);
@@ -1614,6 +1630,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if(existingFee>0 && existingFee!=fee) throw new IllegalArgumentException("Existing fee differs; review its source");
             if(debit.amountMinor!=principal+fee && !(debit.amountMinor==principal && existingFee==fee))
                 throw new IllegalArgumentException("Principal and fee must equal the confirmed debit");
+            FeeBlockReason blocked=fee>0&&existingFee==0?feeRowBlockReason(debitId,from):null;
+            if(omitFee) {
+                if(fee<=0||existingFee!=0||(blocked!=FeeBlockReason.EXCLUDED&&blocked!=FeeBlockReason.IGNORED))
+                    throw new IllegalArgumentException("Fee omission is no longer applicable; review the transfer again");
+            } else if(blocked!=null) throw new TransferFeeUnavailable(blocked);
             for(long receiptId:receiptIds) {
                 if(receiptId==debitId) continue;
                 Transaction receipt=transactionById(receiptId);
@@ -1625,8 +1646,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             ContentValues values=new ContentValues();values.put("amount_minor",principal);values.put("kind","transfer");values.put("category","تحويلات");
             values.put("payment_source_id",from);values.put("destination_source_id",to);values.put("user_edited",1);values.put("needs_review",0);
-            values.put("merchant","تحويل بين حساباتي");writable.update("transactions",values,"id=?",new String[]{Long.toString(debitId)});
-            if(fee>0 && existingFee==0) {
+            values.put("merchant","تحويل بين حساباتي");
+            if(omitFee)values.put("note",(debit.note==null||debit.note.isBlank()?"":debit.note+"\n")+
+                    "تم الربط بدون رسوم بموافقتك: "+java.math.BigDecimal.valueOf(fee,2).toPlainString()+" "+debit.currency+" رسوم مش هتتحسب في مصروفاتك");
+            if(writable.update("transactions",values,"id=?",new String[]{Long.toString(debitId)})!=1)
+                throw new IllegalArgumentException("Transfer was not updated");
+            if(fee>0 && existingFee==0 && !omitFee) {
                 String bank="البنك";for(PaymentSource source:paymentSources()) if(source.id==from) bank=source.name;
                 boolean added=insertEntry("fee:"+debitId,debit.when,fee,debit.currency,"رسوم تحويل "+bank,"رسوم تحويل",
                         "رسوم من العملية",null,null,from,"expense",null,"رسوم مؤكدة من فرق الخصم وأصل التحويل");
@@ -2164,19 +2189,27 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (!receipt.currency.equals(debit.currency) || receipt.amountMinor!=own.principal) return false;
         long existingFee=transferFee(own.outId);
         if (existingFee>0 && existingFee!=own.fee) return false;
-        if (own.fee>0 && existingFee==0 && !feeRowAvailable(own.outId,own.fromAccount)) return false;
-        return debit.amountMinor==own.principal+own.fee || debit.amountMinor==own.principal && existingFee==own.fee;
+        if (!(debit.amountMinor==own.principal+own.fee || debit.amountMinor==own.principal && existingFee==own.fee)) return false;
+        if (own.fee>0 && existingFee==0 && !feeRowAvailable(own.outId,own.fromAccount)) {
+            getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{own.outId});
+            return false;
+        }
+        return true;
     }
 
     /** The separate fee row reconcileOwnTransfer will insert must not be refused, or the pair is left for manual review. */
     private boolean feeRowAvailable(long debitId,long fromAccount) {
+        return feeRowBlockReason(debitId,fromAccount)==null;
+    }
+
+    private FeeBlockReason feeRowBlockReason(long debitId,long fromAccount) {
         String key="fee:"+debitId;
-        try (Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM excluded_messages WHERE unique_key=? UNION ALL SELECT 1 FROM transactions WHERE unique_key=? LIMIT 1",new String[]{key,key})) {
-            if (c.moveToFirst()) return false;
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT 'recorded' FROM transactions WHERE unique_key=? UNION ALL SELECT 'excluded' FROM excluded_messages WHERE unique_key=? LIMIT 1",new String[]{key,key})) {
+            if (c.moveToFirst()) return "excluded".equals(c.getString(0))?FeeBlockReason.EXCLUDED:FeeBlockReason.RECORDED;
         }
         String bank="البنك";for(PaymentSource source:paymentSources()) if(source.id==fromAccount) bank=source.name;
         MerchantRule rule=matchingRule("رسوم تحويل "+bank);
-        return rule==null || !rule.ignored;
+        return rule==null || !rule.ignored?null:FeeBlockReason.IGNORED;
     }
 
     /** Uncategorized rows the user never touched get the category today's rules give their merchant (e.g. ChatGPT → اشتراكات). */
