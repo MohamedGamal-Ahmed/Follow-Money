@@ -34,6 +34,8 @@ Schema v21 adds nullable `transactions.time_precision` (`exact` or `date_only`).
 
 Capture notifications use private visibility and a generic public version; hidden amounts also remove merchant/card details from the private notification. CSV text columns prefix formula-like values with an apostrophe and escape quoted fields. Numeric amount columns stay numeric. Spreadsheet save/reopen behavior is not a universal security guarantee, and re-import retains the protective apostrophe as text.
 
+`CommitmentRepository` owns the existing recurring-plan insert/update/list/lookup, due-day/reminder-setting, removal and alerted-date primitives. `ExpenseDb` retains compatible entry points and the same `Recurring` read model. The move preserves columns/null mapping, active-before-done/due ordering, duplicate handling, trimming/defaults, paid-count clamping, completed-status preservation, due-day bounds and alert resets. It borrows the caller's helper and transaction; it adds no commit or close. Existing update-count/missing-ID behavior is unchanged. Payment matching, marking paid, early-payment normalization, completion/reopen and future settlement-cycle policy remain outside this storage slice; this does not complete the commitment domain or Phase 2.
+
 ## Financial boundaries
 
 - Amounts use integer minor units. Aggregation stays within a currency.

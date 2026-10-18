@@ -23,6 +23,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final TransactionRepository transactionRows = new TransactionRepository(this);
     private final EvidenceRepository captureEvidence = new EvidenceRepository(this);
     private final AccountRepository accounts = new AccountRepository(this);
+    private final CommitmentRepository commitments = new CommitmentRepository(this);
     public ExpenseDb(Context context) {
         super(context, "masareef.db", null, 23);
     }
@@ -1622,88 +1623,32 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public boolean addRecurring(String merchant, long amount, String currency, LocalDate nextDue) {
-        return addRecurring(merchant, amount, currency, nextDue, "monthly", "subscription");
+        return commitments.addRecurring(merchant,amount,currency,nextDue);
     }
 
     public boolean addRecurring(String merchant, long amount, String currency, LocalDate nextDue,
                                 String cycle, String kind) {
-        return putCommitment(null, merchant, amount, currency, nextDue, cycle, kind, null, 0, 1,
-                merchant.toLowerCase(Locale.ROOT), null) != -1;
+        return commitments.addRecurring(merchant,amount,currency,nextDue,cycle,kind);
     }
 
     /** Inserts or updates an installment, subscription or bill. Returns the row id, or -1 for a duplicate. */
     public long putCommitment(Long id, String merchant, long amount, String currency, LocalDate nextDue,
                               String cycle, String kind, Integer totalCount, int paidCount, int remindDays,
                               String matchText, Long paymentSourceId) {
-        ContentValues values = new ContentValues();
-        values.put("merchant", merchant.trim());
-        values.put("amount_minor", amount);
-        values.put("currency", currency);
-        values.put("next_due", nextDue.toString());
-        values.put("cycle", cycle);
-        values.put("kind", kind);
-        if (totalCount == null) values.putNull("total_count"); else values.put("total_count", totalCount);
-        values.put("paid_count", Math.max(0, paidCount));
-        values.put("remind_days", remindDays);
-        values.put("match_text", matchText == null || matchText.isBlank() ? merchant.trim().toLowerCase(Locale.ROOT) :
-                matchText.trim().toLowerCase(Locale.ROOT));
-        if (paymentSourceId == null) values.putNull("payment_source_id"); else values.put("payment_source_id", paymentSourceId);
-        Recurring previous = id == null ? null : recurringById(id);
-        values.put("status", previous != null && previous.isDone() ||
-                totalCount != null && paidCount >= totalCount ? "done" : "active");
-        values.put("due_day", nextDue.getDayOfMonth());
-        values.put("needs_review", ExpenseParser.genericMerchant(merchant) ? 1 : 0);
-        values.putNull("last_alert_date");
-        if (id != null) {
-            getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
-            return id;
-        }
-        return getWritableDatabase().insertWithOnConflict("recurring", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+        return commitments.putCommitment(id,merchant,amount,currency,nextDue,cycle,kind,totalCount,paidCount,remindDays,matchText,paymentSourceId);
     }
 
-    public List<Recurring> recurring() {
-        List<Recurring> result = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query("recurring",
-                new String[]{"id", "merchant", "amount_minor", "currency", "next_due", "last_alert_date", "cycle", "kind",
-                        "total_count", "paid_count", "remind_days", "match_text", "payment_source_id", "last_paid_date", "status", "due_day", "needs_review"},
-                null, null, null, null, "status='done' ASC, next_due ASC")) {
-            while (cursor.moveToNext()) result.add(new Recurring(cursor.getLong(0), cursor.getString(1),
-                    cursor.getLong(2), cursor.getString(3), LocalDate.parse(cursor.getString(4)),
-                    cursor.getString(5), cursor.getString(6), cursor.getString(7),
-                    cursor.isNull(8) ? null : cursor.getInt(8), cursor.getInt(9), cursor.getInt(10),
-                    cursor.getString(11), cursor.isNull(12) ? null : cursor.getLong(12),
-                    cursor.getString(13), cursor.getString(14), cursor.isNull(15) ? 0 : cursor.getInt(15), cursor.getInt(16)!=0));
-        }
-        return result;
-    }
+    public List<Recurring> recurring() { return commitments.recurring(); }
 
-    public Recurring recurringById(long id) {
-        for (Recurring item : recurring()) if (item.id == id) return item;
-        return null;
-    }
+    public Recurring recurringById(long id) { return commitments.recurringById(id); }
 
-    public void setDueDay(long id, int day) {
-        ContentValues values = new ContentValues();
-        values.put("due_day", Math.max(1, Math.min(31, day)));
-        getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
-    }
+    public void setDueDay(long id, int day) { commitments.setDueDay(id,day); }
 
-    public void setRemindDays(long id, int days) {
-        ContentValues values = new ContentValues();
-        values.put("remind_days", days);
-        values.putNull("last_alert_date");
-        getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
-    }
+    public void setRemindDays(long id, int days) { commitments.setRemindDays(id,days); }
 
-    public void removeRecurring(long id) {
-        getWritableDatabase().delete("recurring", "id=?", new String[]{Long.toString(id)});
-    }
+    public void removeRecurring(long id) { commitments.removeRecurring(id); }
 
-    public void markAlerted(long id, LocalDate today) {
-        ContentValues values = new ContentValues();
-        values.put("last_alert_date", today.toString());
-        getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
-    }
+    public void markAlerted(long id, LocalDate today) { commitments.markAlerted(id,today); }
 
     /**
      * A payment made a few days before a due date pays that due date (e.g. the 30 Sep transfer pays the 1 Oct installment).
