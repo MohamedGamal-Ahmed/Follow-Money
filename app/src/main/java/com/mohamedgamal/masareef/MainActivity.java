@@ -2041,7 +2041,7 @@ public final class MainActivity extends Activity {
         return readVersion == currentVersion;
     }
 
-    /** Any local write bumps SQLite's change counter, so a cached suggestion set can tell that it aged. */
+    /** A different committed revision means this cached snapshot aged, including writes by other helpers. */
     static boolean ledgerChanged(long observedChanges, long snapshotChanges) {
         return observedChanges != snapshotChanges;
     }
@@ -2063,8 +2063,9 @@ public final class MainActivity extends Activity {
      */
     static LedgerSnapshot readLedgerSnapshot(ExpenseDb db, long version) {
         int normalized = normalizeEarlyPaymentsOnWorker(db);
+        long changes = db.changes();
         List<ExpenseDb.Transaction> rows = db.recurringCandidateTransactions();
-        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring()), rows, version, db.changes(), normalized);
+        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring()), rows, version, changes, normalized);
     }
 
     /** A local ledger edit: bump the generation so an in-flight snapshot is rejected, then reload the cache. */
@@ -2081,7 +2082,8 @@ public final class MainActivity extends Activity {
 
     /** The suggestion data a redraw would show is different from what the page is currently drawn with. */
     private boolean cacheDiffers(LedgerSnapshot snapshot) {
-        return !snapshot.candidates.equals(recurringCandidates) || !sameRows(snapshot.rows, recurringCandidateRows);
+        return ledgerChanges==null || ledgerChanged(snapshot.changes,ledgerChanges)
+                || !snapshot.candidates.equals(recurringCandidates) || !sameRows(snapshot.rows, recurringCandidateRows);
     }
 
     /**
@@ -2101,8 +2103,10 @@ public final class MainActivity extends Activity {
                 ledgerRefreshPending = false;
                 refreshingLedger.set(false);
                 if (ready == null) { if (repeat) refreshLedger(true); return; }
-                if (!ledgerSnapshotIsCurrent(ready.version, ledgerVersion.get())) {
-                    // A local edit landed while this pass was reading, so its snapshot must not be applied.
+                long committed;
+                try {committed=db.changes();} catch(RuntimeException unavailable) {return;}
+                if (!ledgerSnapshotIsCurrent(ready.version, ledgerVersion.get()) || ledgerChanged(committed,ready.changes)) {
+                    // A local edit or external commit landed while reading/delivering this snapshot.
                     ledgerRefreshPending = repeat;
                     refreshLedger(true);
                     return;
@@ -2123,7 +2127,7 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
-        // Any local add/edit/delete bumps SQLite's change counter, so the cached suggestions cannot stay stale
+        // Any committed tracked write bumps the persistent revision, so the cached suggestions cannot stay stale
         // behind a page whose only refresh path is this render().
         if (db != null) {
             long changes = db.changes();

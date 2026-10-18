@@ -63,6 +63,45 @@ final class LedgerRefreshRegressionTest {
             if(hasText(((ViewGroup)view).getChildAt(i),text))return true;
         return false;
     }
+    void checkMissedBroadcast(boolean delayed){
+        ExpenseDb original=null;CountDownLatch release=new CountDownLatch(1);
+        try{
+            activity=(MainActivity)runner.startActivitySync(new android.content.Intent(runner.getTargetContext(),MainActivity.class)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            drain();original=(ExpenseDb)get("db");
+            final Object[] initial={null};
+            main(()->{set("db",db);set("introVisible",false);set("selectedTab",6);set("searchOpen",false);
+                initial[0]=get("recurringCandidateRows");invoke("render",new Class<?>[0]);invoke("refreshLedger",new Class<?>[]{boolean.class},true);});
+            awaitSnapshot(initial[0]);
+            final Object[] before={null,null};main(()->{before[0]=get("pageScroll");before[1]=get("recurringCandidateRows");});
+            Action commit=()->{
+                try(ExpenseDb external=new ExpenseDb(context)){
+                    require(external.addManualEntry(System.currentTimeMillis(),5000,"EGP","qa_revision","دخل",null,"income",null,null),"External write failed");
+                }
+            };
+            if(delayed){
+                CountDownLatch read=new CountDownLatch(1);
+                main(()->{
+                    invoke("refreshLedger",new Class<?>[]{boolean.class},true);
+                    CaptureQueue.submit(()->{read.countDown();try{release.await(20,TimeUnit.SECONDS);}catch(InterruptedException error){Thread.currentThread().interrupt();}});
+                    require(read.await(10,TimeUnit.SECONDS),"Snapshot worker did not reach its barrier");
+                    commit.run(); // UI delivery is blocked until this main-thread action finishes.
+                });
+                main(()->require(get("recurringCandidateRows")==before[1],"A snapshot older than the committed revision was applied"));
+                release.countDown();
+            }else{
+                commit.run();main(()->invoke("refreshLedger",new Class<?>[]{boolean.class},true));
+            }
+            awaitSnapshot(before[1]);
+            main(()->{require(get("pageScroll")!=before[0],"A missed broadcast left the safe page stale");
+                require(hasText(activity.getWindow().getDecorView(),"qa_revision"),"Committed incoming row missing after revision refresh");});
+        }catch(Exception error){throw new AssertionError(error);}
+        finally{
+            release.countDown();if(activity!=null){final ExpenseDb restore=original;
+                try{drain();main(()->{if(restore!=null)set("db",restore);activity.finish();});}catch(Exception ignored){} }
+        }
+    }
+
     void check(String change,boolean editor,boolean pending){
         ExpenseDb original=null;CountDownLatch release=new CountDownLatch(1);
         try{
@@ -89,7 +128,7 @@ final class LedgerRefreshRegressionTest {
                 require(entered.await(10,TimeUnit.SECONDS),"worker blocker did not start");
                 main(()->invoke("refreshLedger",new Class<?>[]{boolean.class},false));
             }
-            // A different helper matches SMS/notification writes: the activity's total_changes stays unchanged.
+            // Separate helpers match SMS/notification writers; the persistent revision must observe them.
             if("income".equals(change)){
                 SmsParts parts=new SmsParts();parts.add("InstaPay",System.currentTimeMillis(),
                         "You have received EGP 50.00 from qa_refresh@instapay");
