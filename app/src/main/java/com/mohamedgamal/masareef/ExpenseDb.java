@@ -24,6 +24,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final EvidenceRepository captureEvidence = new EvidenceRepository(this);
     private final AccountRepository accounts = new AccountRepository(this);
     private final CommitmentRepository commitments = new CommitmentRepository(this);
+    private final CommitmentMatcher commitmentMatcher = new CommitmentMatcher(this);
     private final ReimbursementRepository reimbursements = new ReimbursementRepository(this);
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     public ExpenseDb(Context context) {
@@ -1665,22 +1666,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public boolean reopenRecurring(long id) { return commitments.reopenRecurring(id); }
 
-    private void advanceRecurring(String merchant, long amount, String currency, long when) {
-        LocalDate day = Instant.ofEpochMilli(when).atZone(ZoneId.systemDefault()).toLocalDate();
-        List<Recurring> matches=new ArrayList<>();
-        List<Recurring> all=recurring();
-        for (Recurring item : all) {
-            if (item.isDone() || item.needsReview ||
-                    ExpenseParser.genericMerchant(merchant)) continue;
-            boolean named = item.merchant.equalsIgnoreCase(merchant) || item.matches(merchant);
-            if (!named) continue;
-            long daysFromDue = Math.abs(java.time.temporal.ChronoUnit.DAYS.between(item.nextDue, day));
-            boolean sameAmount = item.currency.equals(currency) &&
-                    Math.abs(item.amountMinor - amount) <= 1;
-            if (sameAmount && daysFromDue <= 12) matches.add(item);
-        }
-        if(matches.size()==1) markRecurringPaid(matches.get(0).id, day);
-    }
+    private void advanceRecurring(String merchant, long amount, String currency, long when) { commitmentMatcher.advanceRecurring(merchant,amount,currency,when); }
 
     private static final java.util.regex.Pattern COMMITMENT_PAID = java.util.regex.Pattern.compile(
             "(?i)(تم\\s*(?:سداد|دفع|استلام|خصم)|سداد\\s*(?:القسط|قسط)|سددت|paid\\s+successfully|successfully\\s+paid|" +
@@ -2219,18 +2205,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** InstaPay bill payments name the service without an amount; they can still close a matching commitment. */
-    private boolean markServicePaid(String service, long when) {
-        LocalDate day = Instant.ofEpochMilli(when).atZone(ZoneId.systemDefault()).toLocalDate();
-        boolean changed = false;
-        List<Recurring> all=recurring();
-        for (Recurring item : all) {
-            if (item.isDone() || item.needsReview ||
-                    !(item.matches(service) || item.merchant.equalsIgnoreCase(service))) continue;
-            if (Math.abs(java.time.temporal.ChronoUnit.DAYS.between(item.nextDue, day)) > 12) continue;
-            changed |= markRecurringPaid(item.id, day);
-        }
-        return changed;
-    }
+    private boolean markServicePaid(String service, long when) { return commitmentMatcher.markServicePaid(service,when); }
 
     private static String sha256(String text) {
         try {
