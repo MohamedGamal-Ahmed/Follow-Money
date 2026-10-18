@@ -338,6 +338,54 @@ public final class ReconciliationTest extends Instrumentation {
         assertEquals(1,db.balanceHistory(account,"EGP",10).size());assertEquals(0,db.transactionCount());
     }
 
+    public void testCommitmentStorageRoundTripPreservesFieldsAndReminderChanges() {
+        long source=db.addPaymentSource("BM","حساب","7392");LocalDate due=LocalDate.of(2026,11,30);
+        long id=db.putCommitment(null,"  QA Plan  ",12345,"USD",due,"weekly","installment",8,2,5," QA Match ",source);
+        assertTrue(id>0);ExpenseDb.Recurring row=db.recurringById(id);
+        assertEquals("QA Plan",row.merchant);assertEquals(12345,row.amountMinor);assertEquals("USD",row.currency);
+        assertEquals(due,row.nextDue);assertEquals("weekly",row.cycle);assertEquals("installment",row.kind);
+        assertEquals(Integer.valueOf(8),row.totalCount);assertEquals(2,row.paidCount);assertEquals(5,row.remindDays);
+        assertEquals("qa match",row.matchText);assertEquals(Long.valueOf(source),row.paymentSourceId);
+        assertEquals(30,row.dueDay);assertFalse(row.isDone());assertFalse(row.needsReview);
+        assertNull(row.lastAlertDate);assertNull(row.lastPaidDate);
+        db.markAlerted(id,LocalDate.of(2026,11,25));assertEquals("2026-11-25",db.recurringById(id).lastAlertDate);
+        db.setRemindDays(id,7);assertEquals(7,db.recurringById(id).remindDays);assertNull(db.recurringById(id).lastAlertDate);
+        db.setDueDay(id,90);assertEquals(31,db.recurringById(id).dueDay);
+        db.setDueDay(id,-1);assertEquals(1,db.recurringById(id).dueDay);
+        db.markAlerted(id,LocalDate.of(2026,11,26));
+        assertEquals(id,db.putCommitment(id,"QA Updated",54321,"EGP",due.plusMonths(1),"monthly","bill",null,-2,3,"  ",null));
+        row=db.recurringById(id);assertEquals("QA Updated",row.merchant);assertEquals(54321,row.amountMinor);
+        assertEquals("EGP",row.currency);assertEquals("monthly",row.cycle);assertEquals("bill",row.kind);
+        assertEquals(due.plusMonths(1),row.nextDue);assertEquals(30,row.dueDay);assertEquals(0,row.paidCount);
+        assertEquals("qa updated",row.matchText);assertNull(row.totalCount);assertNull(row.paymentSourceId);assertNull(row.lastAlertDate);
+        assertEquals(1,db.recurring().size());assertEquals(0,db.transactionCount());
+    }
+
+    public void testCommitmentStorageOrderingDuplicatesAndOuterRollback() {
+        LocalDate due=LocalDate.of(2026,11,1);
+        assertTrue(db.addRecurring("QA later",2000,"EGP",due.plusMonths(2)));
+        long later=db.recurring().get(0).id;
+        assertTrue(db.addRecurring("QA earlier",1000,"USD",due,"weekly","bill"));
+        long earlier=db.recurring().get(0).id;
+        long done=db.putCommitment(null,"QA done",3000,"EGP",due.minusMonths(1),"monthly","installment",1,1,1,null,null);
+        assertTrue(done>0);List<ExpenseDb.Recurring> ordered=db.recurring();
+        assertEquals(3,ordered.size());assertEquals(earlier,ordered.get(0).id);assertEquals(later,ordered.get(1).id);assertEquals(done,ordered.get(2).id);
+        assertTrue(ordered.get(2).isDone());assertNull(ordered.get(0).totalCount);assertNull(ordered.get(0).paymentSourceId);
+        assertFalse(db.addRecurring("QA later",2000,"EGP",due.plusMonths(3)));assertEquals(3,db.recurring().size());
+        SQLiteDatabase connection=db.getWritableDatabase();connection.beginTransaction();
+        try {
+            db.removeRecurring(earlier);assertNull(db.recurringById(earlier));
+            db.markAlerted(later,due);db.setDueDay(later,15);db.setRemindDays(later,9);
+            assertTrue(db.addRecurring("QA rollback",4000,"EGP",due));
+            assertEquals(15,db.recurringById(later).dueDay);assertEquals(9,db.recurringById(later).remindDays);
+            // The storage repository must not commit or close the caller's transaction/helper.
+        } finally {connection.endTransaction();}
+        assertTrue(connection.isOpen());assertFalse(connection.inTransaction());assertEquals(3,db.recurring().size());
+        assertEquals(earlier,db.recurring().get(0).id);assertEquals(1,db.recurringById(later).dueDay);
+        assertEquals(1,db.recurringById(later).remindDays);assertNull(db.recurringById(later).lastAlertDate);
+        db.removeRecurring(done);assertNull(db.recurringById(done));assertEquals(2,db.recurring().size());assertEquals(0,db.transactionCount());
+    }
+
     public void testLinkGuardsAndReversibleArchive() {
         long account=db.addPaymentSource("Banque Misr","حساب","7392"),card=db.addPaymentSource("Banque Misr","بطاقة","4636");
         long other=db.addPaymentSource("HSBC","حساب","7392"),credit=db.addPaymentSource("Banque Misr","بطاقة ائتمان","2700");
