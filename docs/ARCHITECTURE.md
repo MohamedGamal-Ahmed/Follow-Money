@@ -46,6 +46,8 @@ Schema v24 adds a single-row `ledger_revision` and INSERT/UPDATE/DELETE triggers
 
 `MainActivity` stamps a worker snapshot before its reads and rechecks both local generation and the committed revision at UI delivery. A concurrent commit rejects the old snapshot and queues a fresh pass; a different applied revision forces redraw even when expense-only suggestions match. Existing editing-surface guards preserve drafts. Render/resume and existing post-commit broadcasts discover changes by other helpers; a missed broadcast can therefore be recovered at the next refresh. This does not promise realtime redraw without a refresh signal, a durable job-result channel, or a measured UI latency improvement.
 
+Refused-fee repair preflight sets the debit's `needs_review` marker only while it is zero. Rechecking an already marked refusal therefore performs no marker write or revision increment. A cleared marker can still be set again and rolls back with its caller; removing the fee blocker still permits normal reconciliation. Other writes in a repair pass can independently advance the revision; this guard does not change fee eligibility or consent policy.
+
 ## Financial boundaries
 
 - Amounts use integer minor units. Aggregation stays within a currency.

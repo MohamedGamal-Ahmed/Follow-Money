@@ -1873,7 +1873,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (existingFee>0 && existingFee!=own.fee) return false;
         if (!(debit.amountMinor==own.principal+own.fee || debit.amountMinor==own.principal && existingFee==own.fee)) return false;
         if (own.fee>0 && existingFee==0 && !feeRowAvailable(own.outId,own.fromAccount)) {
-            getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{own.outId});
+            // A matched same-value UPDATE would advance the durable revision on every repair pass.
+            getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=? AND needs_review=0",new Object[]{own.outId});
             return false;
         }
         return true;

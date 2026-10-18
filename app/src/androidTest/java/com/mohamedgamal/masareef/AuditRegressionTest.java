@@ -226,6 +226,40 @@ final class AuditRegressionTest {
         ok(db.transactionById(out).needsReview,"TR2: skipped debit has no visible review marker");
     }
 
+    public void testRefusedFeeRepairOnlyInvalidatesWhenReviewStateChanges(){
+        long[] p=tr2Pair();SQLiteDatabase sql=db.getWritableDatabase();
+        String receiptKey;
+        try(Cursor receipt=sql.rawQuery("SELECT unique_key FROM transactions WHERE id=?",new String[]{Long.toString(p[3])})){
+            ok(receipt.moveToFirst());receiptKey=receipt.getString(0);
+        }
+        sql.execSQL("UPDATE transactions SET user_edited=0 WHERE id IN (?,?)",new Object[]{p[2],p[3]});
+        sql.execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+p[2]});
+        long before=db.changes();ExpenseDb.RepairReport first=db.repairBetween(p[4]-1000,p[4]+120000);
+        eq(0,first.ownTransfers);ok(db.transactionById(p[2]).needsReview,"First refusal marker missing");ok(db.changes()>before,"First marker did not invalidate");
+        eq(10050,db.transactionById(p[2]).amountMinor);eq(10000,db.transactionById(p[3]).amountMinor);eq(0,db.transferFee(p[2]));
+        long marked=db.changes();db.repairBetween(p[4]-1000,p[4]+120000);
+        eq(marked,db.changes()); // Rechecking an already marked refusal must not manufacture an invalidation.
+        eq(2,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM excluded_messages"));
+        sql.execSQL("UPDATE transactions SET needs_review=0 WHERE id=?",new Object[]{p[2]});long cleared=db.changes();
+        sql.beginTransaction();
+        try{
+            db.repairBetweenInCallerTransaction(p[4]-1000,p[4]+120000);
+            ok(db.transactionById(p[2]).needsReview,"Caller transaction did not set marker");ok(db.changes()>cleared,"Caller marker did not invalidate");
+        }finally{sql.endTransaction();} // A new marker and its revision remain owned by this caller.
+        eq(cleared,db.changes());ok(!db.transactionById(p[2]).needsReview,"Caller rollback retained marker");ok(sql.isOpen()&&!sql.inTransaction(),"Caller helper closed or transaction leaked");
+        db.repairBetween(p[4]-1000,p[4]+120000);ok(db.transactionById(p[2]).needsReview,"Cleared marker was not restored");ok(db.changes()>cleared,"Restored marker did not invalidate");
+        long remarked=db.changes();db.repairBetween(p[4]-1000,p[4]+120000);eq(remarked,db.changes());
+        sql.execSQL("DELETE FROM excluded_messages WHERE unique_key=?",new Object[]{"fee:"+p[2]});long unblocked=db.changes();
+        eq(1,db.repairBetween(p[4]-1000,p[4]+120000).ownTransfers);
+        ok("transfer".equals(db.transactionById(p[2]).kind),"Unblocked debit was not reconciled");eq(10000,db.transactionById(p[2]).amountMinor);
+        eq(50,db.transferFee(p[2]));
+        // The new fee may reuse the deleted receipt's numeric row id; test the original source identity.
+        try(Cursor receipt=sql.rawQuery("SELECT 1 FROM transactions WHERE unique_key=?",new String[]{receiptKey})){
+            ok(!receipt.moveToFirst(),"Unblocked receipt identity was not removed");
+        }
+        ok(db.changes()>unblocked,"Reconciliation did not invalidate");
+    }
+
     public void testUnexpectedRepairFailureFailsTheWholeSmsImport(){
         long t=at(LocalDate.now(),10),from=db.addPaymentSource("QA A","حساب","1111"),to=db.addPaymentSource("QA B","حساب","2222");
         ok(db.addManualEntry(t,10050,"EGP","QA out",MoneyFlow.OPEN_TRANSFER_CATEGORY,from,"expense",null,null));long out=db.latestInserted().id;
