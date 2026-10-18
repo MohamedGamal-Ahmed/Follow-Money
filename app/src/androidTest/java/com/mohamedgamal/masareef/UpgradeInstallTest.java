@@ -15,11 +15,12 @@ import java.util.List;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Installed-APK update check: seed with v20, retain app data, then verify with v21. */
+/** Installed-APK update check: seed with v20, retain app data, then verify with the current schema. */
 public final class UpgradeInstallTest extends Instrumentation {
     private String mode;
     private Context target;
     private ExpenseDb db;
+    private List<String> baselineTables;
     @Override public void onCreate(Bundle args){super.onCreate(args);mode=args.getString("mode");start();}
     private void ok(boolean value,String message){if(!value)throw new AssertionError(message);}
     @Override public void onStart(){
@@ -38,20 +39,30 @@ public final class UpgradeInstallTest extends Instrumentation {
                 result.putString("stream","Seeded schema v20 on installed baseline; rows="+db.transactions().size()+"; snapshot saved privately\n");
             }else if("verify".equals(mode)){
                 JSONObject before=new JSONObject(new String(Files.readAllBytes(expected.toPath()),StandardCharsets.UTF_8));
-                ok(db.getWritableDatabase().getVersion()==23,"Updated APK must migrate to v23");
+                baselineTables=new ArrayList<>();JSONArray originalTables=before.getJSONArray("baseline_tables");
+                for(int i=0;i<originalTables.length();i++)baselineTables.add(originalTables.getString(i));
+                ok(db.getWritableDatabase().getVersion()==24,"Updated APK must migrate to v24");
                 JSONObject after=snapshot();
                 ok(before.toString().equals(after.toString()),"Ledger/evidence/preferences/points changed: "+before+" -> "+after);
                 try(Cursor c=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM transactions WHERE time_precision IS NOT NULL",null)){
                     ok(c.moveToFirst()&&c.getLong(0)==0,"Legacy precision must remain unknown");
                 }
                 try(Cursor c=db.getReadableDatabase().rawQuery("PRAGMA integrity_check",null)){ok(c.moveToFirst()&&"ok".equals(c.getString(0)),"Integrity check failed");}
+                try(Cursor tables=db.getReadableDatabase().rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'android_metadata'",null)){
+                    while(tables.moveToNext())if(!baselineTables.contains(tables.getString(0))){
+                        String table=tables.getString(0);
+                        try(Cursor count=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM \""+table.replace("\"","\"\"")+"\"",null)){
+                            ok(count.moveToFirst()&&count.getLong(0)==("ledger_revision".equals(table)?1:0),"Unexpected rows in new table "+table);
+                        }
+                    }
+                }
                 // Open the real updated activity as part of the installed update path.
                 android.app.Activity activity=startActivitySync(new android.content.Intent(target,MainActivity.class)
                         .putExtra("open_transactions",true).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
                 waitForIdleSync();
                 ok(before.toString().equals(snapshot().toString()),"Opening the updated app changed the fixture");
                 runOnMainSync(activity::finish);
-                result.putString("stream","Installed update v20 -> v21 passed; all table rows, encrypted evidence, source plaintext, repayments, budgets and points preserved; legacy precision NULL; integrity_check=ok; app opened\n"+after+"\n");
+                result.putString("stream","Installed update v20 -> v24 passed; all original table rows, encrypted evidence, source plaintext, repayments, budgets and points preserved; legacy precision NULL; integrity_check=ok; app opened\n"+after+"\n");
             }else throw new IllegalArgumentException("Use seed or verify");
         }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Installed upgrade FAILED: "+trace);}
         finally{if(db!=null)db.close();finish(status,result);}
@@ -79,6 +90,8 @@ public final class UpgradeInstallTest extends Instrumentation {
         try(Cursor c=db.getReadableDatabase().rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'android_metadata' ORDER BY name",null)){
             while(c.moveToNext())tables.add(c.getString(0));
         }
+        if(baselineTables==null)baselineTables=tables;
+        tables=baselineTables;result.put("baseline_tables",new JSONArray(tables));
         for(String table:tables){
             JSONArray rows=new JSONArray();
             try(Cursor c=db.getReadableDatabase().rawQuery("SELECT * FROM \""+table+"\" ORDER BY rowid",null)){

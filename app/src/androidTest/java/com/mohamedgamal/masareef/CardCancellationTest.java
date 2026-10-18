@@ -104,7 +104,7 @@ final class CardCancellationTest {
         ok(db.addSms("BANK",debit(),time));db.archiveEntry(db.lastCaptured().id,"bank confirmed cancellation",true);
         db.getWritableDatabase().execSQL("UPDATE transaction_archive SET payload='{broken JSON'");db.close();
         try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(file.getPath(),null,SQLiteDatabase.OPEN_READWRITE)){sql.execSQL("DROP TABLE capture_events");sql.execSQL("DROP TABLE sms_import_receipts");sql.execSQL("DROP TABLE card_settlements");sql.execSQL("DROP TABLE card_settlement_allocations");sql.setVersion(21);}
-        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(1,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(event().cancelled());ok(event().amount==null);ok(event().original==null);ok(new CaptureEvents(db).evidence(event()).get(0).body==null);
+        db=new ExpenseDb(context);eq(24,db.getWritableDatabase().getVersion());eq(1,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(event().cancelled());ok(event().amount==null);ok(event().original==null);ok(new CaptureEvents(db).evidence(event()).get(0).body==null);
         try(Cursor c=db.getReadableDatabase().rawQuery("SELECT payload FROM transaction_archive",null)){ok(c.moveToFirst());ok("{broken JSON".equals(c.getString(0)));}
     }
     public void testV22TimelineUpgradeBackfillsDateAndUsesIndex(){
@@ -113,7 +113,7 @@ final class CardCancellationTest {
             sql.execSQL("CREATE TABLE old_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_key TEXT NOT NULL UNIQUE,message_hash TEXT,status TEXT NOT NULL,amount_minor INTEGER,currency TEXT,title TEXT NOT NULL,received_at INTEGER NOT NULL,archive_id INTEGER,original_transaction_id INTEGER,sender TEXT,source TEXT,encrypted_body TEXT)");
             sql.execSQL("INSERT INTO old_events SELECT id,event_key,message_hash,status,amount_minor,currency,title,received_at,archive_id,original_transaction_id,sender,source,encrypted_body FROM capture_events");sql.execSQL("DROP TABLE capture_events");sql.execSQL("ALTER TABLE old_events RENAME TO capture_events");sql.execSQL("DROP TABLE sms_import_receipts");sql.setVersion(22);
         }
-        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(original,event().displayWhen());eq(1,new CaptureEvents(db).timelineBetween(original,original+1).size());
+        db=new ExpenseDb(context);eq(24,db.getWritableDatabase().getVersion());eq(original,event().displayWhen());eq(1,new CaptureEvents(db).timelineBetween(original,original+1).size());
         try(Cursor c=db.getReadableDatabase().rawQuery("EXPLAIN QUERY PLAN SELECT id FROM capture_events WHERE display_at>=? AND display_at<? ORDER BY display_at DESC,id DESC",new String[]{Long.toString(original),Long.toString(original+1)})){ok(c.moveToFirst());ok(c.getString(3).contains("capture_event_display"));}
     }
     public void testOutOfOrderCancellationSettlesWhenEarlierDebitArrives(){
@@ -198,7 +198,7 @@ final class CardCancellationTest {
     public void testLegacyCancellationMigrationKeepsArchiveAndDistinguishesMissingProof(){
         ok(db.addSms("BANK",debit(),time));long id=db.lastCaptured().id;db.archiveEntry(id,"bank confirmed cancellation",true);long archives=scalar("SELECT COUNT(*) FROM transaction_archive");db.close();
         try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(file.getPath(),null,SQLiteDatabase.OPEN_READWRITE)){sql.execSQL("DROP TABLE capture_events");sql.execSQL("DROP TABLE card_settlements");sql.execSQL("DROP TABLE card_settlement_allocations");sql.setVersion(21);}
-        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(archives,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(event().cancelled());ok(event().body==null);eq(1,new CaptureEvents(db).evidence(event()).size());
+        db=new ExpenseDb(context);eq(24,db.getWritableDatabase().getVersion());eq(archives,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(event().cancelled());ok(event().body==null);eq(1,new CaptureEvents(db).evidence(event()).size());
         db.close();db=new ExpenseDb(context);eq(1,scalar("SELECT COUNT(*) FROM capture_events"));eq(0,db.transactionCount());
     }
     public void testContactlessLastUseWarningIsOnePurchaseAndDeclineIsZero(){

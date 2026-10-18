@@ -26,7 +26,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final CommitmentRepository commitments = new CommitmentRepository(this);
     private final ReimbursementRepository reimbursements = new ReimbursementRepository(this);
     public ExpenseDb(Context context) {
-        super(context, "masareef.db", null, 23);
+        super(context, "masareef.db", null, 24);
     }
 
     @Override public void onCreate(SQLiteDatabase db) {
@@ -65,6 +65,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         createReimbursements(db);
         db.execSQL("ALTER TABLE recurring ADD COLUMN last_paid_due TEXT");
         CardSettlements.create(db);CaptureEvents.create(db);createImportReceipts(db);
+        LedgerRevision.create(db);
     }
 
     /** v20: an incoming payment that returns money spent on someone else's behalf, linked to that purchase. */
@@ -192,6 +193,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if(oldVersion<21)db.execSQL("ALTER TABLE transactions ADD COLUMN time_precision TEXT CHECK(time_precision IN ('exact','date_only'))");
         if(oldVersion<22){CardSettlements.create(db);CaptureEvents.create(db);}
         if(oldVersion<23){CaptureEvents.ensureTimeline(db);createImportReceipts(db);}
+        if(oldVersion<24){
+            // Retain the existing own_handles recovery guard before installing its revision triggers.
+            db.execSQL("CREATE TABLE IF NOT EXISTS own_handles (handle TEXT PRIMARY KEY)");
+            LedgerRevision.create(db);
+        }
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
@@ -1244,13 +1250,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public long transactionCount() { return transactionRows.transactionCount(); }
 
     /**
-     * SQLite's per-connection change counter. Every local write bumps it, so a cached suggestion set can
-     * tell that the ledger moved without enumerating each add/edit/delete call site.
+     * Persistent database-wide invalidation token. Rolled-back writes do not move it; reads and reopen
+     * preserve it. The caller's own uncommitted changes are visible only inside that transaction.
      */
     long changes() {
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT total_changes()",null)) {
-            return c.moveToFirst()?c.getLong(0):-1;
-        }
+        return LedgerRevision.read(getReadableDatabase());
     }
 
     public Transaction latestInserted() { return transactionRows.latestInserted(); }

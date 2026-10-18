@@ -100,6 +100,69 @@ final class AuditRegressionTest {
         new LedgerRefreshRegressionTest(runner,context,db).checkMissedBroadcast(true);
     }
 
+    private String revisionData(SQLiteDatabase sql)throws Exception{
+        org.json.JSONArray snapshot=new org.json.JSONArray();
+        try(Cursor tables=sql.rawQuery("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('android_metadata','ledger_revision') ORDER BY name",null)){
+            while(tables.moveToNext()){
+                String table=tables.getString(0);org.json.JSONArray rows=new org.json.JSONArray();
+                try(Cursor data=sql.rawQuery("SELECT * FROM \""+table.replace("\"","\"\"")+"\" ORDER BY rowid",null)){
+                    while(data.moveToNext()){
+                        org.json.JSONArray row=new org.json.JSONArray();
+                        for(int i=0;i<data.getColumnCount();i++)row.put(data.isNull(i)?org.json.JSONObject.NULL:data.getString(i));
+                        rows.put(row);
+                    }
+                }
+                snapshot.put(new org.json.JSONArray().put(table).put(tables.getString(1)).put(rows));
+            }
+        }
+        return snapshot.toString();
+    }
+
+    public void testV23RevisionUpgradePreservesEveryUserTableAndEvidence()throws Exception{
+        long t=at(LocalDate.now(),10);
+        ok(db.addSms("BM","Card xxx4636 purchase EGP15 at QA SHOP. Available balance EGP7240.01",t));long purchase=db.lastCaptured().id;
+        long income=manual(t+1000,500,"income");eq(500,db.linkReimbursement(income,purchase));
+        ok(db.addRecurring("QA upgrade plan",2000,"EGP",LocalDate.now().plusMonths(1)));
+        SQLiteDatabase sql=db.getWritableDatabase();String before=revisionData(sql);
+        java.util.List<String> triggers=new java.util.ArrayList<>();
+        try(Cursor c=sql.rawQuery("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'ledger_revision_%'",null)){
+            while(c.moveToNext())triggers.add(c.getString(0));
+        }
+        for(String trigger:triggers)sql.execSQL("DROP TRIGGER \""+trigger.replace("\"","\"\"")+"\"");
+        sql.execSQL("DROP TABLE ledger_revision");sql.setVersion(23);db.close();db=new ExpenseDb(context);
+        eq(24,db.getWritableDatabase().getVersion());ok(before.equals(revisionData(db.getReadableDatabase())),"v23 upgrade changed financial tables/schema/evidence");
+        eq(0,db.changes());eq(500,db.reimbursedOf(purchase));ok(!db.sourceEvidence(purchase).isEmpty());
+        try(ExpenseDb external=new ExpenseDb(context)){ok(external.addManual(t+2000,700,"EGP","QA after upgrade","تسوق"));}
+        long committed=db.changes();ok(committed>0);db.close();db=new ExpenseDb(context);eq(committed,db.changes());
+        try(Cursor c=db.getReadableDatabase().rawQuery("PRAGMA integrity_check",null)){ok(c.moveToFirst()&&"ok".equals(c.getString(0)));}
+    }
+
+    public void testRevisionCoversUserTablesAndIgnoresReadsAndUnmatchedWrites(){
+        SQLiteDatabase sql=db.getWritableDatabase();
+        try(Cursor tables=sql.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('android_metadata','ledger_revision')",null)){
+            while(tables.moveToNext())for(String operation:new String[]{"INSERT","UPDATE","DELETE"}){
+                try(Cursor trigger=sql.rawQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND tbl_name=? AND name=?",
+                        new String[]{tables.getString(0),"ledger_revision_"+tables.getString(0)+"_"+operation})){
+                    ok(trigger.moveToFirst()&&trigger.getLong(0)==1,"Untracked user-table write: "+tables.getString(0)+" "+operation);
+                }
+            }
+        }
+        long before=db.changes();db.transactions();db.recurring();eq(before,db.changes());
+        sql.execSQL("UPDATE transactions SET merchant='QA unmatched' WHERE id=-1");eq(before,db.changes());
+        sql.execSQL("INSERT OR IGNORE INTO excluded_messages(unique_key) VALUES('qa-revision')");long inserted=db.changes();ok(inserted>before);
+        sql.execSQL("INSERT OR IGNORE INTO excluded_messages(unique_key) VALUES('qa-revision')");eq(inserted,db.changes());
+    }
+
+    public void testRevisionWriteFailureCannotCommitAnUnstampedFinancialRow(){
+        long before=db.changes();
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_revision_fault BEFORE UPDATE ON ledger_revision BEGIN SELECT RAISE(ABORT,'qa revision fault'); END");
+        try{ok(!db.addManual(at(LocalDate.now(),10),1000,"EGP","QA refused revision","تسوق"));}
+        catch(android.database.sqlite.SQLiteConstraintException expected){/* The original insert API propagates this injected failure. */}
+        eq(0,db.transactionCount());eq(before,db.changes());
+        db.getWritableDatabase().execSQL("DROP TRIGGER qa_revision_fault");
+        ok(db.addManual(at(LocalDate.now(),10),1000,"EGP","QA revision retry","تسوق"));eq(1,db.transactionCount());ok(db.changes()>before);
+    }
+
     public void testSmsImportRepairFailureRollsBackBatchAndIsReported(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
@@ -538,7 +601,7 @@ final class AuditRegressionTest {
             old.execSQL("INSERT INTO reimbursements VALUES(2,1,4000)");
             old.execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,received_at,encrypted_body) VALUES('qa-evidence',1,'SMS',2000,'opaque-legacy-evidence')");
         }
-        db=new ExpenseDb(context);eq(23,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
+        db=new ExpenseDb(context);eq(24,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
         eq(4000,db.reimbursedOf(1));eq(6000,ExpenseDb.effectiveAmount(db.transactionById(1),db.reimbursementOffsets()));
         ok(db.transactionById(1).timePrecision==null&&db.transactionById(2).timePrecision==null);
         eq(1,scalar("SELECT user_edited FROM transactions WHERE id=2"));

@@ -128,7 +128,7 @@ final class LedgerRefreshRegressionTest {
                 require(entered.await(10,TimeUnit.SECONDS),"worker blocker did not start");
                 main(()->invoke("refreshLedger",new Class<?>[]{boolean.class},false));
             }
-            // A different helper matches SMS/notification writes: the activity's total_changes stays unchanged.
+            // Separate helpers match SMS/notification writers; the persistent revision must observe them.
             if("income".equals(change)){
                 SmsParts parts=new SmsParts();parts.add("InstaPay",System.currentTimeMillis(),
                         "You have received EGP 50.00 from qa_refresh@instapay");
