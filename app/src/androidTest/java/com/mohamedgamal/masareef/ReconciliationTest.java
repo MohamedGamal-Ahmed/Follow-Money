@@ -689,6 +689,42 @@ public final class ReconciliationTest extends Instrumentation {
         db.unlinkReimbursement(back);assertEquals(0,db.reimbursedOf(buy));
         db.linkReimbursement(back,buy);db.deleteTransaction(buy);assertNull(db.reimbursedExpense(back));
     }
+    public void testNamedCommitmentMatchingKeepsAmbiguityAndAmountDateCurrencyBounds() {
+        LocalDate day=LocalDate.of(2026,10,10);long when=AT+12*3600000;
+        long a=db.putCommitment(null,"QA ambiguous A",10000,"EGP",day.plusDays(12),"monthly","bill",null,0,1,"qa merchant",null);
+        long b=db.putCommitment(null,"QA ambiguous B",10000,"EGP",day.plusDays(12),"monthly","bill",null,0,1,"qa merchant",null);
+        assertTrue(db.addManual(when,10001,"EGP","QA merchant","فواتير"));long first=db.latestInserted().id;
+        assertEquals(0,db.recurringById(a).paidCount);assertEquals(0,db.recurringById(b).paidCount);
+        assertTrue(db.finishRecurring(b,false));
+        assertTrue(db.addManual(when+1000,10001,"EGP","QA merchant","فواتير"));
+        assertEquals(1,db.recurringById(a).paidCount);assertEquals(day.plusDays(12).plusMonths(1),db.recurringById(a).nextDue);
+        assertEquals(0,db.recurringById(b).paidCount);
+        long far=db.putCommitment(null,"QA far plan",10000,"EGP",day.plusDays(13),"monthly","bill",null,0,1,"qa far vendor",null);
+        assertTrue(db.addManual(when+2000,10000,"EGP","QA far vendor","فواتير"));assertEquals(0,db.recurringById(far).paidCount);
+        long usd=db.putCommitment(null,"QA dollars",10000,"USD",day,"monthly","bill",null,0,1,"qa currency vendor",null);
+        assertTrue(db.addManual(when+3000,10000,"EGP","QA currency vendor","فواتير"));assertEquals(0,db.recurringById(usd).paidCount);
+        assertEquals(4,db.transactionCount());assertEquals(10001,db.transactionById(first).amountMinor);
+    }
+
+    public void testServiceCommitmentMatchingSkipsIneligiblePlansAndBorrowsCaptureRollback() {
+        LocalDate day=LocalDate.of(2026,10,10);String body="تم دفع خدمة QA SERVICE بنجاح";
+        long active=db.putCommitment(null,"QA active service",3200,"EGP",day,"monthly","bill",null,0,1,"qa service",null);
+        long far=db.putCommitment(null,"QA far service",4500,"EGP",day.plusDays(13),"monthly","bill",null,0,1,"qa service",null);
+        long review=db.putCommitment(null,"QA review service",5600,"EGP",day,"monthly","bill",null,0,1,"qa service",null);
+        long done=db.putCommitment(null,"QA done service",6700,"EGP",day,"monthly","installment",1,1,1,"qa service",null);
+        android.content.ContentValues flagged=new android.content.ContentValues();flagged.put("needs_review",1);
+        db.getWritableDatabase().update("recurring",flagged,"id=?",new String[]{Long.toString(review)});
+        long revision=db.changes();SQLiteDatabase connection=db.getWritableDatabase();connection.beginTransaction();
+        try{assertTrue(db.captureSms("InstaPay",body,AT).dbChanged);assertEquals(1,db.recurringById(active).paidCount);}
+        finally{connection.endTransaction();} // Successful inner capture is still owned by this outer caller.
+        assertEquals(revision,db.changes());assertEquals(0,db.recurringById(active).paidCount);assertTrue(connection.isOpen()&&!connection.inTransaction());
+        assertTrue(db.captureSms("InstaPay",body,AT).dbChanged);assertEquals(1,db.recurringById(active).paidCount);
+        assertEquals(day.plusMonths(1),db.recurringById(active).nextDue);
+        assertEquals(0,db.recurringById(far).paidCount);assertEquals(0,db.recurringById(review).paidCount);assertEquals(1,db.recurringById(done).paidCount);
+        assertFalse(db.captureSms("InstaPay",body,AT+1000).dbChanged);assertEquals(1,db.recurringById(active).paidCount);
+        assertEquals(0,db.transactionCount()); // A receipt without an amount must not invent a second debit.
+    }
+
     public void testCommitmentStateKeepsMonthEndAnchorAndCompletionGuards() {
         LocalDate january=LocalDate.of(2026,1,31),february=LocalDate.of(2026,2,28),march=LocalDate.of(2026,3,31);
         long id=db.putCommitment(null,"QA month end",1200,"EGP",january,"monthly","installment",3,0,1,"QA month end",null);
