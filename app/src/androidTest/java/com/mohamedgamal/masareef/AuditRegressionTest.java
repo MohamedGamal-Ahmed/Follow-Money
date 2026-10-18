@@ -67,6 +67,39 @@ final class AuditRegressionTest {
                 new String[]{Long.toString(originalId)})){ok(cursor.moveToFirst());return cursor.getString(0);}
     }
 
+    public void testRevisionSeesCommittedExternalWritesAndSurvivesReopen(){
+        long before=db.changes();
+        try(ExpenseDb external=new ExpenseDb(context)){
+            ok(external.addManual(at(LocalDate.now(),10),1000,"EGP","QA external","تسوق"));
+        }
+        ok(db.changes()!=before,"Committed external write was invisible without a broadcast");
+        long committed=db.changes();db.close();db=new ExpenseDb(context);
+        eq(committed,db.changes());eq(1,db.transactionCount());
+        try(ExpenseDb external=new ExpenseDb(context)){
+            long account=external.addPaymentSource("QA revision","حساب",null);
+            external.putManualBalance(account,"EGP",30000,System.currentTimeMillis());
+            ok(external.putCommitment(null,"QA revision plan",2000,"EGP",LocalDate.now().plusMonths(1),"monthly","bill",null,0,1,null,null)>0);
+        }
+        ok(db.changes()>committed,"Non-transaction financial state did not invalidate the ledger");
+    }
+
+    public void testRevisionRollsBackWithItsCallerAndDoesNotResetOnClear(){
+        long before=db.changes();SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try{manual(at(LocalDate.now(),10),1000,"expense");}finally{sql.endTransaction();}
+        eq(0,db.transactionCount());eq(before,db.changes());
+        manual(at(LocalDate.now(),11),2000,"expense");long committed=db.changes();ok(committed>before);
+        db.clearAllData();ok(db.changes()>committed,"Deleting data reset/reused the revision");
+        long cleared=db.changes();db.close();db=new ExpenseDb(context);eq(cleared,db.changes());
+    }
+
+    public void testMissedBroadcastStillRedrawsAfterExternalCommit(){
+        new LedgerRefreshRegressionTest(runner,context,db).checkMissedBroadcast(false);
+    }
+
+    public void testCommitAfterSnapshotReadCannotApplyTheOldSnapshot(){
+        new LedgerRefreshRegressionTest(runner,context,db).checkMissedBroadcast(true);
+    }
+
     public void testSmsImportRepairFailureRollsBackBatchAndIsReported(){
         long t=at(LocalDate.now(),10);
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
