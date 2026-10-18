@@ -400,6 +400,49 @@ final class FeatureAuditTest {
         java.util.List<ExpenseDb.Transaction> older=db.reimbursementCandidates(income,true);eq(1,older.size());eq(old,older.get(0).id);
     }
 
+    public void testReimbursementPreviewIsReadOnlyAtTheExactTimeBoundary() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        ok(db.addManual(t+60000,3000,"EGP","QA boundary A","بقالة"));long a=db.latestInserted().id;
+        ok(db.addManual(t+60000,5000,"EGP","QA boundary B","بقالة"));long b=db.latestInserted().id;
+        ok(db.addManual(t+60001,7000,"EGP","QA too late","بقالة"));long later=db.latestInserted().id;
+        ok(db.addManual(at(day.minusDays(1)),1000,"EGP","QA older","بقالة"));long older=db.latestInserted().id;
+        ok(db.addManual(t,9000,"USD","QA other currency","بقالة"));
+        ok(db.addManual(t,1100,"EGP","QA unresolved","تحويلات"));
+        ok(db.addManualEntry(t,2000,"EGP","QA refund","دخل",null,"income",null,null));
+        ExpenseDb.Transaction income=db.latestInserted();long revision=db.changes();
+        java.util.List<ExpenseDb.Transaction> candidates=db.reimbursementCandidates(income);
+        eq(2,candidates.size());eq(b,candidates.get(0).id);eq(a,candidates.get(1).id);
+        java.util.List<ExpenseDb.Transaction> previous=db.reimbursementCandidates(income,true);
+        eq(1,previous.size());eq(older,previous.get(0).id);
+        ok(db.reimbursementCandidates(null).isEmpty());ok(db.reimbursementCandidates(db.transactionById(a)).isEmpty());
+        ExpenseDb.ReimbursementPreview preview=db.previewReimbursement(income.id,a);
+        eq(2000,preview.applied);eq(1000,preview.personal);eq(13000,preview.daySpending);ok(day.equals(preview.day));
+        try{db.previewReimbursement(income.id,later);throw new AssertionError("Purchase beyond the one-minute boundary allowed");}
+        catch(IllegalArgumentException expected){}
+        eq(revision,db.changes());eq(0,countRows("reimbursements"));eq(7,db.transactionCount());
+    }
+
+    public void testReimbursementConfirmationBorrowsRollbackAndRechecksExternalDaySpending() {
+        long t=at(LocalDate.now());
+        ok(db.addManual(t,5000,"EGP","QA purchase","بقالة"));long buy=db.latestInserted().id;
+        ok(db.addManualEntry(t+1000,2000,"EGP","QA refund","دخل",null,"income",null,null));long income=db.latestInserted().id;
+        ExpenseDb.ReimbursementPreview preview=db.previewReimbursement(income,buy);long revision=db.changes();
+        SQLiteDatabase connection=db.getWritableDatabase();connection.beginTransaction();
+        try{eq(2000,db.confirmReimbursement(preview));eq(2000,db.reimbursedOf(buy));}
+        finally{connection.endTransaction();} // The outer caller deliberately rolls the confirmation back.
+        eq(revision,db.changes());eq(0,countRows("reimbursements"));ok(connection.isOpen()&&!connection.inTransaction());
+        try(ExpenseDb external=new ExpenseDb(context)){
+            ok(external.addManual(t+2000,300,"EGP","QA changed day total","بقالة"));
+        }
+        long externalRevision=db.changes();ok(externalRevision>revision);
+        try{db.confirmReimbursement(preview);throw new AssertionError("Stale day-spending preview confirmed");}
+        catch(IllegalArgumentException expected){}
+        eq(externalRevision,db.changes());eq(0,countRows("reimbursements"));ok(!connection.inTransaction());
+        ExpenseDb.ReimbursementPreview fresh=db.previewReimbursement(income,buy);
+        eq(3300,fresh.daySpending);eq(2000,db.confirmReimbursement(fresh));eq(2000,db.reimbursedOf(buy));
+        eq(5000,db.transactionById(buy).amountMinor);eq(2000,db.transactionById(income).amountMinor);
+    }
+
     public void testSeoudiCoffeePreviewConfirmUndoAndOldDay() {
         LocalDate day=LocalDate.now();long t=at(day);
         DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,day.minusDays(3),0));

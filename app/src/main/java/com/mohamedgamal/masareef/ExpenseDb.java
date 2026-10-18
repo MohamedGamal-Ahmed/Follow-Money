@@ -25,6 +25,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final AccountRepository accounts = new AccountRepository(this);
     private final CommitmentRepository commitments = new CommitmentRepository(this);
     private final ReimbursementRepository reimbursements = new ReimbursementRepository(this);
+    private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     public ExpenseDb(Context context) {
         super(context, "masareef.db", null, 24);
     }
@@ -1805,29 +1806,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return reimbursementCandidates(income,false);
     }
 
-    public List<Transaction> reimbursementCandidates(Transaction income,boolean older) {
-        List<Transaction> result=new ArrayList<>();
-        if (income==null || !"income".equals(income.kind)) return result;
-        java.util.Map<Long,Long> offsets=reimbursementOffsets();
-        LocalDate day=Instant.ofEpochMilli(income.when).atZone(ZoneId.systemDefault()).toLocalDate();
-        for (Transaction tx:transactionsBetween(older?LocalDate.of(1970,1,1):day,older?day:day.plusDays(1)))
-            if ("expense".equals(tx.kind) && tx.currency.equals(income.currency) && reimbursementPrecedes(tx,income) &&
-                    effectiveAmount(tx,offsets)>0 && MoneyFlow.bucket(tx.kind,tx.category)!=MoneyFlow.Bucket.OPEN_TRANSFER) result.add(tx);
-        result.sort((a,b)->{
-            int byTime=Long.compare(b.when,a.when);
-            return byTime!=0?byTime:Long.compare(b.id,a.id);
-        });
-        return result;
-    }
+    public List<Transaction> reimbursementCandidates(Transaction income,boolean older) { return reimbursementFlow.reimbursementCandidates(income,older); }
 
-    private static boolean reimbursementPrecedes(Transaction expense,Transaction income) {
-        if("date_only".equals(expense.timePrecision)||"date_only".equals(income.timePrecision)) {
-            ZoneId zone=ZoneId.systemDefault();
-            return !Instant.ofEpochMilli(expense.when).atZone(zone).toLocalDate()
-                    .isAfter(Instant.ofEpochMilli(income.when).atZone(zone).toLocalDate());
-        }
-        return expense.when<=income.when+60_000;
-    }
 
     static final class ReimbursementPreview {
         final Transaction income,expense;
@@ -1840,37 +1820,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
     }
 
-    ReimbursementPreview previewReimbursement(long incomeId,long expenseId) {
-        Transaction income=transactionById(incomeId),expense=transactionById(expenseId);
-        if(income==null || expense==null || !"income".equals(income.kind) || !"expense".equals(expense.kind) ||
-                !income.currency.equals(expense.currency) || !reimbursementPrecedes(expense,income) || reimbursedExpense(incomeId)!=null ||
-                MoneyFlow.bucket(expense.kind,expense.category)==MoneyFlow.Bucket.OPEN_TRANSFER)
-            throw new IllegalArgumentException("Purchase or repayment changed");
-        java.util.Map<Long,Long> offsets=reimbursementOffsets();
-        long left=effectiveAmount(expense,offsets),applied=Math.min(left,income.amountMinor);
-        if(applied<=0)throw new IllegalArgumentException("Nothing left to repay");
-        LocalDate day=Instant.ofEpochMilli(expense.when).atZone(ZoneId.systemDefault()).toLocalDate();
-        MoneyTotals totals=new MoneyTotals();
-        for(Transaction tx:transactionsBetween(day,day.plusDays(1)))totals.add(tx.currency,tx.kind,tx.category,effectiveAmount(tx,offsets));
-        MoneyTotals.Totals currencyTotals=totals.currencies.get(expense.currency);
-        long spending=currencyTotals==null?0:currencyTotals.living;
-        String fingerprint=income.when+":"+income.amountMinor+":"+income.currency+":"+income.merchant+":"+
-                expense.when+":"+expense.amountMinor+":"+expense.category+":"+expense.merchant+":"+left+":"+spending+":"+
-                income.timePrecision+":"+expense.timePrecision;
-        return new ReimbursementPreview(income,expense,applied,left-applied,
-                spending-(MoneyFlow.bucket(expense.kind,expense.category)==MoneyFlow.Bucket.LIVING?applied:0),fingerprint);
-    }
+    ReimbursementPreview previewReimbursement(long incomeId,long expenseId) { return reimbursementFlow.previewReimbursement(incomeId,expenseId); }
 
     /** The confirmation must still describe the records the user actually reviewed. */
-    long confirmReimbursement(ReimbursementPreview preview) {
-        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
-        try {
-            ReimbursementPreview current=previewReimbursement(preview.income.id,preview.expense.id);
-            if(!current.fingerprint.equals(preview.fingerprint))throw new IllegalArgumentException("Preview changed");
-            long applied=linkReimbursement(current.income.id,current.expense.id);
-            sql.setTransactionSuccessful();return applied;
-        } finally {sql.endTransaction();}
-    }
+    long confirmReimbursement(ReimbursementPreview preview) { return reimbursementFlow.confirmReimbursement(preview); }
 
     /** Undo this exact link only; never erase a replacement or another incoming repayment. */
     boolean undoReimbursement(long incomeId,long expenseId,long amount) { return reimbursements.undoReimbursement(incomeId,expenseId,amount); }
