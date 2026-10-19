@@ -159,6 +159,29 @@ final class FeatureAuditTest {
         AccountMovement movement=new AccountMovement();movement.add("transfer","تحويلات",5000,true,true);
         eq(0,movement.ownIncoming);eq(0,movement.ownOutgoing);eq(0,movement.outgoing());eq(1,countRows("transactions"));
     }
+    public void testCashWithdrawalIsNeitherSpendingNorBudgetUse() {
+        LocalDate day=LocalDate.now();
+        ok(db.addManual(at(day),50000,"EGP","QA ATM","سحب نقدي"));
+        ok(db.addManual(at(day),10000,"EGP","QA grocery","بقالة"));
+        ok(db.addManual(at(day),500,"EGP","QA fee","رسوم تحويل"));
+        long planId=db.putBudgetPlan(null,"QA cash budget",100000,"EGP","monthly",day.withDayOfMonth(1),30,
+                Arrays.asList("سحب نقدي","بقالة","رسوم تحويل"));
+        ok(planId>0);
+        ExpenseDb.BudgetPlan plan=null;
+        for(ExpenseDb.BudgetPlan item:db.budgetPlans())if(item.id==planId)plan=item;
+        ok(plan!=null);
+        eq(10500,db.spentForBudget(plan,day));
+        eq(10500,db.monthlyTotals(day).get("EGP"));
+        eq(10500,db.monthlyTotalForKind(day,"EGP","expense"));
+        long categoryTotal=0;
+        for(ExpenseDb.CategoryTotal item:db.monthlyCategoryTotals(day))categoryTotal+=item.amountMinor;
+        eq(10500,categoryTotal);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",100000,day,0));
+        DailySummary summary=DailySummary.load(context,db);
+        eq(10500,summary.currencies.get("EGP").expense);
+        eq(89500,summary.currencies.get("EGP").remaining);
+        eq(3,countRows("transactions")); // Historical rows are not rewritten or re-categorized.
+    }
     public void testMonthlySummaryUsesEffectiveAmountsAndNeverWritesLedger() {
         LocalDate day=LocalDate.of(2026,9,10);
         ok(db.addManual(at(day),10000,"EGP","QA purchase","بقالة"));long purchase=db.latestInserted().id;

@@ -17,17 +17,19 @@ import java.util.TreeMap;
  * The single set of money definitions shared by every screen, widget and notification.
  *
  * Every transaction falls in exactly one bucket:
- *  LIVING        day-to-day spending, cash withdrawals and bank fees («صرف»)
- *  COMMITMENT    installments, bills and subscriptions
- *  OPEN_TRANSFER money sent to other people whose purpose is not set yet
- *  INFLOW        money that came in (not necessarily earned income)
- *  INTERNAL      moves between the user's own accounts; never spending or income
+ *  LIVING          day-to-day spending and bank fees («صرف»)
+ *  COMMITMENT      installments, bills and subscriptions
+ *  OPEN_TRANSFER   money sent to other people whose purpose is not set yet
+ *  INFLOW          money that came in (not necessarily earned income)
+ *  INTERNAL        moves between the user's own accounts; never spending or income
+ *  CASH_WITHDRAWAL cash taken out of a tracked account; money moved, never spending
  */
 final class MoneyFlow {
-    enum Bucket { LIVING, COMMITMENT, OPEN_TRANSFER, INFLOW, INTERNAL }
+    enum Bucket { LIVING, COMMITMENT, OPEN_TRANSFER, INFLOW, INTERNAL, CASH_WITHDRAWAL }
     enum Range { MONTH, YEAR, LAST_12 }
 
     static final String OPEN_TRANSFER_CATEGORY = "تحويلات";
+    static final String CASH_WITHDRAWAL_CATEGORY = "سحب نقدي";
     static final Set<String> COMMITMENT_CATEGORIES = Collections.unmodifiableSet(new java.util.HashSet<>(java.util.Arrays.asList("أقساط", "فواتير", "اشتراكات")));
     static final String UNCATEGORIZED = "غير مصنف";
 
@@ -37,10 +39,12 @@ final class MoneyFlow {
         if ("transfer".equals(kind)) return Bucket.INTERNAL;
         if ("income".equals(kind)) return Bucket.INFLOW;
         if (OPEN_TRANSFER_CATEGORY.equals(category)) return Bucket.OPEN_TRANSFER;
+        if (CASH_WITHDRAWAL_CATEGORY.equals(category)) return Bucket.CASH_WITHDRAWAL;
         if (category != null && COMMITMENT_CATEGORIES.contains(category)) return Bucket.COMMITMENT;
         return Bucket.LIVING;
     }
 
+    /** Only real spending buckets; a cash withdrawal moves money to cash and is not an outflow. */
     static boolean isOutflow(Bucket bucket) {
         return bucket == Bucket.LIVING || bucket == Bucket.COMMITMENT || bucket == Bucket.OPEN_TRANSFER;
     }
@@ -51,6 +55,7 @@ final class MoneyFlow {
             case COMMITMENT: return "أقساط والتزامات";
             case OPEN_TRANSFER: return "تحويلات غرضها مش محدد";
             case INFLOW: return "فلوس دخلت";
+            case CASH_WITHDRAWAL: return "سحب نقدي";
             default: return "بين حساباتك";
         }
     }

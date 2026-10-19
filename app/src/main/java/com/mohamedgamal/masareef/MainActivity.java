@@ -3288,7 +3288,7 @@ public final class MainActivity extends Activity {
         if(result.valid)text+="\n"+(result.remaining<0?"تجاوز الحد: "+money(-result.remaining,code):"المتبقي من الحد: "+money(result.remaining,code));
         if(!preview.day.equals(LocalDate.now()))text+="\nالاسترداد يخص يوم الشراء؛ مش بيقلل صرف النهارده.";
         if(MoneyFlow.bucket(preview.expense.kind,preview.expense.category)!=MoneyFlow.Bucket.LIVING)
-            text+="\nالشراء ده من الالتزامات؛ مش داخل في الحد اليومي.";
+            text+="\nالعملية دي مش ضمن الصرف اليومي؛ مش داخلة في الحد اليومي.";
         return text;
     }
 
@@ -4379,7 +4379,7 @@ public final class MainActivity extends Activity {
             TextView points=label("نقاط الالتزام · "+code+" ←",13,ACCENT,true);
             points.setPadding(0,dp(8),0,dp(12));points.setOnClickListener(v->{if(dailyDetails!=null)dailyDetails.dismiss();pointsDialog(code);});dailyDetailsContent.addView(points);
         }
-        dailyDetailsContent.addView(label("مصروف اليوم = صرف يومي بس (شراء وسحب كاش ورسوم). الأقساط والفواتير والتحويلات لناس ليها سطر لوحدها في التحليلات ومش بتاكل من الحد اليومي. الدخل والتحويلات الداخلية لا تزود الحد. المتبقي لا ينتقل لبكرة. كل عملة لها حد منفصل.",12,MUTED,false));
+        dailyDetailsContent.addView(label("مصروف اليوم = صرف يومي بس (شراء ورسوم). سحب الكاش اتنقل من حسابك لكاش ومش مصروف. الأقساط والفواتير والتحويلات لناس ليها سطر لوحدها في التحليلات ومش بتاكل من الحد اليومي. الدخل والتحويلات الداخلية لا تزود الحد. المتبقي لا ينتقل لبكرة. كل عملة لها حد منفصل.",12,MUTED,false));
         dailyDetailsContent.addView(label("اليوم من 00:00 حتى 00:00 التالي حسب "+summary.zone+" · تحديث "+summary.date+" "+summary.updated.atZone(summary.zone).toLocalTime().withNano(0),11,MUTED,false));
     }
 
@@ -4445,7 +4445,7 @@ public final class MainActivity extends Activity {
         }
         TextView help=label("النقاط بتتحسب إزاي؟",13,ACCENT,true);help.setPadding(0,dp(12),0,dp(8));
         help.setOnClickListener(v->new ChoiceDialogBuilder().setTitle("طريقة حساب النقاط")
-                .setMessage("كل 10 وحدات من "+code+" تحت حد اليوم = نقطة، والزيادة تخصم بنفس النسبة. نتيجة كل يوم بتتقرب لأقرب عدد صحيح؛ نصف نقطة يتقرب بعيدًا عن الصفر. رصيدك هو مجموع نتائج الأيام المعتمدة.\n\nالنهارده مؤقت. اليوم يدخل الرصيد بعد نهايته وتأكيد تسجيل كل المصروفات، بما فيها الكاش. العمليات المحتاجة مراجعة تمنع اعتماد اليوم.\n\nحد النقاط بيتثبت أول مرة في اليوم؛ تعديل الميزانية يسري على حد النقاط من بكرة. الاسترداد يصحح يوم الشراء. الأيام غير المسجلة ما تاخدش نقاط تلقائيًا.\n\nمحطات الـ100 نقطة للتشجيع فقط. النقاط مش فلوس أو مكافآت نقدية، وكل عملة لها رصيد منفصل.")
+                .setMessage("كل 10 وحدات من "+code+" تحت حد اليوم = نقطة، والزيادة تخصم بنفس النسبة. نتيجة كل يوم بتتقرب لأقرب عدد صحيح؛ نصف نقطة يتقرب بعيدًا عن الصفر. رصيدك هو مجموع نتائج الأيام المعتمدة.\n\nالنهارده مؤقت. اليوم يدخل الرصيد بعد نهايته وتأكيد تسجيل كل المصروفات. سحب الكاش مش مصروف ومش داخل في الحساب. العمليات المحتاجة مراجعة تمنع اعتماد اليوم.\n\nحد النقاط بيتثبت أول مرة في اليوم؛ تعديل الميزانية يسري على حد النقاط من بكرة. الاسترداد يصحح يوم الشراء. الأيام غير المسجلة ما تاخدش نقاط تلقائيًا.\n\nمحطات الـ100 نقطة للتشجيع فقط. النقاط مش فلوس أو مكافآت نقدية، وكل عملة لها رصيد منفصل.")
                 .setPositiveButton("تمام",null).show());content.addView(help);
         if(days.isEmpty())content.addView(label("فعّل النقاط وابدأ بالنهارده. أول رصيد معتمد يظهر بعد نهاية اليوم وتأكيد تسجيله.",13,MUTED,false));
         dialog.show();
@@ -4472,7 +4472,7 @@ public final class MainActivity extends Activity {
             confirm.setOnClickListener(v->{
                 if(day.complete){DailyPointsStore.revoke(this,code,day.date);dialog.dismiss();render();pointsDialog(code,all);return;}
                 new ChoiceDialogBuilder().setTitle("كل مصروفات "+dayLabel(day.date)+" متسجلة؟")
-                        .setMessage("بعد التأكيد، نتيجة اليوم "+pointsNumber(day.points())+" نقطة هتدخل رصيدك. راجع الشراء والكاش والمصروفات الناقصة؛ تقدر تلغي التأكيد بعدين.")
+                        .setMessage("بعد التأكيد، نتيجة اليوم "+pointsNumber(day.points())+" نقطة هتدخل رصيدك. راجع الشراء والرسوم والمصروفات الناقصة؛ تقدر تلغي التأكيد بعدين.")
                         .setPositiveButton("التسجيل كامل",(d,w)->{
                             try{DailyPointsStore.confirm(this,db,code,day.date,LocalDate.now());}
                             catch(IllegalArgumentException changed){toast("اليوم محتاج مراجعة أو لسه مفتوح");}
@@ -5226,7 +5226,7 @@ public final class MainActivity extends Activity {
         for(String currency:report.currencies.keySet())addChip(currencies,currency,currency.equals(monthlyCurrency),()->{monthlyCurrency=currency;render();});
         page.addView(currencies);
         MonthlyReport.Currency data=report.currencies.get(monthlyCurrency);MoneyFlow.Summary current=data.current;
-        LinearLayout hero=card();hero.setBackground(rounded(BRAND,22));hero.addView(label("إجمالي اللي خرج · "+monthlyName(monthlyMonth),13,0xffb9d3c8,false));
+        LinearLayout hero=card();hero.setBackground(rounded(BRAND,22));hero.addView(label("إجمالي المصروف · "+monthlyName(monthlyMonth),13,0xffb9d3c8,false));
         TextView outgoing=label(money(current.totalOut(),monthlyCurrency),30,Color.WHITE,true);outgoing.setTextDirection(View.TEXT_DIRECTION_LTR);hero.addView(outgoing);
         hero.addView(label(current.outCount()+" عملية · "+current.byDay.size()+" يوم فيه حركة مسجلة",12,0xffb9d3c8,false));
         hero.setOnClickListener(v->openMonthlyTransactions(null,"",""));
@@ -5236,8 +5236,9 @@ public final class MainActivity extends Activity {
         monthlyMetric(totals,"تحويلات لناس غير محددة الغرض",current.of(MoneyFlow.Bucket.OPEN_TRANSFER),dark?0xfff2ac65:ORANGE,()->openMonthlyTransactions(MoneyFlow.Bucket.OPEN_TRANSFER,"",""));
         monthlyMetric(totals,"وارد مسجل",current.of(MoneyFlow.Bucket.INFLOW),INCOME,()->openMonthlyTransactions(MoneyFlow.Bucket.INFLOW,"",""));
         monthlyMetric(totals,"تحويل بين حساباتك · منفصل",current.of(MoneyFlow.Bucket.INTERNAL),MUTED,()->openMonthlyTransactions(MoneyFlow.Bucket.INTERNAL,"",""));
-        monthlyMetric(totals,"صافي الحركة المسجلة",current.of(MoneyFlow.Bucket.INFLOW)-current.totalOut(),INK,null);
-        note("العملات منفصلة. الصافي مش رصيد بنك أو وفر مؤكد. الصرف اليومي يشمل الشراء والكاش والرسوم؛ الاسترداد المرتبط يُخصم من العملية الأصلية والوارد زي باقي التحليلات.");
+        monthlyMetric(totals,"سحب نقدي · من حسابك لكاش",current.of(MoneyFlow.Bucket.CASH_WITHDRAWAL),MUTED,()->openMonthlyTransactions(MoneyFlow.Bucket.CASH_WITHDRAWAL,"",""));
+        monthlyMetric(totals,"صافي الصرف والدخل المسجل",current.of(MoneyFlow.Bucket.INFLOW)-current.totalOut(),INK,null);
+        note("العملات منفصلة. الصافي مش رصيد بنك أو وفر مؤكد. الصرف اليومي يشمل الشراء والرسوم؛ سحب الكاش اتنقل من حسابك لكاش ومش مصروف. الاسترداد المرتبط يُخصم من العملية الأصلية والوارد زي باقي التحليلات.");
 
         section("صرفك اليومي راح فين؟",null,null);LinearLayout categories=listCard(page);long living=current.of(MoneyFlow.Bucket.LIVING);
         for(Map.Entry<String,Long> entry:current.livingCategories()) {
@@ -5293,6 +5294,7 @@ public final class MainActivity extends Activity {
             case COMMITMENT: return INDIGO;
             case OPEN_TRANSFER: return ORANGE;
             case INFLOW: return INCOME;
+            case CASH_WITHDRAWAL: return 0xff3b4ba8;
             default: return MUTED;
         }
     }
@@ -5300,10 +5302,11 @@ public final class MainActivity extends Activity {
     private String bucketDetail(MoneyFlow.Bucket bucket, MoneyFlow.Summary s) {
         int n = s.countOf(bucket);
         switch (bucket) {
-            case LIVING: return n + " عملية: شراء وسحب كاش ورسوم";
+            case LIVING: return n + " عملية: شراء ورسوم";
             case COMMITMENT: return n + " دفعة: أقساط وفواتير واشتراكات";
             case OPEN_TRANSFER: return n == 0 ? "كل التحويلات متحدد غرضها" : n + " تحويل لناس · حدد غرضها";
             case INFLOW: return n + " عملية · مش شرط تكون دخل مكتسب";
+            case CASH_WITHDRAWAL: return n + " سحب من الحساب · مش مصروف";
             default: return n + " حركة · مش محسوبة صرف ولا دخل";
         }
     }
@@ -5393,7 +5396,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout buckets = listCard(page);
         for (MoneyFlow.Bucket bucket : new MoneyFlow.Bucket[]{MoneyFlow.Bucket.COMMITMENT, MoneyFlow.Bucket.OPEN_TRANSFER,
-                MoneyFlow.Bucket.INFLOW, MoneyFlow.Bucket.INTERNAL}) {
+                MoneyFlow.Bucket.INFLOW, MoneyFlow.Bucket.INTERNAL, MoneyFlow.Bucket.CASH_WITHDRAWAL}) {
             if (buckets.getChildCount() > 0) divider(buckets);
             bucketRow(buckets, bucket, s);
         }
@@ -5401,7 +5404,7 @@ public final class MainActivity extends Activity {
         LinearLayout total = new LinearLayout(this); total.setGravity(Gravity.CENTER_VERTICAL);
         total.setPadding(0, dp(12), 0, dp(12));
         LinearLayout totalCopy = new LinearLayout(this); totalCopy.setOrientation(LinearLayout.VERTICAL);
-        totalCopy.addView(label("إجمالي اللي خرج", 13, MUTED, false));
+        totalCopy.addView(label("إجمالي المصروف", 13, MUTED, false));
         totalCopy.addView(label("صرف يومي + أقساط + تحويلات لناس · " + s.outCount() + " عملية", 11, MUTED, false));
         total.addView(totalCopy, new LinearLayout.LayoutParams(0, -2, 1));
         TextView totalAmount = label(money(s.totalOut(), "EGP"), 14, MUTED, true);
@@ -5414,7 +5417,7 @@ public final class MainActivity extends Activity {
             section("تكلفة المعيشة المسجلة",null,null);
             LinearLayout cost=card();cost.addView(label(money(s.of(MoneyFlow.Bucket.LIVING)+s.of(MoneyFlow.Bucket.COMMITMENT),"EGP"),28,INK,true));
             cost.addView(label("صرف يومي "+money(s.of(MoneyFlow.Bucket.LIVING),"EGP")+" · التزامات "+money(s.of(MoneyFlow.Bucket.COMMITMENT),"EGP"),13,MUTED,false));
-            cost.addView(label("للفترة المختارة، حسب العمليات المسجلة. التحويلات مجهولة الغرض وبين حساباتك مستبعدة، وسحب الكاش ضمن الصرف اليومي.",12,MUTED,false));
+            cost.addView(label("للفترة المختارة، حسب العمليات المسجلة. التحويلات مجهولة الغرض وبين حساباتك مستبعدة، وسحب الكاش اتنقل من حسابك لكاش ومش مصروف.",12,MUTED,false));
         }
         // Findings: forecast, what is left, commitment burden, habits, unusual payments...
         if(spending) insightCards(period);
@@ -5505,8 +5508,8 @@ public final class MainActivity extends Activity {
                     .append(money(other.of(MoneyFlow.Bucket.INFLOW), entry.getKey()));
         }
         if (others.length() > 0) note("عملات تانية (مش مجموعة مع الجنيه):\n" + others);
-        note("نفس التعريفات في كل الصفحات: «صرف يومي» شراء وسحب كاش ورسوم. الأقساط والفواتير والاشتراكات سطر لوحدها. " +
-                "التحويلات لناس لحد ما تحدد غرضها سطر لوحدها. التحويل بين حساباتك مش صرف ولا دخل. الأرقام بالجنيه.");
+        note("نفس التعريفات في كل الصفحات: «صرف يومي» شراء ورسوم. الأقساط والفواتير والاشتراكات سطر لوحدها. " +
+                "التحويلات لناس لحد ما تحدد غرضها سطر لوحدها. التحويل بين حساباتك وسحب الكاش مش صرف ولا دخل. الأرقام بالجنيه.");
     }
 
     private void insightCards(LocalDate[] period) {
@@ -5605,8 +5608,8 @@ public final class MainActivity extends Activity {
         copy.addView(label(bucketDetail(bucket, s), 11, bucket == MoneyFlow.Bucket.OPEN_TRANSFER && s.countOf(bucket) > 0 ? ORANGE : MUTED, false));
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(10));
         row.addView(copy, copyParams);
-        String sign = bucket == MoneyFlow.Bucket.INFLOW ? "+" : bucket == MoneyFlow.Bucket.INTERNAL ? "" : "−";
-        TextView amount = label(sign + money(s.of(bucket), "EGP"), 14, bucket == MoneyFlow.Bucket.INTERNAL ? MUTED : bucketColor(bucket), true);
+        String sign = bucket == MoneyFlow.Bucket.INFLOW ? "+" : bucket == MoneyFlow.Bucket.INTERNAL || bucket == MoneyFlow.Bucket.CASH_WITHDRAWAL ? "" : "−";
+        TextView amount = label(sign + money(s.of(bucket), "EGP"), 14, bucket == MoneyFlow.Bucket.INTERNAL || bucket == MoneyFlow.Bucket.CASH_WITHDRAWAL ? MUTED : bucketColor(bucket), true);
         amount.setTextDirection(View.TEXT_DIRECTION_LTR);
         row.addView(amount);
         row.setOnClickListener(v -> openBucket(bucket, "", bucket == MoneyFlow.Bucket.OPEN_TRANSFER));
@@ -5857,6 +5860,7 @@ public final class MainActivity extends Activity {
             copy.addView(flowLine(movement.incoming,max,EMERALD,"+",INCOME));
             copy.addView(flowLine(movement.outgoing(),max,0xffe46a6a,"−",CORAL));
             if(movement.ownIncoming+movement.ownOutgoing>0) copy.addView(label("بين حساباتك: وارد "+money(movement.ownIncoming,"EGP")+" · خارج "+money(movement.ownOutgoing,"EGP"),11,MUTED,false));
+            if(movement.withdrawn>0) copy.addView(label("سحب نقدي: "+money(movement.withdrawn,"EGP")+" · مش مصروف",11,MUTED,false));
             LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.setMarginStart(dp(12));row.addView(copy,cp);
             row.addView(tintedIcon(R.drawable.ic_chevron_forward,MUTED),new LinearLayout.LayoutParams(dp(18),dp(18)));
             row.setOnClickListener(v->{flowSourceId=source.id;selectedTab=14;render();});list.addView(row);
@@ -5972,6 +5976,7 @@ public final class MainActivity extends Activity {
         miniStat(stats, "مصروف مسجل", totals.spent, CORAL);
         miniStat(stats, "تحويلات لناس", totals.sent, ORANGE);
         miniStat(stats, "وارد مسجل", totals.incoming, INCOME);
+        if(totals.withdrawn>0) note("سحب نقدي: "+money(totals.withdrawn,"EGP")+" · اتنقل من الحساب لكاش ومش مصروف.");
         List<ExpenseDb.PaymentSource> linked=db.linkedCards(account.id);
         if(!linked.isEmpty()) {
             StringBuilder names=new StringBuilder();for(ExpenseDb.PaymentSource card:linked) names.append(names.length()==0?"":"، ").append("•").append(card.last4);

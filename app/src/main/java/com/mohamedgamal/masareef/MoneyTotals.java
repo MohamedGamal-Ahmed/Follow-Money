@@ -6,7 +6,7 @@ import java.util.Map;
 /** Day headers, the daily budget and the widget use MoneyFlow's buckets: own transfers never count as income/expense. */
 final class MoneyTotals {
     static final class Totals {
-        /** income = money in; expense = everything that left (living + commitments + open transfers); living = «صرف» only. */
+        /** income = money in; expense = everything that left as spending; living = «صرف» only. */
         long income, expense, transfers, living;
     }
     final Map<String,Totals> currencies=new LinkedHashMap<>();
@@ -20,7 +20,8 @@ final class MoneyTotals {
         MoneyFlow.Bucket bucket=MoneyFlow.bucket(kind,category);
         if(bucket==MoneyFlow.Bucket.INFLOW) t.income=Math.addExact(t.income,amount);
         else if(bucket==MoneyFlow.Bucket.INTERNAL) t.transfers=Math.addExact(t.transfers,amount);
-        else if("expense".equals(kind)) {
+        else if("expense".equals(kind) && bucket!=MoneyFlow.Bucket.CASH_WITHDRAWAL) {
+            // A cash withdrawal is money moved to cash, not spending; the same rule as MoneyFlow.isOutflow.
             t.expense=Math.addExact(t.expense,amount);
             if(bucket==MoneyFlow.Bucket.LIVING) t.living=Math.addExact(t.living,amount);
         }

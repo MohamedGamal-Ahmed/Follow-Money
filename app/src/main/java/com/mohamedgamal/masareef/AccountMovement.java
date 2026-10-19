@@ -2,7 +2,7 @@ package com.mohamedgamal.masareef;
 
 /** Gross recorded bank movements; reimbursements do not erase actual account inflows/outflows. */
 final class AccountMovement {
-    long incoming, spent, sent, ownIncoming, ownOutgoing;
+    long incoming, spent, sent, withdrawn, ownIncoming, ownOutgoing;
     void add(String kind,String category,long amount,boolean from,boolean to) {
         if(amount<=0 || !from && !to) return;
         if("transfer".equals(kind)) {
@@ -11,9 +11,11 @@ final class AccountMovement {
             else if(to && !from) ownIncoming+=amount;
         } else if(from && "income".equals(kind)) incoming+=amount;
         else if(from && "expense".equals(kind)) {
-            if(MoneyFlow.bucket(kind,category)==MoneyFlow.Bucket.OPEN_TRANSFER) sent+=amount;
+            MoneyFlow.Bucket bucket=MoneyFlow.bucket(kind,category);
+            if(bucket==MoneyFlow.Bucket.OPEN_TRANSFER) sent+=amount;
+            else if(bucket==MoneyFlow.Bucket.CASH_WITHDRAWAL) withdrawn+=amount; // left the bank, not spent
             else spent+=amount;
         }
     }
-    long outgoing() { return spent+sent; }
+    long outgoing() { return spent+sent+withdrawn; }
 }
