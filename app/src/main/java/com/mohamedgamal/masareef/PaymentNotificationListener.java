@@ -58,10 +58,10 @@ public final class PaymentNotificationListener extends NotificationListenerServi
                 ExpenseDb.Transaction before = db.latestInserted();
                 CaptureResult result = db.captureNotification(packageName, label, body, item.getPostTime());
                 boolean added = result.dbChanged;
-                if (added || CommitmentHint.parse(label, body, item.getPostTime()) != null ||
-                        CommitmentHint.completedPlanKey(label, body) != null)
+                if (added)
                     SmsReceiver.notifyDataChanged(context);
                 else DailyRefreshReceiver.refresh(context);
+                if(result.completion!=CaptureResult.Completion.COMMITTED)return;
                 if(System.currentTimeMillis()-item.getPostTime()<10*60*1000)CaptureNotifier.notifyEvent(context,result.event);
                 if (added) {
                     ExpenseDb.Transaction after = result.transaction;

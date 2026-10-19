@@ -715,13 +715,13 @@ public final class ReconciliationTest extends Instrumentation {
         android.content.ContentValues flagged=new android.content.ContentValues();flagged.put("needs_review",1);
         db.getWritableDatabase().update("recurring",flagged,"id=?",new String[]{Long.toString(review)});
         long revision=db.changes();SQLiteDatabase connection=db.getWritableDatabase();connection.beginTransaction();
-        try{assertTrue(db.captureSms("InstaPay",body,AT).dbChanged);assertEquals(1,db.recurringById(active).paidCount);}
+        try{assertTrue(db.captureSms("InstaPay",body,AT).accepted);assertEquals(1,db.recurringById(active).paidCount);}
         finally{connection.endTransaction();} // Successful inner capture is still owned by this outer caller.
         assertEquals(revision,db.changes());assertEquals(0,db.recurringById(active).paidCount);assertTrue(connection.isOpen()&&!connection.inTransaction());
-        assertTrue(db.captureSms("InstaPay",body,AT).dbChanged);assertEquals(1,db.recurringById(active).paidCount);
+        assertTrue(db.captureSms("InstaPay",body,AT).accepted);assertEquals(1,db.recurringById(active).paidCount);
         assertEquals(day.plusMonths(1),db.recurringById(active).nextDue);
         assertEquals(0,db.recurringById(far).paidCount);assertEquals(0,db.recurringById(review).paidCount);assertEquals(1,db.recurringById(done).paidCount);
-        assertFalse(db.captureSms("InstaPay",body,AT+1000).dbChanged);assertEquals(1,db.recurringById(active).paidCount);
+        assertFalse(db.captureSms("InstaPay",body,AT+1000).accepted);assertEquals(1,db.recurringById(active).paidCount);
         assertEquals(0,db.transactionCount()); // A receipt without an amount must not invent a second debit.
     }
 
