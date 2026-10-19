@@ -134,9 +134,24 @@ public final class SmsImportActivity extends Activity {
             drawRows();
         }else if("done".equals(session.phase)){
             TextView done=text("اكتمل الاستيراد",22);done.setTypeface(font,Typeface.BOLD);page.addView(done);
-            page.addView(text("تمت معالجة "+session.processed+" رسالة مالية. صافي التغيّر في عدد العمليات: "+session.added+".",16));
+            ImportResult imported=session.imported;
+            if(imported==null||imported.offered==0){
+                page.addView(text("لم نعتمد أي رسالة محددة؛ لم تتغير العمليات.",16));
+            }else{
+                page.addView(text("اعتمدنا "+imported.offered+" رسالة محددة:",16));
+                StringBuilder summary=new StringBuilder("• "+imported.created+" عملية جديدة");
+                if(imported.matchedExisting>0)summary.append("\n• ").append(imported.matchedExisting).append(" طابقت عملية مسجلة بالفعل");
+                if(imported.skippedDuplicate>0)summary.append("\n• ").append(imported.skippedDuplicate).append(" مكررة لم تُسجَّل مرتين");
+                if(imported.noLedgerChange>0)summary.append("\n• ").append(imported.noLedgerChange).append(" حدّثت رصيدًا أو تذكيرًا أو مراجعة بلا عملية جديدة");
+                if(imported.refused>0)summary.append("\n• ").append(imported.refused).append(" مرفوضة (ليست مصروفًا)");
+                if(imported.excluded>0)summary.append("\n• ").append(imported.excluded).append(" مستبعدة عندك");
+                page.addView(text(summary.toString(),14));
+                // Repair happens in the same batch but on rows the user never selected; it is reported as repair.
+                if(imported.repair.archivedRows>0||imported.repair.ownTransfers>0||imported.repair.feesCreated>0)
+                    page.addView(text("الإصلاح الآلي في نفس دفعة الحفظ: أرشف "+imported.repair.archivedRows+" صفًا لم تختره، منها "+imported.repair.ownTransfers+" تحويل داخلي، وأضاف "+imported.repair.feesCreated+" عمولة. الرسوم تظهر في العمليات.",14));
+            }
             page.addView(text("المكررات لا تُسجل مرتين. الرصيد والتذكيرات ليست مصروفات جديدة؛ إلغاء التحويل لا يلغي المشتريات الأصلية.",14));
-            if(session.skipped>0)page.addView(text(session.skipped+" رسالة لم تُستورد تلقائيًا: رفض/صيغة مستقبلية، استبعاد سابق أو إلغاء تحديد. تقدر تشوفها في التفاصيل.",14));
+            if(session.skipped>0)page.addView(text(session.skipped+" رسالة لم تُعرض على الدفعة: غير محددة أو مستبعدة سابقًا. تقدر تشوفها في التفاصيل.",14));
             if(!session.pending.isEmpty()){
                 page.addView(text(session.pending.size()+" رسالة إلغاء قديمة تحتاج تأكيدك؛ التحويلات الأصلية لم تتغير بسببها.",15));
                 for(CaptureEvents.Event event:session.pending)page.addView(button("مراجعة الإلغاء · "+(event.amount==null?"المبلغ غير مؤكد":MainActivity.money(event.amount,event.currency)),()->{
@@ -253,9 +268,10 @@ public final class SmsImportActivity extends Activity {
         final Context app;
         final List<SmsPreview> items=new ArrayList<>();
         volatile String phase="idle",error="",startLabel="";
-        volatile int total,scanned,processed,skipped;
+        volatile int total,scanned,skipped;
         boolean reviewBeforeImport;
-        volatile long added;
+        /** What the approved batch actually did; null until a committed batch reports one. */
+        volatile ImportResult imported;
         long rangeStart,rangeEnd;
         volatile List<CaptureEvents.Event> pending=java.util.Collections.emptyList();
         volatile boolean cancelled;
@@ -270,7 +286,7 @@ public final class SmsImportActivity extends Activity {
         }
         synchronized void cancelScan(){if("scan".equals(phase)){cancelled=true;generation++;phase="idle";}}
         synchronized void start(LocalDate start) {
-            cancelled=false;final int token=++generation;items.clear();total=0;scanned=0;processed=0;skipped=0;added=0;phase="scan";
+            cancelled=false;final int token=++generation;items.clear();total=0;scanned=0;skipped=0;imported=null;phase="scan";
             startLabel=start==null?"كل الرسائل":start.toString();
             long since=start==null?0:start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
             long until=System.currentTimeMillis();rangeStart=since;rangeEnd=Long.MAX_VALUE;pending=java.util.Collections.emptyList();
@@ -301,10 +317,13 @@ public final class SmsImportActivity extends Activity {
             if(!"ready".equals(phase))return;
             List<SmsPreview> selected=new ArrayList<>();for(SmsPreview r:items)if(r.selected&&r.captureStatus!=2)selected.add(r);
             skipped=items.size()-selected.size();
-            if(selected.isEmpty()){processed=0;added=0;try(ExpenseDb read=new ExpenseDb(app)){pending=pendingAfterCommit(read,rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
+            if(selected.isEmpty()){imported=null;try(ExpenseDb read=new ExpenseDb(app)){pending=pendingAfterCommit(read,rangeStart,rangeEnd);}mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).apply();phase="done";publish(true);return;}phase="apply";
             CaptureQueue.submit(()->{
                 try(ExpenseDb writeDb=new ExpenseDb(app)) {
-                    added=new ImportBatch(writeDb).execute(selected);processed=selected.size();
+                    ImportResult result=new ImportBatch(writeDb).executeDetailed(selected);
+                    // A caller-owned transaction is not a committed import: never show success before it commits.
+                    if(!result.committed){error="لم تُعتمد الدفعة بعد؛ لن نعرض نجاحًا قبل تأكيد الحفظ. أعد المحاولة.";phase="error";publish(true);return;}
+                    imported=result;
                     mainPreferences(app).edit().putBoolean("initial_sms_import_done",true).putInt("balance_parser_version",13).apply();
                     pending=pendingAfterCommit(writeDb,rangeStart,rangeEnd);
                     phase="done";
