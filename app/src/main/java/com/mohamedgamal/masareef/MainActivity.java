@@ -1018,9 +1018,21 @@ public final class MainActivity extends Activity {
                         .setMessage(preview.toString())
                         .setPositiveButton("استيراد", (dialog, which) -> CaptureQueue.submit(() -> {
                             try {
-                                ExpenseDb.CsvBatchResult result = db.importCsvBatch(fileHash.toString(), rows);
-                                String message = "تم استيراد " + result.saved + " عملية جديدة" + (result.duplicates > 0 ? "، وتخطينا " + result.duplicates + " مكررة" : "");
-                                postUi(() -> { toast(message); render(); });
+                                CsvImportResult result = db.importCsvBatchDetailed(fileHash.toString(), rows);
+                                // A caller-owned transaction is not a committed import: never report success first.
+                                if (!result.committed) {
+                                    postUi(() -> new ChoiceDialogBuilder().setTitle("لم تُعتمد العملية بعد")
+                                            .setMessage("لن نعرض نجاحًا قبل تأكيد الحفظ. أعد المحاولة.")
+                                            .setPositiveButton("تمام", null).show());
+                                    return;
+                                }
+                                StringBuilder message = new StringBuilder("تم استيراد " + result.created + " عملية جديدة");
+                                if (result.alreadyPresent > 0)
+                                    message.append("، وتخطينا ").append(result.alreadyPresent).append(" سطرًا مسجلًا من قبل");
+                                if (result.excluded > 0)
+                                    message.append("، و").append(result.excluded).append(" سطرًا مستبعدًا عندك");
+                                String summary = message.toString();
+                                postUi(() -> { toast(summary); render(); });
                             } catch (RuntimeException failed) {
                                 postUi(() -> new ChoiceDialogBuilder().setTitle("تعذر استيراد CSV")
                                         .setMessage("لم نحفظ أي سطر من الملف، وبياناتك زي ما كانت. أعد المحاولة، ولو تكررت المشكلة صدّر الملف تاني.")
