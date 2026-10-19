@@ -91,7 +91,7 @@ final class CommitmentPayments {
         for(Cycle cycle:cycles(baseline.id)){
             if(cycle.remaining()==0)paid=Math.addExact(paid,1);
             else if(!cycle.due.isAfter(due)){due=cycle.due;amount=cycle.expected;currency=cycle.currency;}
-            if(cycle.lastPaid!=null&&(last==null||cycle.lastPaid.isAfter(LocalDate.parse(last))))last=cycle.lastPaid.toString();
+            if(cycle.remaining()==0&&cycle.lastPaid!=null&&(last==null||cycle.lastPaid.isAfter(LocalDate.parse(last))))last=cycle.lastPaid.toString();
         }
         if(baseline.totalCount!=null)paid=Math.min(paid,baseline.totalCount);
         String status=baseline.isDone()||baseline.totalCount!=null&&paid>=baseline.totalCount?"done":"active";

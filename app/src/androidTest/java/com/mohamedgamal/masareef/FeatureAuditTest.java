@@ -111,9 +111,11 @@ final class FeatureAuditTest {
         eq(2,db.recurringById(plan).paidCount); // No amount-only partial guess.
         db.linkCommitmentPayment(plan,due,first,6000);
         eq(4000,db.commitmentCycles(plan).get(0).remaining());
+        ok(db.recurringById(plan).lastPaidDate==null); // A partial transfer is not a completed installment date.
         ok(db.addManual(t+1000,4000,"EGP","QA provider","أقساط"));long second=db.latestInserted().id;
         db.linkCommitmentPayment(plan,due,second,4000);
         eq(3,db.recurringById(plan).paidCount);eq(2,db.transactionCount());
+        eq(due.toString(),db.recurringById(plan).lastPaidDate);
         db.updateTransaction(first,5000,"EGP","QA provider","أقساط",null);
         eq(2,db.recurringById(plan).paidCount);eq(1000,db.commitmentCycles(plan).get(0).remaining());
         ok(db.addManualEntry(t+2000,2000,"EGP","QA refund","دخل",null,"income",null,null));
