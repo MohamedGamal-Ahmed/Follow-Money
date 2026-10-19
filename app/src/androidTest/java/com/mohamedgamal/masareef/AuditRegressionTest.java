@@ -449,6 +449,188 @@ final class AuditRegressionTest {
         eq(0,db.paymentSources().size());eq(0,scalar("SELECT COUNT(*) FROM source_aliases"));
     }
 
+    public void testCaptureResultReportsCommittedDuplicateEvidenceChange(){
+        long t=at(LocalDate.now(),10);String body="Card purchase EGP 100 at QA CONTRACT";
+        ok(db.captureSms("BANK",body,t).dbChanged);long revision=db.changes();
+        CaptureResult duplicate=db.captureSms("BANK",body,t);
+        ok(db.changes()>revision);ok(duplicate.dbChanged,"Committed duplicate evidence write was reported as unchanged");
+        ok(duplicate.transaction==null);eq(1,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM capture_evidence"));
+    }
+
+    public void testCaptureResultReportsCommittedBalanceOnlyChange(){
+        long t=at(LocalDate.now(),10),revision=db.changes();
+        CaptureResult balance=db.captureSms("BANK","Account ending 1234 available balance EGP 1000",t);
+        ok(db.changes()>revision);ok(balance.dbChanged,"Committed balance-only write was reported as unchanged");
+        ok(balance.transaction==null);eq(0,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM balance_snapshots"));
+    }
+
+    public void testCaptureContractIdsReasonsEvidenceAndSnapshots(){
+        long t=at(LocalDate.now(),10),before=db.changes();String body="Card purchase EGP 100 at QA CONTRACT";
+        CaptureResult fresh=db.captureSms("BANK",body,t);long id=fresh.transaction.id;
+        ok(fresh.completion==CaptureResult.Completion.COMMITTED&&fresh.accepted&&fresh.dbChanged);
+        ok(fresh.reason==CaptureResult.Reason.INSERTED);ok(fresh.evidence==CaptureResult.Evidence.SAVED_WITH_BODY);
+        eq(id,fresh.transactionId);eq(id,fresh.capturedTransactionId);eq(before,fresh.revisionBefore);eq(db.changes(),fresh.revisionAfter);ok(!fresh.needsReview);
+        CaptureResult duplicate=db.captureSms("BANK",body,t);
+        ok(!duplicate.accepted&&duplicate.dbChanged);ok(duplicate.reason==CaptureResult.Reason.EXISTING_MATCH);
+        eq(id,duplicate.transactionId);ok(duplicate.capturedTransactionId==null&&duplicate.transaction==null);
+        ok(duplicate.evidence==CaptureResult.Evidence.SAVED_WITH_BODY);eq(fresh.revisionAfter,duplicate.revisionBefore);
+        CaptureResult missing=db.captureSms("BANK",null,t);ok(missing.reason==CaptureResult.Reason.MISSING_BODY);
+        ok(!missing.accepted&&!missing.dbChanged);ok(missing.evidence==CaptureResult.Evidence.NOT_ATTEMPTED);
+        ok(db.captureSms("BANK","Your OTP is 123456",t).reason==CaptureResult.Reason.VERIFICATION);
+        eq(id,fresh.transaction.id);eq(10000,fresh.transaction.amountMinor);eq(before,fresh.revisionBefore);
+    }
+
+    public void testCaptureContractPendingCallerNeverClaimsCommittedChange(){
+        long t=at(LocalDate.now(),10),before=db.changes();CaptureResult pending;
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try{
+            pending=db.captureSms("BANK","Card purchase EGP 100 at QA CONTRACT",t);
+            ok(pending.accepted&&!pending.dbChanged);ok(pending.completion==CaptureResult.Completion.PENDING_CALLER);
+            ok(pending.transaction!=null&&pending.revisionAfter>before);eq(pending.transaction.id,pending.transactionId);
+        }finally{sql.endTransaction();}
+        eq(0,db.transactionCount());eq(before,db.changes());
+        ok(pending.completion==CaptureResult.Completion.PENDING_CALLER&&!pending.dbChanged);
+    }
+
+    public void testCaptureContractEvidenceRefusalDoesNotInventSuccessfulEvidence(){
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_capture_evidence_ignore BEFORE INSERT ON capture_evidence BEGIN SELECT RAISE(IGNORE); END");
+        CaptureResult result=db.captureSms("BANK","Card purchase EGP 100 at QA CONTRACT",at(LocalDate.now(),10));
+        ok(result.accepted&&result.dbChanged);ok(result.reason==CaptureResult.Reason.INSERTED);
+        ok(result.evidence==CaptureResult.Evidence.NOT_APPLIED);eq(1,db.transactionCount());eq(0,scalar("SELECT COUNT(*) FROM capture_evidence"));
+        ok(!result.needsReview,"Result invented a stored review marker");
+    }
+
+    public void testCaptureContractReviewMarkerAndRefusalHaveMatchedIds(){
+        long t=at(LocalDate.now(),10),id=manual(t,10000,"expense");
+        String future="Your payment EGP 100 will be processed tomorrow";
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0,message_hash=? WHERE id=?",new Object[]{CaptureIdentity.hash("BANK\n"+future),id});
+        CaptureResult review=db.captureSms("BANK",future,t);
+        ok(!review.accepted&&review.dbChanged&&review.needsReview);ok(review.reason==CaptureResult.Reason.FUTURE_ONLY);
+        eq(id,review.transactionId);ok(review.transaction==null&&review.capturedTransactionId==null);eq(10000,db.transactionById(id).amountMinor);
+        db.putMerchantRule("QA REFUSED","تسوق",true);
+        CaptureResult refused=db.captureSms("BANK","Card purchase EGP 20 at QA REFUSED",t+10000);
+        ok(!refused.accepted&&!refused.dbChanged);ok(refused.reason==CaptureResult.Reason.INSERT_NOT_APPLIED);
+        ok(refused.transactionId==null&&refused.evidence==CaptureResult.Evidence.NOT_ATTEMPTED);eq(1,db.transactionCount());
+    }
+
+    public void testCaptureContractMergeAndCancellationCarrySurvivingIdentities(){
+        long t=at(LocalDate.now(),10);CaptureResult note=db.captureNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t);
+        CaptureResult bank=db.captureSms("BANK","Card purchase EGP 100 at QA SHOP",t+2000);
+        eq(bank.transaction.id,bank.transactionId);eq(bank.transaction.id,db.lastCaptured().id);
+        ok(db.transactionById(note.transactionId)==null);eq(1,db.transactionCount());eq(2,scalar("SELECT COUNT(*) FROM capture_evidence"));
+        long cancelAt=t+3600000;CaptureResult review=db.captureSms("BANK",CANCEL_NOTICE,cancelAt+3000);
+        ok(review.needsReview&&review.reason==CaptureResult.Reason.NOTICE_RECORDED&&review.evidence==CaptureResult.Evidence.EVENT_BODY);
+        CaptureResult debit=db.captureSms("BANK",CANCEL_DEBIT,cancelAt);
+        ok(debit.event!=null&&debit.event.cancelled());ok(debit.transaction==null&&debit.transactionId==null&&!debit.needsReview);
+        eq(debit.capturedTransactionId,debit.event.originalId);ok(debit.event.archiveId!=null);eq(1,db.transactionCount());
+    }
+
+    public void testCaptureContractIncomingOwnTransferFollowsMergeBeforeFeeIdReuse(){
+        long t=at(LocalDate.now(),10),from=db.addPaymentSource("BankMisr","حساب","1111");
+        db.addPaymentSource("BankMisr","حساب","2222");
+        ok(db.addManualEntry(t,10050,"EGP","QA OUT","تحويلات",from,"expense",null,null));long out=db.latestInserted().id;
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0 WHERE id=?",new Object[]{out});
+        CaptureResult receipt=db.captureSms("BankMisr","تم اضافة مبلغ 100 EGP لحساب رقم 2222 عن طريق التحويل اللحظي",t+60000);
+        ok(receipt.accepted&&receipt.dbChanged);ok(receipt.transaction!=null);
+        eq(out,receipt.transactionId);eq(out,receipt.transaction.id);ok(receipt.capturedTransactionId!=out);
+        eq(10000,receipt.transaction.amountMinor);ok("transfer".equals(receipt.transaction.kind));
+        eq(50,db.transferFee(out));eq(2,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM transaction_archive"));
+        eq(out,scalar("SELECT transaction_id FROM capture_evidence"));eq(0,scalar("SELECT COUNT(*) FROM reimbursements"));
+    }
+
+    public void testCaptureContractFailedRepairDiscardsRolledBackMergeAliases(){
+        long t=at(LocalDate.now(),10);ok(db.addSms("BANK","Card purchase EGP 100 at QA SHOP",t));
+        long[] pair=tr2Pair();db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0 WHERE id IN (?,?)",new Object[]{pair[2],pair[3]});
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_late_capture_repair_fault BEFORE INSERT ON transactions WHEN NEW.unique_key LIKE 'fee:%' BEGIN SELECT RAISE(ABORT,'qa late repair fault'); END");
+        CaptureResult result=db.captureNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t+2000);
+        ok(result.accepted&&result.dbChanged);ok(result.completion==CaptureResult.Completion.COMMITTED_REPAIR_FAILED);
+        ok(result.transaction!=null);eq(result.capturedTransactionId,result.transactionId);eq(result.transaction.id,result.capturedTransactionId);
+        eq(4,db.transactionCount());eq(2,scalar("SELECT COUNT(*) FROM capture_evidence"));
+        eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));eq(0,db.transferFee(pair[2]));
+        eq(10050,db.transactionById(pair[2]).amountMinor);eq(10000,db.transactionById(pair[3]).amountMinor);
+    }
+
+    public void testCaptureConsumerBroadcastsCommittedBalanceOnlyChange(){
+        final int[] broadcasts={0};Context observed=new ContextWrapper(context){
+            @Override public void sendBroadcast(android.content.Intent intent){if(SmsReceiver.ACTION_DATA_CHANGED.equals(intent.getAction()))broadcasts[0]++;}
+        };
+        SmsParts parts=new SmsParts();parts.add("BANK",at(LocalDate.now(),10),"Account ending 1234 available balance EGP 1000");
+        SmsReceiver.captureNow(observed,parts);
+        eq(1,broadcasts[0]);eq(0,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM balance_snapshots"));
+    }
+
+    // P2-A baseline: these assertions precede result-contract changes. Boolean means legacy
+    // acceptance, not every database write; duplicate evidence replacement also advances revision.
+    public void testCaptureBaselineFreshDuplicateAndIgnored(){
+        long t=at(LocalDate.now(),10),before=db.changes();String body="Card purchase EGP 100 at QA CONTRACT";
+        CaptureResult fresh=db.captureSms("BANK",body,t);
+        ok(fresh.accepted);ok(fresh.transaction!=null);eq(10000,fresh.transaction.amountMinor);
+        ok("EGP".equals(fresh.transaction.currency));eq(1,db.transactionCount());
+        eq(1,scalar("SELECT COUNT(*) FROM capture_evidence"));eq(0,scalar("SELECT COUNT(*) FROM reimbursements"));
+        long id=fresh.transaction.id,revision=db.changes();ok(revision>before);
+        CaptureResult duplicate=db.captureSms("BANK",body,t);
+        ok(!duplicate.accepted);ok(duplicate.transaction==null&&duplicate.event==null);
+        eq(id,db.transactions().get(0).id);eq(1,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM capture_evidence"));
+        ok(db.changes()>revision,"Same-source evidence replacement currently invalidates revision");
+        revision=db.changes();ok(!db.captureSms("BANK",null,t).accepted);
+        ok(!db.captureSms("BANK","Your OTP is 123456",t).accepted);eq(revision,db.changes());
+        String excluded="Card purchase EGP 20 at QA EXCLUDED";
+        db.getWritableDatabase().execSQL("INSERT INTO excluded_messages VALUES(?)",new Object[]{CaptureIdentity.smsKey("BANK",excluded,t)});
+        revision=db.changes();ok(!db.captureSms("BANK",excluded,t).accepted);eq(revision,db.changes());
+        eq(1,db.transactionCount());eq(id,fresh.transaction.id);eq(10000,fresh.transaction.amountMinor);
+    }
+
+    public void testCaptureBaselineSideEffectWithoutLedgerRow(){
+        long t=at(LocalDate.now(),10),revision=db.changes();
+        CaptureResult balance=db.captureSms("BANK","Account ending 1234 available balance EGP 1000",t);
+        ok(!balance.accepted);ok(balance.transaction==null&&balance.event==null);
+        eq(0,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM balance_snapshots"));
+        eq(100000,scalar("SELECT balance_minor FROM balance_snapshots"));
+        eq(0,scalar("SELECT COUNT(*) FROM capture_evidence"));ok(db.changes()>revision);
+    }
+
+    public void testCaptureBaselineReviewAndHistoricalConsent(){
+        long t=at(LocalDate.now(),10),revision=db.changes();
+        CaptureResult review=db.captureSms("BANK",CANCEL_NOTICE,t);
+        ok(review.accepted);ok(review.transaction==null);ok(review.event!=null&&!review.event.cancelled());
+        eq(0,db.transactionCount());eq(1,scalar("SELECT COUNT(*) FROM capture_events WHERE status='needs_review'"));
+        eq(0,scalar("SELECT COUNT(*) FROM capture_evidence"));eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
+        ok(db.changes()>revision);revision=db.changes();
+        ok(!db.captureSms("BANK",CANCEL_NOTICE,t).accepted);eq(revision,db.changes());
+        SmsPreview history=SmsPreview.parse("BANK",CANCEL_NOTICE,t+3600000);ok(history!=null);
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(history)));
+        eq(1,scalar("SELECT COUNT(*) FROM capture_events WHERE status='needs_confirmation'"));
+        eq(1,scalar("SELECT COUNT(*) FROM sms_import_receipts"));eq(0,db.transactionCount());
+    }
+
+    public void testCaptureBaselineCallerRollbackRestoresAllRowsAndRevision()throws Exception{
+        long t=at(LocalDate.now(),10),revision=db.changes();String before=revisionData(db.getWritableDatabase());
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try{
+            CaptureResult pending=db.captureSms("BM","Card xxx4636 purchase EGP15 at QA CONTRACT. Available balance EGP7240.01",t);
+            ok(pending.accepted);ok(pending.transaction!=null);eq(1,db.transactionCount());ok(db.changes()>revision);
+        }finally{sql.endTransaction();}
+        eq(revision,db.changes());ok(before.equals(revisionData(sql)));ok(sql.isOpen());
+    }
+
+    public void testCaptureBaselineEvidenceFailureRollsBackStorage()throws Exception{
+        long t=at(LocalDate.now(),10),revision=db.changes();String before=revisionData(db.getWritableDatabase());
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_capture_evidence_fault BEFORE INSERT ON capture_evidence BEGIN SELECT RAISE(ABORT,'qa evidence fault'); END");
+        try{db.captureSms("BM","Card xxx4636 purchase EGP15 at QA CONTRACT. Available balance EGP7240.01",t);throw new AssertionError("Evidence failure reported success");}
+        catch(android.database.sqlite.SQLiteConstraintException expected){}
+        eq(revision,db.changes());ok(before.equals(revisionData(db.getWritableDatabase())));ok(db.getWritableDatabase().isOpen());
+    }
+
+    public void testCaptureBaselineLiveRepairFailureRetainsCommittedCapture(){
+        long t=at(LocalDate.now(),10);ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
+        long revision=db.changes();
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_live_repair_fault BEFORE DELETE ON transactions BEGIN SELECT RAISE(ABORT,'qa repair fault'); END");
+        CaptureResult legacy=db.captureSms("BANK","Card purchase EGP 100 at QA SHOP",t+2000);ok(legacy.accepted);
+        // Live storage and repair are separate owners today. P2-C must address this explicitly.
+        eq(2,db.transactionCount());eq(2,scalar("SELECT COUNT(*) FROM capture_evidence"));
+        eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));ok(db.changes()>revision);
+    }
+
     public void testCaptureOutcomeNewDuplicateCancellationAndMergeFollowed(){
         long t=at(LocalDate.now(),10);
         // New: one row, no event.
@@ -471,36 +653,36 @@ final class AuditRegressionTest {
     public void testCaptureResultMatchesLegacyAccessorsForEveryOutcome(){
         long t=at(LocalDate.now(),10);
         CaptureResult fresh=db.captureNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t);
-        ok(fresh.dbChanged);ok(fresh.transaction!=null);eq(db.lastCaptured().id,fresh.transaction.id);ok(fresh.event==null);
+        ok(fresh.accepted);ok(fresh.transaction!=null);eq(db.lastCaptured().id,fresh.transaction.id);ok(fresh.event==null);
         CaptureResult duplicate=db.captureNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t);
-        ok(!duplicate.dbChanged);ok(duplicate.transaction==null);ok(duplicate.event==null);
+        ok(!duplicate.accepted);ok(duplicate.transaction==null);ok(duplicate.event==null);
         long rows=db.transactionCount();
         CaptureResult merged=db.captureSms("BANK","Card purchase EGP 100 at QA SHOP",t+2000);
-        ok(merged.dbChanged);ok(merged.transaction!=null);eq(db.lastCaptured().id,merged.transaction.id);eq(rows,db.transactionCount());ok(db.transactionById(merged.transaction.id)!=null);
+        ok(merged.accepted);ok(merged.transaction!=null);eq(db.lastCaptured().id,merged.transaction.id);eq(rows,db.transactionCount());ok(db.transactionById(merged.transaction.id)!=null);
         long cancelAt=t+3600000;
-        ok(db.captureSms("BANK",CANCEL_DEBIT,cancelAt).dbChanged);
+        ok(db.captureSms("BANK",CANCEL_DEBIT,cancelAt).accepted);
         CaptureResult cancelled=db.captureSms("BANK",CANCEL_NOTICE,cancelAt+3000);
-        ok(cancelled.dbChanged);ok(cancelled.transaction==null);ok(cancelled.event!=null&&cancelled.event.cancelled());eq(db.lastCaptureEvent().id,cancelled.event.id);
+        ok(cancelled.accepted);ok(cancelled.transaction==null);ok(cancelled.event!=null&&cancelled.event.cancelled());eq(db.lastCaptureEvent().id,cancelled.event.id);
         CaptureResult otp=db.captureSms("BANK","Your OTP is 123456 for payment EGP 227",cancelAt+4000);
-        ok(!otp.dbChanged);ok(otp.transaction==null);ok(otp.event==null);
+        ok(!otp.accepted);ok(otp.transaction==null);ok(otp.event==null);
     }
 
     public void testCaptureUseCaseKeepsEarlierSnapshotsAndSourceIdentities(){
         long t=at(LocalDate.now(),10);
         CaptureTransaction capture=new CaptureTransaction(db);
         CaptureResult fresh=capture.execute(CaptureRequest.notification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
-        ok(fresh.dbChanged);ok(fresh.transaction!=null);ok(fresh.event==null);
+        ok(fresh.accepted);ok(fresh.transaction!=null);ok(fresh.event==null);
         long id=fresh.transaction.id;
         CaptureResult merged=capture.execute(CaptureRequest.sms("BANK","Card purchase EGP 100 at QA SHOP",t+2000));
-        ok(merged.dbChanged);ok(merged.transaction!=null);eq(db.lastCaptured().id,merged.transaction.id);
+        ok(merged.accepted);ok(merged.transaction!=null);eq(db.lastCaptured().id,merged.transaction.id);
         ok(db.transactionById(id)==null);eq(1,db.transactionCount());
         long cancelAt=t+3600000;
-        ok(capture.execute(CaptureRequest.sms("BANK",CANCEL_DEBIT,cancelAt)).dbChanged);
+        ok(capture.execute(CaptureRequest.sms("BANK",CANCEL_DEBIT,cancelAt)).accepted);
         CaptureResult cancelled=capture.execute(CaptureRequest.sms("BANK",CANCEL_NOTICE,cancelAt+3000));
         ok(cancelled.event!=null&&cancelled.event.cancelled());ok(cancelled.transaction==null);
         long eventId=cancelled.event.id;
         CaptureResult ignored=capture.execute(CaptureRequest.sms("BANK","Your OTP is 123456",cancelAt+4000));
-        ok(!ignored.dbChanged);ok(ignored.transaction==null);ok(ignored.event==null);
+        ok(!ignored.accepted);ok(ignored.transaction==null);ok(ignored.event==null);
         eq(id,fresh.transaction.id);eq(10000,fresh.transaction.amountMinor);ok(fresh.event==null);
         eq(eventId,cancelled.event.id);ok(cancelled.event.cancelled());
         String body="Card purchase EGP 37 at QA SECOND SHOP";

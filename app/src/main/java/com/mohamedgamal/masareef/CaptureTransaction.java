@@ -2,7 +2,7 @@ package com.mohamedgamal.masareef;
 
 /**
  * Orders live capture, bounded repair, and the resulting snapshot. Borrows the caller's connection:
- * ExpenseDb still owns storage transactions; this extraction neither closes it nor adds a transaction.
+ * ExpenseDb still owns storage transactions; this use case neither closes it nor adds a transaction.
  * Historical import retains its separate batch/confirmation policy.
  */
 final class CaptureTransaction {
@@ -11,15 +11,28 @@ final class CaptureTransaction {
     CaptureTransaction(ExpenseDb db) { this.db = db; }
 
     CaptureResult execute(CaptureRequest request) {
-        boolean added = apply(request);
-        return new CaptureResult(added, added ? db.lastCaptured() : null, db.lastCaptureEvent());
+        boolean pending = db.getWritableDatabase().inTransaction();
+        long before = db.changes();
+        db.rememberCapture(-1, null);
+        CaptureResult.Write write = db.addAutomaticCapture(request);
+        long capturedId = write.rowId;
+        finish(request, write);
+        return new CaptureResult(write, capturedId,
+                write.rowId < 0 ? null : db.transactionById(write.rowId), pending, before, db.changes());
     }
 
-    /** Boolean compatibility path: preserve the timestamp-aware API's lack of a result-row lookup. */
+    /** Boolean compatibility path; acceptance keeps its historical meaning. */
     boolean apply(CaptureRequest request) {
-        boolean added = db.addAutomaticCapture(request);
+        return execute(request).accepted;
+    }
+
+    private void finish(CaptureRequest request, CaptureResult.Write write) {
         // A second own-transfer leg or the bank copy of an app notification may have just arrived.
-        if (added) db.repairAround(request.captureAt);
-        return added;
+        if (write.added) {
+            ExpenseDb.RepairReport repair = db.repairAround(request.captureAt);
+            write.rowId = repair.follow(write.rowId);
+            write.repairFailed = repair.failed;
+        }
+        db.rememberCapture(write.inserted ? write.rowId : -1, write.event);
     }
 }

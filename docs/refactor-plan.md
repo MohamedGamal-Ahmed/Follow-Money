@@ -264,3 +264,99 @@ flowchart TD
 
 عند التسليم الأول كانت الجولة قراءة مصادر واختبارات وتقارير فقط، دون تشغيل الاختبارات أو تعديل Android source أو schema أو بيانات المستخدم. بدأ التنفيذ بعد ذلك بتفويض محمد؛ يُرجع إلى PRs الدفعات ونتائج CI المطابقة للـhead لمعرفة التقدم الفعلي. نجاح extraction منفرد لا يغلق المرحلة 2 أو يثبت تسليم SMS وإشعارات حقيقية أو القبول الشامل.
 
+
+---
+
+## P2-A capture contract and synthetic baseline
+
+Base: `f9ae8ce6ab9bd595b442bb866c2e1b99794120bd` (PR34). This batch starts P2-A;
+it does not close Phase2, P2-C transaction ownership, REV-L4, or import/mutation result work.
+No parser, eligibility, currency, consent, schema, library or ledger policy change is intended.
+
+### Fixtures and explicit result corrections
+
+`AuditRegressionTest.testCaptureBaseline*` was added before production edits. The original
+test source and run receipts are preserved locally in `.tmp/p2a-baseline-*`.
+Amounts below are minor units. Revisions are persistent invalidation tokens, not row counts.
+`legacy` means the old `CaptureResult.dbChanged` / boolean API, which reports acceptance rather
+than all writes. Exact duplicate evidence replacement can advance revision; that churn stays open.
+
+| Fixture / test | Expected result (legacy baseline or named contract test) | Committed rows / links / evidence / revision |
+| --- | --- | --- |
+| Fresh SMS; FreshDuplicateAndIgnored | legacy true, created transaction, no event | One EGP expense, gross/effective 10000; one attached evidence; no reimbursement; revision advances |
+| Exact same SMS; FreshDuplicateAndIgnored | legacy false, no created transaction/event | Same ID, amount/currency/count; evidence replaced (still one); revision advances |
+| Null / OTP / excluded; FreshDuplicateAndIgnored | legacy false, no row/event | No new rows/links/evidence; revision unchanged (exclusion setup excluded) |
+| Balance only; SideEffectWithoutLedgerRow | legacy false, no created row/event | Zero ledger rows, one balance snapshot of EGP 100000; no capture_evidence; revision advances |
+| Unmatched cancellation; ReviewAndHistoricalConsent | legacy true, needs_review event | Zero ledger/archive/evidence rows; encrypted body in capture_events; revision advances |
+| Repeated cancellation; ReviewAndHistoricalConsent | legacy false, no new event | Existing event unchanged; revision unchanged |
+| Historical cancellation; ReviewAndHistoricalConsent | import count 0 | One needs_confirmation event and receipt; no automatic archive; no ledger row |
+| Outer caller rollback; CallerRollbackRestoresAllRowsAndRevision | old result returns before outer commit | In-flight row/balance/source/evidence visible, then complete table snapshot and revision restored; helper open |
+| Evidence SQL ABORT; EvidenceFailureRollsBackStorage | exception, no success result | All storage tables and revision unchanged; helper open |
+| Live repair SQL ABORT; LiveRepairFailureRetainsCommittedCapture | legacy true, swallowed repair error | Prior notification plus newly committed SMS = two rows/evidence; repair archive rolls back; revision advances. Final contract adds COMMITTED_REPAIR_FAILED; ownership remains a P2-C dependency |
+| Notification + bank copy; existing CaptureUseCaseKeepsEarlierSnapshotsAndSourceIdentities | legacy true, surviving created row | One EGP 10000 row, two evidence sources, archive of removed copy; earlier result remains a snapshot |
+| Merge with reimbursement/fee/origin; existing AutomaticPurchaseMergePreservesRepaymentFeesOriginAndEvidence | surviving ID | Gross 10000, effective 6000; income 4000 offsets to 0; fee/origin/reimbursement/evidence follow kept ID |
+| Matched cancellation; existing CaptureOutcomeNewDuplicateCancellationAndMergeFollowed | event cancelled, no created row | Debit archived with its evidence; event refers to archive/original ID; zero active canceled debit |
+| SMS batch repair failure; existing SmsImportRepairFailureRollsBackBatchAndIsReported | exception | Whole batch/receipts/repair rollback, unlike live's separate owners |
+| CSV false/throw and missing mutation; existing CSV and mutation regressions | failure / NOT_FOUND | Existing atomicity and no-learning assertions retained; no contract expansion for these APIs in this batch |
+| Evidence SQL IGNORE; ContractEvidenceRefusalDoesNotInventSuccessfulEvidence | accepted capture, evidence NOT_APPLIED | One EGP 10000 ledger row; no evidence row, no invented review flag; revision advances. Existing storage policy retained |
+| Future-only notice matching a legacy row; ContractReviewMarkerAndRefusalHaveMatchedIds | accepted false, committed change, needsReview true, matched ID | Original amount/currency retained; review marker updates; no new ledger/evidence; revision advances |
+| Ignored merchant; ContractReviewMarkerAndRefusalHaveMatchedIds | INSERT_NOT_APPLIED | No new row/evidence; no invented refusal cause; no revision change for this fixture |
+| Incoming own transfer; ContractIncomingOwnTransferFollowsMergeBeforeFeeIdReuse | created receipt follows outgoing ID | Gross debit 10050 becomes principal transfer 10000 plus fee expense 50; incoming archived; evidence follows outgoing; numeric ID reuse does not identify the fee as captured principal |
+| Actual SMS producer; ConsumerBroadcastsCommittedBalanceOnlyChange | one DATA_CHANGED broadcast | One balance snapshot, zero ledger rows; no transaction notification fabricated |
+| Early merge then later fee-write failure; ContractFailedRepairDiscardsRolledBackMergeAliases | COMMITTED_REPAIR_FAILED, committed capture ID retained | Four original/captured rows, two evidence rows, zero repair archives/fees; debit 10050 and receipt 10000 unchanged; aliases from the rolled-back repair are discarded |
+
+### Contract change, separate from extraction
+
+There is no extraction-only claim for this batch. Request-local storage observations replace
+the journey's reads of shared `lastCapturedId` / `lastCaptureEvent`; compatibility accessors remain
+for older boolean callers. SQL policy and transaction ordering stay in their existing owners.
+The deliberate result correction distinguishes legacy acceptance from observed committed revision
+change, including evidence-only and balance-only writes. Live producers consume the corrected
+committed-change signal, and row/event notifications require a completed standalone call.
+
+The first local-state-only patch is preserved separately in `.tmp/p2a-local-state-only.patch`.
+The contract correction is intentionally separate from that patch: old `dbChanged` assertions
+map to `accepted`, while two tests require the corrected committed-write signal to change.
+Frozen before-correction APKs retain those tests before the fix. This is local evidence, not a
+tests-first Git commit or an assertion that the final test file is byte-identical to the baseline.
+
+`capturedTransactionId` identifies the initial insertion even when subsequently archived;
+`transactionId` identifies the surviving matched row. An existing match is not labeled a proven
+no-op or exact duplicate. `transaction` is returned only for a created surviving row. Evidence
+reports `NOT_ATTEMPTED`, `SAVED_WITH_BODY`, `SAVED_WITHOUT_BODY`, `NOT_APPLIED`, or `EVENT_BODY`;
+saved body presence does not assert decryptability or diagnose a missing body's cause.
+`needsReview` reads actual row/event state; it does not invent a review marker for missing evidence.
+Revision differences are global invalidation observations, not per-capture write attribution under
+other writers. Source text, hashes and body diagnostics are not added to the result.
+
+Storage and commit failures still throw. Legacy bounded live repair catches its own failures;
+the result now exposes COMMITTED_REPAIR_FAILED, and consumers refresh the committed capture
+without issuing a success notification. An outer transaction's result
+is explicitly pending and cannot authorize success notifications. The result's revision is a
+snapshot, not a promise that a caller will commit later. Live storage and repair remain separate
+transactions, so repair failure can follow committed storage. Durable retry/recovery belongs
+to P2-C/Phase3. No source text or private data belongs in result diagnostics or these fixtures.
+
+Capture SQL string literals/order, marker predicates and storage transaction calls are compared
+against the base; the merge body, parser, CaptureEvents, RepairRules, ImportBatch and
+TransactionMutation remain unchanged. This is a focused source audit, not proof of every runtime
+policy. Timestamp-aware booleans now construct snapshots too; no performance claim is made.
+Import/mutation contract expansion, endTransaction fault injection, evidence recovery and write
+serialization remain open. REV-L4 is unchanged.
+
+Local verification: 17 JVM suites, debug/test builds and lint passed (0 errors, 66 existing warnings).
+Revised base fixtures passed 73/0 on unchanged production; local-state-only production plus the
+two result regressions passed 73 with exactly those 2 expected failures. Final native groups
+27/14/31/83/30 passed (185/0), and isolated lifetime passed 4/0. These are uncommitted working-tree
+results, not CI or independent approval. Logs, source snapshots, staged patches and hashes are
+listed in `.tmp/P2A-review-request.md`. No private replay, physical device, visual acceptance,
+process-death recovery, measured performance or new installed-upgrade acceptance is claimed.
+
+Baseline refinement is explicit: the initial balance fixture omitted the parser's account marker
+and saved no balance; it was corrected to `Account ending 1234`. The initial live-repair test
+incorrectly expected an exception and failed because the base swallows that error. Its baseline
+now pins the actual legacy acceptance and committed storage; a separate contract regression
+asserts partial repair failure and surviving identity. Original failed logs/source remain local.
+The first final base-suite run also exposed three old service assertions still using `dbChanged`
+as acceptance inside an outer transaction. Only that field name changed to `accepted`; all paid
+counts, dates, duplicate and rollback assertions remain identical. Final suites were rebuilt/rerun.

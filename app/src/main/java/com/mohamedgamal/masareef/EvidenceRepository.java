@@ -14,14 +14,16 @@ final class EvidenceRepository {
     EvidenceRepository(ExpenseDb db) { this.db = db; }
 
     /** Runs within the capture owner's transaction; adds no transaction and never closes the helper. */
-    void record(String key, long existing, String hash, String normalized, String reference,
+    CaptureResult.Evidence record(String key, long existing, String hash, String normalized, String reference,
                 String channel, String label, long receivedAt, String direction, String body) {
         ContentValues evidence = new ContentValues();
         evidence.put("unique_key", key); evidence.put("transaction_id", existing); evidence.put("message_hash", hash);
         evidence.put("normalized_hash", normalized); evidence.put("reference_hash", reference);
         evidence.put("source", channel); evidence.put("sender", label); evidence.put("received_at", receivedAt);
         evidence.put("direction", direction); evidence.put("encrypted_body", EvidenceVault.encrypt(body));
-        db.getWritableDatabase().insertWithOnConflict("capture_evidence", null, evidence, SQLiteDatabase.CONFLICT_REPLACE);
+        long saved=db.getWritableDatabase().insertWithOnConflict("capture_evidence", null, evidence, SQLiteDatabase.CONFLICT_REPLACE);
+        return saved<0?CaptureResult.Evidence.NOT_APPLIED:evidence.getAsString("encrypted_body")==null?
+                CaptureResult.Evidence.SAVED_WITHOUT_BODY:CaptureResult.Evidence.SAVED_WITH_BODY;
     }
 
     List<SourceEvidence> commitmentHistory(String key) {
