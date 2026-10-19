@@ -30,12 +30,19 @@ final class CommitmentPaymentUiTest {
     }
     private void click(String wanted){
         for(int attempt=0;attempt<40;attempt++){
-            AccessibilityNodeInfo n=node(wanted);
-            if(n!=null){n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());
+            AccessibilityNodeInfo root=runner.getUiAutomation().getRootInActiveWindow();
+            if(root!=null)for(AccessibilityNodeInfo found:root.findAccessibilityNodeInfosByText(wanted)){
+                if(!text(found.getText()).contains(wanted))continue;
+                found.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());
+                AccessibilityNodeInfo n=found;
                 for(int depth=0;n!=null&&depth<8;depth++,n=n.getParent())if(n.isClickable()&&n.performAction(AccessibilityNodeInfo.ACTION_CLICK)){idle();return;}
             }
             pause();
         }throw new AssertionError("Cannot click "+wanted);
+    }
+    private void dump(AccessibilityNodeInfo n,StringBuilder out){
+        if(n==null)return;if(n.getText()!=null)out.append(text(n.getText())).append(" | ");
+        for(int i=0;i<n.getChildCount();i++)dump(n.getChild(i),out);
     }
     private void show(long commitmentId,int tab){
         runner.runOnMainSync(()->{try{
@@ -73,7 +80,7 @@ final class CommitmentPaymentUiTest {
             target.getSharedPreferences("notification_settings",0).edit().putBoolean("access_prompted",true).commit();
             activity=(MainActivity)runner.startActivitySync(new android.content.Intent(target,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));idle();
             show(plan,11);ok(db.recurringById(plan).paidCount==0,"Partial payment finalized a cycle");screen("01-partial");
-            click("علّمه مدفوع");click("اربط عملية مسجلة");click("اختار العملية");click("QA UI provider");
+            click("علّمه مدفوع");click("اربط عملية مسجلة");click("اختار العملية");screen("02-candidates");click("QA UI provider");
             ok(node("راجع ربط الدفعة")!=null,"Allocation preview missing");ok(db.transactionCount()==2,"Preview created an expense");screen("02-preview");
             click("اعتماد الربط");waitPaid(plan,1);ok(db.transactionCount()==2,"Link duplicated spending");screen("03-paid");
             click("عرض التسويات وفك الربط");click("ربط راجعته");click("فك الربط");waitPaid(plan,0);ok(db.transactionCount()==2,"Undo deleted the payment");screen("04-undo");
@@ -82,7 +89,10 @@ final class CommitmentPaymentUiTest {
             click("مش متعلق بالتزاماتي");for(int i=0;i<100&&!db.pendingCommitmentConfirmations().isEmpty();i++)pause();
             ok(db.pendingCommitmentConfirmations().isEmpty(),"Review dismissal did not persist");ok(db.transactionCount()==2,"Provider review invented an expense");
             result.putString("stream","Commitment UI checks passed: "+checks+"; link/partial/preview/undo/provider review; screenshots in cache/commitment-ui\n");
-        }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Commitment UI FAILED: "+trace);}
+        }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));
+            StringBuilder visible=new StringBuilder();dump(runner.getUiAutomation().getRootInActiveWindow(),visible);
+            try{if(screenshots!=null)screen("failure");}catch(Exception ignored){}
+            result.putString("stream","Commitment UI FAILED: "+trace+"\nVisible: "+visible);}
         finally{
             if(activity!=null)runner.runOnMainSync(activity::finish);
             if(owned&&db!=null)db.clearAllData(); // The empty QA target was verified before creating any rows.
