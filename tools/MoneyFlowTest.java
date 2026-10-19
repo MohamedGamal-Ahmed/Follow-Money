@@ -105,6 +105,71 @@ public final class MoneyFlowTest {
         daily.add("EGP", "transfer", "تحويلات", 2000000);
         MoneyTotals.Totals t = daily.currencies.get("EGP");
         check(t.living == 25000 && t.expense == 5185000 && t.transfers == 2000000, "daily budget and day headers ignore cash withdrawals");
+        // A filtered list's day header shows that filter's own total (the B3 sample: cash 200 + 50, own move 300).
+        MoneyTotals filtered = new MoneyTotals();
+        filtered.add("EGP", "expense", "سحب نقدي", 20000);
+        filtered.add("EGP", "expense", "سحب نقدي", 5000);
+        filtered.add("EGP", "transfer", "تحويلات", 30000);
+        filtered.add("EGP", "expense", "تحويلات", 55000);
+        filtered.add("EGP", "expense", "فواتير", 50000);
+        filtered.add("EGP", "expense", "بقالة", 7000);
+        filtered.add("EGP", "income", "دخل", 109000);
+        MoneyTotals.Totals f = filtered.currencies.get("EGP");
+        check(f.of("CASH_WITHDRAWAL") == 25000 && f.cash == 25000 && f.expense == 112000, "cash list header = 250, still outside «خرج»");
+        check(f.of("INTERNAL") == 30000, "own-account list header = 300");
+        check(f.of("OPEN_TRANSFER") == 55000 && f.of("COMMITMENT") == 50000 && f.of("LIVING") == 7000 && f.of("INFLOW") == 109000, "one header figure per bucket");
+        check(f.of(MoneyFlow.SPENDING_FILTER) == 57000 && f.of("") == f.expense, "spending list header = living + commitments; plain list keeps «خرج»");
+        // Home «مصروفاتك آخر 7 أيام»: grocery 100 (30 refunded -> 70 effective) + fee 20 + paid bill 500 = 590.
+        LocalDate weekToday = LocalDate.of(2026, 10, 19);
+        List<MoneyFlow.Item> wk = new ArrayList<>();
+        wk.add(new MoneyFlow.Item(1, at("2026-10-19"), 7000, "EGP", "expense", "بقالة", "هايبر"));
+        wk.add(new MoneyFlow.Item(2, at("2026-10-18"), 50000, "EGP", "expense", "فواتير", "كهرباء"));
+        wk.add(new MoneyFlow.Item(3, at("2026-10-18"), 2000, "EGP", "expense", "رسوم بنكية", "بنك"));
+        wk.add(new MoneyFlow.Item(4, at("2026-10-17"), 40000, "EGP", "expense", "تحويلات", "صديق"));
+        wk.add(new MoneyFlow.Item(5, at("2026-10-17"), 20000, "EGP", "expense", "سحب نقدي", "ATM"));
+        wk.add(new MoneyFlow.Item(6, at("2026-10-16"), 30000, "EGP", "transfer", "تحويلات", "بين حساباتي"));
+        wk.add(new MoneyFlow.Item(7, at("2026-10-15"), 100000, "EGP", "income", "دخل", "مرتب"));
+        wk.add(new MoneyFlow.Item(8, at("2026-10-12"), 99900, "EGP", "expense", "فواتير", "خارج الفترة"));
+        wk.add(new MoneyFlow.Item(9, at("2026-10-19"), 5000, "USD", "expense", "بقالة", "عملة تانية"));
+        MoneyFlow.Week week = MoneyFlow.week(wk, weekToday, ZONE, "EGP");
+        check(week.spending() == 59000, "week spending = daily + commitments after refund = 590");
+        check(week.living == 9000 && week.commitment == 50000, "split: daily 90, commitments 500");
+        check(week.openTransfer == 40000, "open transfer 400 stays out of the number");
+        check(week.spending() + week.openTransfer == 99000 && week.spending() != 59000 + 20000 + 30000, "cash and own moves never join spending");
+        check(week.spendingCount == 3 && week.income == 100000, "count and income");
+        // The bars use the number's own definition: grocery 70 on the 19th, bill 500 + fee 20 on the 18th; nothing on the 13th.
+        check(week.daily[6] == 7000 && week.daily[5] == 52000 && week.daily[0] == 0, "bars = spending per day, bill included, cash/transfers excluded");
+        long barsTotal = 0; for (long day : week.daily) barsTotal += day;
+        check(barsTotal == week.spending(), "the seven bars add up to the number");
+        check(week.living == 9000, "day-to-day part (the daily budget's definition) still available on its own");
+        // Movements shown beside the number, never added to it.
+        check(week.cash == 20000 && week.internal == 30000 && week.openTransfer == 40000, "cash, own-account and open-transfer movements carried separately");
+        check(week.movement(MoneyFlow.Bucket.CASH_WITHDRAWAL) == 20000 && week.movement(MoneyFlow.Bucket.INTERNAL) == 30000
+                && week.movement(MoneyFlow.Bucket.OPEN_TRANSFER) == 40000 && week.movement(MoneyFlow.Bucket.LIVING) == 0, "movement() reads the three movement buckets only");
+        check(MoneyFlow.MOVEMENT_BUCKETS.length == 3 && !MoneyFlow.isSpending(MoneyFlow.MOVEMENT_BUCKETS[0])
+                && !MoneyFlow.isSpending(MoneyFlow.MOVEMENT_BUCKETS[1]) && !MoneyFlow.isSpending(MoneyFlow.MOVEMENT_BUCKETS[2]), "no movement bucket is spending");
+        // The category split uses the same definition and period, so it adds up to the number too.
+        long categoriesTotal = 0; boolean billListed = false;
+        for (Map.Entry<String, Long> entry : week.categories) { categoriesTotal += entry.getValue(); if ("فواتير".equals(entry.getKey()) && entry.getValue() == 50000) billListed = true; }
+        check(categoriesTotal == week.spending() && billListed, "home categories add up to the number and include commitments");
+        check(week.categories.get(0).getKey().equals("فواتير") && week.categories.size() == 3, "categories sorted largest first: bills, grocery, fee");
+        check(!MoneyFlow.listsCaptureHistory(MoneyFlow.SPENDING_FILTER) && MoneyFlow.listsCaptureHistory("") && MoneyFlow.listsCaptureHistory("LIVING"),
+                "the list behind the number shows transactions only; other lists keep cancelled attempts");
+        // The list filter behind the number returns exactly the rows that add up to it.
+        long listed = 0;
+        for (MoneyFlow.Item item : wk) {
+            if (!"EGP".equals(item.currency) || item.when < at("2026-10-13") || item.when >= at("2026-10-20")) continue;
+            if (MoneyFlow.matchesFilter(MoneyFlow.SPENDING_FILTER, item.bucket)) listed += item.amountMinor;
+        }
+        check(listed == week.spending(), "tapping the number lists rows summing to it");
+        check(!MoneyFlow.matchesFilter(MoneyFlow.SPENDING_FILTER, MoneyFlow.Bucket.OPEN_TRANSFER)
+                && !MoneyFlow.matchesFilter(MoneyFlow.SPENDING_FILTER, MoneyFlow.Bucket.CASH_WITHDRAWAL)
+                && !MoneyFlow.matchesFilter(MoneyFlow.SPENDING_FILTER, MoneyFlow.Bucket.INTERNAL)
+                && !MoneyFlow.matchesFilter(MoneyFlow.SPENDING_FILTER, MoneyFlow.Bucket.INFLOW), "filter excludes transfers, cash, internal and income");
+        check(MoneyFlow.matchesFilter("", MoneyFlow.Bucket.INTERNAL) && MoneyFlow.matchesFilter("COMMITMENT", MoneyFlow.Bucket.COMMITMENT)
+                && !MoneyFlow.matchesFilter("COMMITMENT", MoneyFlow.Bucket.LIVING), "existing single-bucket filters unchanged");
+        check("مصروفات".equals(MoneyFlow.filterLabel(MoneyFlow.SPENDING_FILTER)) && "سحب نقدي".equals(MoneyFlow.filterLabel("CASH_WITHDRAWAL")), "filter labels");
+        check(MoneyFlow.week(new ArrayList<>(), weekToday, ZONE, "EGP").spending() == 0, "empty week is zero");
         System.out.println("Money flow checks passed: " + checked);
     }
 }

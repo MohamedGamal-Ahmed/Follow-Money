@@ -92,6 +92,11 @@ public final class MainActivity extends Activity {
     private String transactionCurrencyFilter = "";
     private long selectedCommitmentId = -1;
     private MoneyFlow.Range insightsRange = MoneyFlow.Range.MONTH;
+    /** MVP home shows one number («مصروفاتك آخر 7 أيام»); the daily budget/points card returns later from here. */
+    private static final boolean HOME_SHOWS_DAILY_BUDGET = false;
+    /** Largest categories shown on the home card before the «باقي التصنيفات» row. */
+    private static final int HOME_CATEGORY_ROWS = 5;
+    private boolean homeCategoriesExpanded;
     private String transactionBucketFilter = "";
     private long flowSourceId = -1;
     private java.time.YearMonth monthlyMonth=java.time.YearMonth.now().minusMonths(1);
@@ -2297,27 +2302,19 @@ public final class MainActivity extends Activity {
         page.addView(top);
 
         monthlyReadyCard();
-        dailyHomeCard();
-        // Same definitions as التحليلات: «صرف» is day-to-day spending; commitments and transfers are separate lines.
+        // MVP home: one number, one period, one definition. The daily budget and points keep their data, dialogs,
+        // widgets and settings entry («الميزانية اليومية والراتب», «ميزانياتك»); only their home card is off.
+        if (HOME_SHOWS_DAILY_BUDGET) dailyHomeCard();
+        // Same MoneyFlow buckets as التحليلات. «مصروفاتك» = day-to-day spending + paid commitments (after linked
+        // refunds), over the rolling week; the bars and the category card below use exactly that definition and
+        // period, so their totals equal the number. Open transfers, cash withdrawals and own-account moves are listed
+        // separately under «حركات غير داخلة في المصروفات» and are never added to it.
         LocalDate start = LocalDate.now().minusDays(6);
-        long[] daily = new long[7];
-        long weekIncome = 0, weekOther = 0;
-        int weekCount = 0;
-        Map<Long, Long> offsets = db.reimbursementOffsets();
-        for (ExpenseDb.Transaction item : db.transactionsBetween(start, LocalDate.now().plusDays(1))) {
-            if (!"EGP".equals(item.currency)) continue;
-            long amount = ExpenseDb.effectiveAmount(item, offsets);
-            if (amount == 0) continue;
-            MoneyFlow.Bucket bucket = MoneyFlow.bucket(item.kind, item.category);
-            if (bucket == MoneyFlow.Bucket.INFLOW) weekIncome += amount;
-            else if (bucket == MoneyFlow.Bucket.LIVING) {
-                weekCount++;
-                int day = (int) ChronoUnit.DAYS.between(start,
-                        Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate());
-                if (day >= 0 && day < daily.length) daily[day] += amount;
-            } else if (MoneyFlow.isOutflow(bucket)) weekOther += amount;
-        }
-        long weekSpent = 0; for (long value : daily) weekSpent += value;
+        MoneyFlow.Week week = MoneyFlow.week(flowItems(MoneyFlow.rollingWeek(LocalDate.now())), LocalDate.now(), ZoneId.systemDefault(), "EGP");
+        long[] daily = week.daily;
+        long weekIncome = week.income;
+        int weekCount = week.spendingCount;
+        long weekSpent = week.spending();
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setPadding(dp(20), dp(18), dp(20), dp(18));
@@ -2325,7 +2322,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
         hp.topMargin = dp(16); page.addView(hero, hp);
         LinearLayout heading = new LinearLayout(this); heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.addView(label("صرفت آخر 7 أيام", 13, 0xffb9d3c8, false), new LinearLayout.LayoutParams(0, -2, 1));
+        heading.addView(label("مصروفاتك آخر 7 أيام", 13, 0xffb9d3c8, false), new LinearLayout.LayoutParams(0, -2, 1));
         DateTimeFormatter dayMonth = DateTimeFormatter.ofPattern("d MMMM", new Locale("ar"));
         heading.addView(label(start.getDayOfMonth() + " – " + LocalDate.now().format(dayMonth), 12, 0xffb9d3c8, false));
         hero.addView(heading);
@@ -2333,7 +2330,7 @@ public final class MainActivity extends Activity {
         LinearLayout numbers = new LinearLayout(this); numbers.setOrientation(LinearLayout.VERTICAL);
         numbers.addView(label(money(weekSpent, "EGP"), 30, Color.WHITE, true));
         LinearLayout pills = new LinearLayout(this);
-        pills.addView(pill(weekCount + " عملية صرف", BRAND_SOFT, 0xffe6efea));
+        pills.addView(pill(weekCount + " عملية", BRAND_SOFT, 0xffe6efea));
         LinearLayout.LayoutParams secondPill = new LinearLayout.LayoutParams(-2, -2); secondPill.setMarginStart(dp(6));
         pills.addView(pill("دخلت +" + money(weekIncome, "EGP"), BRAND_SOFT, LIME), secondPill);
         LinearLayout.LayoutParams pillsParams = new LinearLayout.LayoutParams(-2, -2); pillsParams.topMargin = dp(6);
@@ -2343,14 +2340,21 @@ public final class MainActivity extends Activity {
         String[] letters = new String[7];
         for (int i = 0; i < 7; i++) letters[i] = dayLetter(start.plusDays(i).getDayOfWeek());
         bars.setData(daily, letters, 0xff2e6b57, LIME, 0xff8fb3a5, REGULAR);
-        body.addView(bars, new LinearLayout.LayoutParams(dp(112), dp(76)));
+        LinearLayout barsBox = new LinearLayout(this); barsBox.setOrientation(LinearLayout.VERTICAL);
+        barsBox.addView(bars, new LinearLayout.LayoutParams(dp(112), dp(76)));
+        barsBox.addView(label("الأعمدة: مصروفات كل يوم", 10, 0xffb9d3c8, false));
+        body.addView(barsBox, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, -2); bodyParams.topMargin = dp(10);
         hero.addView(body, bodyParams);
-        if (weekOther > 0)
-            hero.addView(label("وكمان أقساط وتحويلات لناس " + money(weekOther, "EGP") + " · التفاصيل في التحليلات", 11, 0xffb9d3c8, false));
-        hero.setOnClickListener(v -> { insightsRange = MoneyFlow.Range.MONTH; insightsSection="overview"; selectedMonth = LocalDate.now().withDayOfMonth(1); selectedTab = 4; render(); });
+        if (weekSpent > 0) {
+            TextView split = label("صرف يومي " + money(week.living, "EGP") + " + فواتير وأقساط واشتراكات " + money(week.commitment, "EGP"), 11, 0xffb9d3c8, false);
+            split.setTextDirection(View.TEXT_DIRECTION_RTL);
+            hero.addView(split);
+        }
+        hero.setOnClickListener(v -> openRollingWeek(MoneyFlow.SPENDING_FILTER, false));
 
-        homeCategorySummary();
+        homeMovementsCard(week);
+        homeCategorySummary(week);
         nextCommitmentCard();
         section("كروتك وحساباتك", "عرض الكل", () -> { selectedTab = 1; render(); });
         homeSourceCards();
@@ -2368,16 +2372,50 @@ public final class MainActivity extends Activity {
         // The home screen ends here: month overview and reviews live in التحليلات and العمليات.
     }
 
-    private void homeCategorySummary() {
+    /**
+     * Money that moved in the same rolling week but is not in «مصروفاتك»: transfers to people whose purpose is not
+     * set, cash withdrawals and moves between own accounts. Shown for explanation only, one line per bucket, each
+     * opening exactly its rows (same week, EGP); the three are never summed into one figure.
+     */
+    private void homeMovementsCard(MoneyFlow.Week week) {
+        boolean any=false;
+        for(MoneyFlow.Bucket bucket:MoneyFlow.MOVEMENT_BUCKETS) if(week.movement(bucket)>0) any=true;
+        if(!any) return;
+        section("حركات غير داخلة في المصروفات",null,null);
+        LinearLayout box=card();box.addView(label("نفس آخر 7 أيام · EGP · كل سطر يفتح عملياته",12,MUTED,false));
+        for(MoneyFlow.Bucket bucket:MoneyFlow.MOVEMENT_BUCKETS) {
+            long amount=week.movement(bucket);
+            if(amount<=0) continue;
+            LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(0,dp(10),0,dp(6));
+            int icon=bucket==MoneyFlow.Bucket.CASH_WITHDRAWAL?R.drawable.ic_cat_atm:R.drawable.ic_cat_transfer;
+            row.addView(tintedIcon(icon,bucketColor(bucket)),new LinearLayout.LayoutParams(dp(22),dp(22)));
+            LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);
+            copy.addView(label(MoneyFlow.label(bucket),14,INK,true));
+            String why=bucket==MoneyFlow.Bucket.OPEN_TRANSFER?"حدد غرضها عشان تتحسب صح":bucket==MoneyFlow.Bucket.CASH_WITHDRAWAL?"فلوسك اتنقلت لكاش؛ الصرف منها بيتسجل لما يحصل":"نقل بين حساباتك؛ مش صرف ولا دخل";
+            copy.addView(label(why,11,MUTED,false));
+            LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.setMarginStart(dp(10));row.addView(copy,cp);
+            TextView amountView=label(money(amount,"EGP"),13,INK,true);amountView.setTextDirection(View.TEXT_DIRECTION_LTR);row.addView(amountView);
+            row.addView(tintedIcon(R.drawable.ic_chevron_forward,MUTED),new LinearLayout.LayoutParams(dp(18),dp(18)));
+            final MoneyFlow.Bucket target=bucket;
+            row.setOnClickListener(v->openRollingWeek(target.name(),target==MoneyFlow.Bucket.OPEN_TRANSFER));
+            box.addView(row);
+        }
+    }
+
+    /** The home number split by category: same rolling week, same «مصروفات» definition, so the rows add up to it. */
+    private void homeCategorySummary(MoneyFlow.Week week) {
+        long total=week.spending();
+        if(total<=0) return;
         LocalDate month=LocalDate.now().withDayOfMonth(1);
-        LocalDate[] period={month,month.plusMonths(1)};
-        MoneyFlow.Summary summary=MoneyFlow.summarize(flowItems(period),period,ZoneId.systemDefault()).get("EGP");
-        if(summary==null || summary.of(MoneyFlow.Bucket.LIVING)<=0) return;
-        section("أين تنفق أموالك؟","التحليل الكامل",()->openInsights("categories",month));
-        LinearLayout box=card();box.addView(label("الصرف اليومي · الشهر الحالي · EGP",12,MUTED,false));
-        long total=summary.of(MoneyFlow.Bucket.LIVING);int shown=0;
-        for(Map.Entry<String,Long> entry:summary.livingCategories()) {
-            if(shown++==5) break;
+        section("أين تنفق أموالك؟","التحليل الشهري",()->openInsights("categories",month));
+        LinearLayout box=card();box.addView(label("مصروفاتك آخر 7 أيام حسب التصنيف · EGP",12,MUTED,false));
+        // The card shows the largest five; the rest is one row carrying their sum, so the amounts on screen add up to
+        // the number. Tapping that row expands the remaining categories in place (no list, no second definition).
+        int limit=homeCategoriesExpanded?Integer.MAX_VALUE:HOME_CATEGORY_ROWS;
+        int shown=0;long rest=0;int restCount=0;
+        for(Map.Entry<String,Long> entry:week.categories) {
+            if(shown>=limit) { rest+=entry.getValue(); restCount++; continue; }
+            shown++;
             String name=entry.getKey();int[] style=categoryStyle(name);
             LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(0,dp(10),0,dp(4));
             ImageView icon=tintedIcon(style[2],style[1]);row.addView(icon,new LinearLayout.LayoutParams(dp(22),dp(22)));
@@ -2392,10 +2430,26 @@ public final class MainActivity extends Activity {
             row.addView(figures);box.addView(row);
             View track=new View(this);box.addView(track,new LinearLayout.LayoutParams(-1,dp(5)));
             fillBar(track,entry.getValue(),total,categoryColor(name),BORDER);
-            Runnable open=()->{insightsRange=MoneyFlow.Range.MONTH;selectedMonth=month;insightsSection="categories";openBucket(MoneyFlow.Bucket.LIVING,name,MoneyFlow.UNCATEGORIZED.equals(name));};
+            Runnable open=()->openRollingWeekCategory(name,MoneyFlow.UNCATEGORIZED.equals(name));
             row.setOnClickListener(v->open.run());track.setOnClickListener(v->open.run());
         }
-        box.addView(label("الأقساط والفواتير والتحويلات ليها تفاصيل منفصلة في التحليلات",11,MUTED,false));
+        if(restCount>0) {
+            LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(0,dp(10),0,dp(4));
+            row.addView(tintedIcon(R.drawable.ic_cat_other,MUTED),new LinearLayout.LayoutParams(dp(22),dp(22)));
+            TextView title=label("باقي التصنيفات · "+restCount+"  ⌄",14,INK,true);LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,-2,1);tp.setMarginStart(dp(10));row.addView(title,tp);
+            LinearLayout figures=new LinearLayout(this);figures.setGravity(Gravity.CENTER_VERTICAL);figures.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+            TextView amount=label(money(rest,"EGP"),12,MUTED,false);amount.setTextDirection(View.TEXT_DIRECTION_LTR);figures.addView(amount);
+            TextView share=pill(Math.round(100.0*rest/total)+"%",BORDER,MUTED);share.setTextDirection(View.TEXT_DIRECTION_LTR);
+            LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,-2);sp.setMarginStart(dp(8));figures.addView(share,sp);
+            row.addView(figures);box.addView(row);
+            View track=new View(this);box.addView(track,new LinearLayout.LayoutParams(-1,dp(5)));fillBar(track,rest,total,MUTED,BORDER);
+            Runnable expand=()->{homeCategoriesExpanded=true;render();};
+            row.setOnClickListener(v->expand.run());track.setOnClickListener(v->expand.run());
+        } else if(homeCategoriesExpanded&&week.categories.size()>HOME_CATEGORY_ROWS) {
+            TextView less=label("عرض أكبر "+HOME_CATEGORY_ROWS+" بس  ⌃",12,ACCENT,true);less.setPadding(0,dp(8),0,0);
+            less.setOnClickListener(v->{homeCategoriesExpanded=false;render();});box.addView(less);
+        }
+        box.addView(label("التحويلات والسحب النقدي مش داخلين هنا · التفاصيل الشهرية في التحليلات",11,MUTED,false));
     }
 
     private void openInsights(String section,LocalDate month) {
@@ -2566,8 +2620,7 @@ public final class MainActivity extends Activity {
         });
         String[][] kinds = {{"الكل", ""}, {"مصروف", "expense"}, {"دخل", "income"}, {"تحويل", "transfer"}};
         if (!transactionBucketFilter.isEmpty()) {
-            MoneyFlow.Bucket bucket = MoneyFlow.Bucket.valueOf(transactionBucketFilter);
-            addChip(chips, MoneyFlow.label(bucket) + "  ✕", true, () -> { transactionBucketFilter = ""; render(); });
+            addChip(chips, MoneyFlow.filterLabel(transactionBucketFilter) + "  ✕", true, () -> { transactionBucketFilter = ""; render(); });
         }
         for (String[] kind : kinds)
             addChip(chips, kind[0], transactionBucketFilter.isEmpty() && transactionKindFilter.equals(kind[1]), () -> {
@@ -2641,6 +2694,8 @@ public final class MainActivity extends Activity {
                 ExpenseDb.Transaction tx=entry.transaction;
                 if(tx==null){if(!matchesCaptureFilters(entry.event,text))continue;}
                 else if(!matchesTransactionFilters(tx,text))continue;
+                // Rows fully refunded contribute nothing to the home «مصروفاتك» number, so they stay out of its list too.
+                if(tx!=null&&MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)&&ExpenseDb.effectiveAmount(tx,dayOffsets)==0)continue;
                 LocalDate day = Instant.ofEpochMilli(entry.when()).atZone(ZoneId.systemDefault()).toLocalDate();
                 if (!day.equals(currentDay)) {
                     if (dayTotal != null) setDayTotal(dayTotal, net);
@@ -2690,7 +2745,11 @@ public final class MainActivity extends Activity {
         StringBuilder text=new StringBuilder();
         for(Map.Entry<String,MoneyTotals.Totals> e:totals.currencies.entrySet()) {
             if(text.length()>0)text.append("\n");
-            text.append("دخل ").append(money(e.getValue().income,e.getKey())).append(" · خرج ").append(money(e.getValue().expense,e.getKey()));
+            // A filtered list (the rows behind one home number or movement line) is headed by that bucket's own
+            // total, e.g. «سحب نقدي 250» or «بين حساباتك 300»; the plain list keeps «دخل · خرج».
+            if(!transactionBucketFilter.isEmpty())
+                text.append(MoneyFlow.filterLabel(transactionBucketFilter)).append(" ").append(money(e.getValue().of(transactionBucketFilter),e.getKey()));
+            else text.append("دخل ").append(money(e.getValue().income,e.getKey())).append(" · خرج ").append(money(e.getValue().expense,e.getKey()));
         }
         view.setText(text.toString());view.setMaxWidth(dp(235));view.setSingleLine(false);
         view.setContentDescription(text+" · التحويلات الداخلية لا تدخل الدخل أو المصروف");
@@ -2781,10 +2840,16 @@ public final class MainActivity extends Activity {
         copy.addView(meta);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(12));
         line.addView(copy, copyParams);
-        TextView amount = label(signedMoney(item), 14, kindColor(item.kind), true);
+        // In the home «مصروفات» list a refunded purchase shows what it contributes (net), so the rows add up to the header.
+        long repaid = MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter) && "expense".equals(item.kind) ? db.reimbursedOf(item.id) : 0;
+        TextView amount = label(repaid > 0 ? "−" + money(Math.max(0, item.amountMinor - repaid), item.currency) : signedMoney(item), 14, kindColor(item.kind), true);
         amount.setTextDirection(View.TEXT_DIRECTION_LTR);
         line.addView(amount);
         row.addView(line);
+        if (repaid > 0) {
+            TextView net = label("الشراء " + money(item.amountMinor, item.currency) + " − استرداد " + money(repaid, item.currency) + " = نصيبك", 12, INCOME, true);
+            net.setPadding(dp(8), dp(6), dp(54), 0); row.addView(net);
+        }
         String share=reimbursementShare(item);
         if(share!=null) {
             TextView personal=label(share,12,INCOME,true);
@@ -2962,7 +3027,7 @@ public final class MainActivity extends Activity {
         return (transactionKindFilter.isEmpty()||transactionKindFilter.equals(tx.kind))
                 &&(transactionCategoryFilter.isEmpty()||transactionCategoryFilter.equals(tx.category))
                 &&(!transactionExcludeTransfers||!isSentTransfer(tx))
-                &&(transactionBucketFilter.isEmpty()||MoneyFlow.bucket(tx.kind,tx.category).name().equals(transactionBucketFilter))
+                &&MoneyFlow.matchesFilter(transactionBucketFilter,MoneyFlow.bucket(tx.kind,tx.category))
                 &&(transactionCurrencyFilter.isEmpty()||transactionCurrencyFilter.equals(tx.currency))
                 &&(transactionSourceFilter==null||transactionSourceFilter.equals(tx.paymentSourceId)||transactionSourceFilter.equals(tx.destinationSourceId))
                 &&(text.isEmpty()||(tx.merchant+" "+tx.category+" "+money(tx.amountMinor,tx.currency)).toLowerCase(Locale.ROOT).contains(text));
@@ -2970,6 +3035,8 @@ public final class MainActivity extends Activity {
     private boolean matchesCaptureFilters(CaptureEvents.Event event,String text){
         // Canceled attempts are audit history, not active expenses awaiting classification.
         if ("غير مصنف".equals(transactionCategoryFilter)) return false;
+        // The list behind the home number holds only the rows that add up to it; no cancelled attempts beside them.
+        if (!MoneyFlow.listsCaptureHistory(transactionBucketFilter)) return false;
         if(event.original!=null){
             String query=text.replace("ملغاة", "").trim();return matchesTransactionFilters(event.original,query);
         }
@@ -6024,6 +6091,31 @@ public final class MainActivity extends Activity {
         transactionSearch = ""; searchOpen = false;
         bulkMode = review; bulkSelected.clear();
         transactionsBackTab = 4;
+        selectedTab = 6;
+        render();
+    }
+
+    /** Opens exactly the rows behind a home «آخر 7 أيام» number: same rolling week, EGP, and bucket filter. */
+    private void openRollingWeek(String bucketFilter, boolean review) {
+        resetTransactionFilters();
+        transactionBucketFilter = bucketFilter;
+        transactionPeriod = MoneyFlow.rollingWeek(LocalDate.now());
+        transactionCurrencyFilter = "EGP";
+        bulkMode = review;
+        transactionsBackTab = 0;
+        selectedTab = 6;
+        render();
+    }
+
+    /** One category of the home number: the «مصروفات» rows of that category in the same rolling week and currency. */
+    private void openRollingWeekCategory(String category, boolean review) {
+        resetTransactionFilters();
+        transactionBucketFilter = MoneyFlow.SPENDING_FILTER;
+        transactionCategoryFilter = category;
+        transactionPeriod = MoneyFlow.rollingWeek(LocalDate.now());
+        transactionCurrencyFilter = "EGP";
+        bulkMode = review;
+        transactionsBackTab = 0;
         selectedTab = 6;
         render();
     }

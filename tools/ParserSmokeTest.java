@@ -12,6 +12,15 @@ public final class ParserSmokeTest {
         checked++;
     }
 
+    private static void expectMerchant(String message, String merchant, long amount, String last4) {
+        ExpenseParser.Parsed parsed = ExpenseParser.parse("BanqueMisr", message);
+        if (parsed == null || !merchant.equals(parsed.merchant) || parsed.amountMinor != amount ||
+                (last4 == null ? parsed.cardLast4 != null : !last4.equals(parsed.cardLast4)))
+            throw new AssertionError("Merchant/amount/card mismatch for: " + message + " -> " +
+                    (parsed == null ? "null" : parsed.merchant + "/" + parsed.amountMinor + "/" + parsed.cardLast4));
+        checked++;
+    }
+
     private static void skip(String message) {
         if (ExpenseParser.parse("BANK", message) != null)
             throw new AssertionError("Unexpected transaction: " + message);
@@ -344,6 +353,15 @@ public final class ParserSmokeTest {
                 throw new AssertionError("Purchase hidden by generic withdrawal verb: "+body);
             checked++;
         }
+        // A digit inside a merchant name stays; the amount, card tail, reference, date and time after it do not.
+        expectMerchant("Card purchase at QA_B3_SHOP EGP 200.00 on 19/10/2026 at 22:02. Card ****1111.", "QA_B3_SHOP", 20000, "1111");
+        expectMerchant("Card purchase at 7-ELEVEN EGP 45.50 on 19/10/2026 at 09:15. Card ****2222.", "7-ELEVEN", 4550, "2222");
+        expectMerchant("Card purchase at QA MART 6 OCT EGP 310.00 on 19/10/2026 at 18:00. Card ****3333.", "QA MART 6 OCT", 31000, "3333");
+        // A known brand still gets its catalog name even with a branch number after it.
+        expectMerchant("Card purchase at SPINNEYS 6 OCT EGP 310.00 on 19/10/2026 at 18:00. Card ****3333.", "Spinneys", 31000, "3333");
+        expectMerchant("Purchase of 75 EGP at UBER 19/10/2026 21:44 Card ****5555", "Uber", 7500, "5555");
+        expectMerchant("Card purchase at QA_B3_SHOP 200 EGP ref 987654321 Card ****1111", "QA_B3_SHOP", 20000, "1111");
+        expectMerchant("Card purchase at GO BUS 2 *9999 EGP 120.00 on 19/10/2026", "GO BUS 2", 12000, null);
         System.out.println("Parser smoke tests passed: " + checked);
     }
 }

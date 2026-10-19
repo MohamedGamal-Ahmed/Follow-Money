@@ -7,7 +7,7 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 | | |
 | --- | --- |
 | Status | Private project; feature freeze from 14 October 2026 — fixes, testing and Play preparation only |
-| App version | 0.2.0 — development build |
+| App version | 0.2.1 — development build |
 | Platform | Android 8.0+ / API 26+ |
 | Implementation | Java 17, native Android views, SQLite |
 | Services | No backend, account registration or analytics service |
@@ -35,15 +35,19 @@ Actual emulator capture of the Settings screen; no financial data is shown.
 
 | Number | Meaning |
 | --- | --- |
+| Home spending, last 7 days | Everyday spending plus paid commitments, after linked refunds; bars and categories use the same period and definition |
 | Everyday spending | Expenses after the applicable refund/reimbursement adjustments; identified commitments are shown separately |
 | Commitments | Recorded payments identified as installments, bills or subscriptions; a future schedule alone does not create an expense |
 | Transfers to others | Outgoing transfers that are not identified as transfers between your own accounts or as commitments |
 | Internal transfers | Movement between your confirmed accounts; not income or consumption |
+| Cash withdrawals | Money moved from an account to cash; shown separately from spending |
 | Income | Recorded incoming money after applicable refund adjustments; not necessarily salary |
 | Daily remaining | Your configured daily limit minus eligible spending today; income does not increase the limit |
 | Account balance | Latest explicit bank balance, or an estimate from that anchor and later transactions, labeled accordingly |
 
 These are records captured by the app, not a complete bank statement. Different currencies are never silently added together. [Architecture and calculation boundaries](docs/ARCHITECTURE.md)
+
+The simplified home screen hides the daily-budget and points cards while retaining their settings and data. Other movements have separate links to their transactions. Categories show the largest five plus the remaining amount; expand that row to see every category. Filtered day headers show the total of their own rows.
 
 ## Run locally
 
@@ -65,7 +69,7 @@ The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`. Uploa
 
 ### Separate APK for private testers
 
-The `beta` build uses `com.mohamedgamal.masareef.beta`, the launcher/widget label **Follow Money Beta**, and version name `0.2.0-beta`. It inherits release shrinking and disables debugging. Its signature permission is scoped to its application ID, so it can coexist with the original app even with a different signer. Beta data is separate and does not automatically migrate to the production app.
+The `beta` build uses `com.mohamedgamal.masareef.beta`, the launcher/widget label **Follow Money Beta**, and version name `0.2.1-beta`. It inherits release shrinking and disables debugging. Its signature permission is scoped to its application ID, so it can coexist with the original app even with a different signer. Beta data is separate and does not automatically migrate to the production app.
 
 On the original Windows account, create a dedicated Beta key once, then retain that same key for updates:
 

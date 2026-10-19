@@ -43,6 +43,32 @@ public final class CommitmentHintSmokeTest {
         skip("بنفكرك انك تقدر تكشف اونلاين، من خلال تطبيق الخدمة");
         skip("تم سداد جميع الأقساط لعملية الشراء رقم 123456/789012");
         if(ExpenseParser.parse("AnyBank","يرجى سداد مبلغ 4900 جنيه قبل 26/10/2026")!=null) throw new AssertionError("Reminder became an expense");
+
+        // Three separate things, tested apart. The B3 sample's Netflix message (19 Oct 2026, 80 EGP):
+        long b3=LocalDate.of(2026,10,19).atTime(21,40).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        String netflix="Card purchase at NETFLIX EGP 80.00 on 19/10/2026 at 21:40. Card ****1111.";
+        // (a) A paid subscription is a transaction in the «مصروفاتك» number (commitment bucket), not a reminder.
+        ExpenseParser.Parsed paid=ExpenseParser.parse("BanqueMisr",netflix);
+        if(paid==null || paid.amountMinor!=8000 || !"اشتراكات".equals(paid.category) || CommitmentHint.isReminder(netflix))
+            throw new AssertionError("Subscription payment not recorded as a paid commitment: "+(paid==null?"null":paid.category));
+        if(MoneyFlow.bucket("expense",paid.category)!=MoneyFlow.Bucket.COMMITMENT || !MoneyFlow.isSpending(MoneyFlow.Bucket.COMMITMENT))
+            throw new AssertionError("Paid subscription must count in the home number");
+        checks++;
+        // (b) The same message also yields a proposal for a recurring commitment; a proposal is not a second expense,
+        //     carries an estimated (not exact) next date one cycle later, and waits for confirmation.
+        CommitmentHint proposal=CommitmentHint.parse("BanqueMisr",netflix,b3);
+        if(proposal==null || !"subscription".equals(proposal.kind) || proposal.amount!=8000 || proposal.dateExact ||
+                !LocalDate.of(2026,11,19).equals(proposal.estimatedDate) || !proposal.cycle.equals("monthly"))
+            throw new AssertionError("Subscription proposal missing or wrong: "+(proposal==null?"null":proposal.kind+"/"+proposal.estimatedDate));
+        checks++;
+        // (c) A reminder for a future installment is a proposal only: never an expense, never in the number.
+        String reminder="Reminder: installment payment EGP 999.00 to QAUnpaid will be processed tomorrow. Card ****1111.";
+        if(ExpenseParser.parse("BanqueMisr",reminder)!=null) throw new AssertionError("Future-installment reminder became an expense");
+        CommitmentHint due=CommitmentHint.parse("BanqueMisr",reminder,b3);
+        if(due==null || !"installment".equals(due.kind) || due.amount!=99900) throw new AssertionError("Reminder did not become a proposal");
+        checks++;
+        // Confirming a proposal, allocating the next cycle's payment once, and reminders are database/UI behaviour:
+        // covered on the device by CommitmentPaymentUiTest ("Link duplicated spending"), not here.
         System.out.println("Commitment hint checks passed: "+checks);
     }
 }

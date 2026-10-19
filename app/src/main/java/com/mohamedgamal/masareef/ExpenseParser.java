@@ -41,6 +41,13 @@ public final class ExpenseParser {
             "(?i)([0-9][0-9., ]*)\\s*(EGP|LE|E£|ج\\.?م\\.?|جنيه\\s+استرليني|جنيه|USD|EUR|GBP|دولار|يورو)(?![A-Za-z])");
     private static final Pattern MERCHANT = Pattern.compile(
             "(?i)(?:\\b(?:at|from|to)\\b|لدى|عند|على|لصالح|الى|إلى|من)\\s+([^.,;\\n]{2,45})");
+    /** An amount after the merchant name, in either order (EGP 200.00 / 200 EGP), and everything after it. */
+    private static final Pattern MERCHANT_AMOUNT_TAIL = Pattern.compile(
+            "(?i)\\s*(?:(?<![A-Za-z])(?:EGP|LE|E£|USD|EUR|GBP|ج\\.?م\\.?|جنيه|دولار|يورو)\\s*[0-9][0-9., ]*" +
+            "|[0-9][0-9.,]*\\s*(?:EGP|LE|E£|USD|EUR|GBP|ج\\.?م\\.?|جنيه|دولار|يورو)(?![A-Za-z])).*$");
+    /** A separate token that is a date, a time or a long number (reference), and everything after it. */
+    private static final Pattern MERCHANT_REFERENCE_TAIL = Pattern.compile(
+            "\\s+(?:[0-9]{1,2}[/.-][0-9]{1,2}[/.-][0-9]{2,4}|[0-9]{1,2}:[0-9]{2}|[0-9]{3,})(?![\\p{L}]).*$");
     private static final Pattern DATE_MERCHANT = Pattern.compile(
             "(?i)\\b[0-3]?\\d(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\\d{2,4}\\s+([A-Z][A-Z0-9*& .-]{2,40}?)\\s+(?:purchase|payment|paid)\\b");
     private static final Pattern CARD_TAIL = Pattern.compile("(?i)(?:card|visa|بطاقة|فيزا).*?(?:\\*{2,}|x{2,})\\d{4}");
@@ -560,7 +567,11 @@ public final class ExpenseParser {
             String shop=candidate.replaceFirst("(?i)\\s+(?:EGP|LE|USD|EUR|GBP)\\s*[0-9].*$", "");
             return MerchantClassifier.displayName(shop);
         }
-        candidate = candidate.replaceAll("[0-9*#].*$", "").trim();
+        // Drop what follows the name (amount, masked card, reference, date, time) without cutting the name itself:
+        // a digit inside a merchant name (QA_B3_SHOP, 7-ELEVEN, SPINNEYS 6 OCT) is part of it.
+        candidate = MERCHANT_AMOUNT_TAIL.matcher(candidate).replaceFirst("").trim();
+        candidate = candidate.replaceAll("[*#].*$", "").trim();
+        candidate = MERCHANT_REFERENCE_TAIL.matcher(candidate).replaceFirst("").trim();
         candidate = candidate.replaceAll("(?i)\\s*(?:EGP|LE|E£|USD|EUR|ج\\.?م\\.?|جنيه|دولار|يورو)$", "").trim();
         candidate = candidate.replaceAll("(?i)\\s*(?:بنجاح|successfully)\\.?$", "").trim();
         if (candidate.length() < 2) return sender == null || sender.isBlank() ? "غير معروف" : sender.trim();
