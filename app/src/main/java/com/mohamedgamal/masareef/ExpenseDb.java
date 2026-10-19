@@ -246,12 +246,38 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private static void createImportReceipts(SQLiteDatabase sql){sql.execSQL("CREATE TABLE IF NOT EXISTS sms_import_receipts(unique_key TEXT PRIMARY KEY)");}
     /** Historical cancellation is evidence for explicit review; it must not archive a debit unattended. */
     boolean addHistoricalSms(SmsPreview row){
+        CaptureResult.Write write=addHistoricalSmsObserved(row);
+        return write!=null&&write.added;
+    }
+
+    /**
+     * The same historical write as {@link #addHistoricalSms}, with the capture observation kept for the import
+     * contract that has to report it. Returns null when the row short-circuits before capture because its
+     * identity was already known; {@link #smsCaptureStatus} names the status and {@link #historicalKnown} the table.
+     */
+    CaptureResult.Write addHistoricalSmsObserved(SmsPreview row){
         lastCaptureEvent=null;lastCapturedId=-1;
-        if(smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe)!=0)return false;
+        if(smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe)!=0)return null;
         CaptureResult.Write write=addAutomaticCapture(row.sender,row.sender,row.body,row.captureAt,"SMS",row.receiptKeySafe?row.receivedAt:row.captureAt,false);
         rememberCapture(write.inserted?write.rowId:-1,write.event);
         ContentValues receipt=new ContentValues();receipt.put("unique_key",sha256(row.sender+"\n"+row.captureAt+"\n"+row.body));getWritableDatabase().insertWithOnConflict("sms_import_receipts",null,receipt,SQLiteDatabase.CONFLICT_IGNORE);
-        return write.added;
+        return write;
+    }
+
+    /** Which stored table already knew this row's identity, read with the same keys and order as smsCaptureStatus. */
+    ImportResult.Known historicalKnown(SmsPreview row) {
+        String key=sha256(row.sender+"\n"+CaptureIdentity.smsTimestamp(row.receivedAt,row.captureAt)+"\n"+row.body);
+        String legacyKey=row.receiptKeySafe?sha256(row.sender+"\n"+row.receivedAt+"\n"+row.body):key;
+        String[] keys=new String[]{key,legacyKey};
+        if(storedIdentity("SELECT 1 FROM capture_evidence WHERE unique_key IN (?,?) AND source='SMS' LIMIT 1",keys))return ImportResult.Known.EVIDENCE;
+        if(storedIdentity("SELECT 1 FROM excluded_messages WHERE unique_key IN (?,?) LIMIT 1",keys))return ImportResult.Known.EXCLUDED;
+        if(storedIdentity("SELECT 1 FROM sms_import_receipts WHERE unique_key IN (?,?) LIMIT 1",keys))return ImportResult.Known.RECEIPT;
+        if(storedIdentity("SELECT 1 FROM capture_events WHERE event_key IN (?,?) AND source='SMS' LIMIT 1",keys))return ImportResult.Known.EVENT;
+        return null;
+    }
+
+    private boolean storedIdentity(String sql,String[] keys) {
+        try(Cursor c=getReadableDatabase().rawQuery(sql,keys)){return c.moveToFirst();}
     }
     public boolean addSms(String sender, String body, long when) {
         return captureSms(sender, body, when).accepted;
@@ -913,17 +939,49 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      * A row that was not inserted must already exist or be excluded; anything else is a failure, not a duplicate.
      */
     public CsvBatchResult importCsvBatch(String fileHash, List<CsvImport.Row> rows) {
-        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        CsvImportResult detailed=importCsvBatchDetailed(fileHash,rows);
+        // The legacy number keeps its documented meaning: rows already present plus rows the user excluded.
+        return new CsvBatchResult(detailed.created,detailed.alreadyPresent+detailed.excluded);
+    }
+
+    /** The same file and transaction as {@link #importCsvBatch}, with created / already present / excluded split. */
+    public CsvImportResult importCsvBatchDetailed(String fileHash, List<CsvImport.Row> rows) {
+        SQLiteDatabase sql=getWritableDatabase();
+        boolean owned=!sql.inTransaction();
+        sql.beginTransaction();
         try {
-            int saved=0, duplicates=0;
+            long revisionBefore=changes();
+            List<CsvImportResult.Row> outcomes=new ArrayList<>();
+            int created=0, alreadyPresent=0, excluded=0;
             for (CsvImport.Row row : rows) {
-                if (addCsvEntry(fileHash, row)) saved++;
-                else if (csvRowKnown("csv:"+fileHash+":"+row.line)) duplicates++;
-                else throw new IllegalStateException("CSV row "+row.line+" was not saved");
+                String key="csv:"+fileHash+":"+row.line;
+                if (addCsvEntry(fileHash, row)) {
+                    created++;
+                    outcomes.add(new CsvImportResult.Row(row,CsvImportResult.Outcome.CREATED,rowIdForKey(key)));
+                } else if (excludedKey(key)) {
+                    excluded++;
+                    outcomes.add(new CsvImportResult.Row(row,CsvImportResult.Outcome.EXCLUDED,null));
+                } else if (csvRowKnown(key)) {
+                    alreadyPresent++;
+                    outcomes.add(new CsvImportResult.Row(row,CsvImportResult.Outcome.ALREADY_PRESENT,rowIdForKey(key)));
+                } else throw new IllegalStateException("CSV row "+row.line+" was not saved");
             }
+            long revisionAfter=changes();
             sql.setTransactionSuccessful();
-            return new CsvBatchResult(saved, duplicates);
+            return new CsvImportResult(outcomes,created,alreadyPresent,excluded,owned,revisionBefore,revisionAfter);
         } finally { sql.endTransaction(); }
+    }
+
+    private boolean excludedKey(String key) {
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM excluded_messages WHERE unique_key=? LIMIT 1",new String[]{key})) {
+            return c.moveToFirst();
+        }
+    }
+
+    private Long rowIdForKey(String key) {
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT id FROM transactions WHERE unique_key=? LIMIT 1",new String[]{key})) {
+            return c.moveToFirst()?c.getLong(0):null;
+        }
     }
 
     private boolean csvRowKnown(String key) {
@@ -1140,6 +1198,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return null;
     }
 
+    /** The stored rule that refuses this merchant; used to name a refusal the capture write cannot name. */
+    boolean merchantIgnored(String merchant) {
+        if (merchant==null || merchant.isBlank()) return false;
+        MerchantRule rule=matchingRule(merchant);
+        return rule!=null && rule.ignored;
+    }
+
     public void rememberMerchantCategory(String merchant, String category) {
         if (!canRememberMerchant(merchant,category)) throw new IllegalArgumentException("Not a spending merchant");
         putMerchantRule("="+MerchantClassifier.identity(merchant),category,false);
@@ -1269,6 +1334,51 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      */
     long changes() {
         return LedgerRevision.read(getReadableDatabase());
+    }
+
+    /**
+     * Read-only stored observation for one historical row. Its own keys are primary-key probes and the two
+     * commitment tables are small, so reporting side effects never scans the ledger-sized evidence or balance
+     * tables. An in-place update that changes nothing observable is never claimed as a write.
+     */
+    static final class RowWrites {
+        final boolean evidence, receipt, event, balance;
+        final long hints, linkedCommitments;
+        RowWrites(boolean evidence,boolean receipt,boolean event,boolean balance,long hints,long linkedCommitments) {
+            this.evidence=evidence; this.receipt=receipt; this.event=event; this.balance=balance;
+            this.hints=hints; this.linkedCommitments=linkedCommitments;
+        }
+    }
+
+    RowWrites rowWritesFor(SmsPreview row) {
+        String key=sha256(row.sender+"\n"+row.captureAt+"\n"+row.body);
+        String legacyKey=sha256(row.sender+"\n"+(row.receiptKeySafe?row.receivedAt:row.captureAt)+"\n"+row.body);
+        String[] keys=new String[]{key,legacyKey};
+        return new RowWrites(
+                storedIdentity("SELECT 1 FROM capture_evidence WHERE unique_key IN (?,?) LIMIT 1",keys),
+                storedIdentity("SELECT 1 FROM sms_import_receipts WHERE unique_key=? LIMIT 1",new String[]{key}),
+                storedIdentity("SELECT 1 FROM capture_events WHERE event_key IN (?,?) LIMIT 1",keys),
+                storedIdentity("SELECT 1 FROM balance_snapshots WHERE unique_key=? LIMIT 1",
+                        new String[]{sha256("balance:"+row.sender+"\n"+row.captureAt+"\n"+row.body)}),
+                countOf("commitment_suggestions",null)+countOf("commitment_observations",null),
+                countOf("recurring","last_paid_date IS NOT NULL"));
+    }
+
+    /** Repair-level observation: rows this batch archived and fee rows it created, both counted at batch scope. */
+    static final class RepairWrites {
+        final long archives, feeRows;
+        RepairWrites(long archives,long feeRows) { this.archives=archives; this.feeRows=feeRows; }
+    }
+
+    RepairWrites repairWrites() {
+        return new RepairWrites(countOf("transaction_archive",null),
+                countOf("transactions","fee_parent_id IS NOT NULL"));
+    }
+
+    private long countOf(String table,String where) {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM "+table+(where==null?"":" WHERE "+where),null)) {
+            return c.moveToFirst()?c.getLong(0):0;
+        }
     }
 
     public Transaction latestInserted() { return transactionRows.latestInserted(); }
@@ -1772,6 +1882,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures;
         public long movedMinor, feesMinor;
         public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized > 0; }
+        /** Rows this repair moved into an archive, counted for the import contract that reports them. */
+        int mergedRowCount() { return mergedRows.size(); }
     }
 
     private List<RepairRules.Row> repairRows(long from, long to) {
