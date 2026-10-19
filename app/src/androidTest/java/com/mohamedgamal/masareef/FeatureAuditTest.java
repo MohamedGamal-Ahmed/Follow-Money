@@ -238,6 +238,34 @@ final class FeatureAuditTest {
         eq(500,daily.currencies.get("EGP").expense);
         eq(99500,daily.currencies.get("EGP").remaining);
     }
+    public void testCashFeeOwnershipIsStableAcrossWordOrder() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        String[] messages={
+                "Cash withdrawal at ATM for EGP 2000 from account ****1234 with a fee",
+                "تم سحب من حسابك مبلغ 2000 جنيه مع رسوم",
+                "Your account was debited EGP 2000 at ATM with a fee",
+                "ATM cash withdrawal fee of EGP 5 from account ****1234",
+                "Cash withdrawal at ATM for EGP 5 from account ****1234 with a fee of EGP 5",
+                "Your account was charged EGP 5 from account ****1234 as a cash withdrawal fee"
+        };
+        long cash=0,fees=0;
+        for(int i=0;i<messages.length;i++) {
+            ok(db.addSms("BANK",messages[i],t+i*3600000L));
+            ExpenseDb.Transaction row=db.lastCaptured();ok(row!=null);
+            if(i==3 || i==5) {
+                ok(MoneyFlow.BANK_FEE_CATEGORY.equals(row.category));fees+=row.amountMinor;
+            } else {
+                ok(MoneyFlow.CASH_WITHDRAWAL_CATEGORY.equals(row.category));cash+=row.amountMinor;
+            }
+        }
+        eq(600500,cash);eq(1000,fees);eq(6,countRows("transactions"));
+        eq(1000,db.monthlyTotals(day).get("EGP"));
+        eq(1000,db.monthlyTotalForKind(day,"EGP","expense"));
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",100000,day,0));
+        DailySummary summary=DailySummary.load(context,db);
+        eq(1000,summary.currencies.get("EGP").expense);
+        eq(99000,summary.currencies.get("EGP").remaining);
+    }
     public void testLegacyReimbursementLinkToCashWithdrawalIsKeptButNotApplied() {
         LocalDate day=LocalDate.now();long t=at(day);
         ok(db.addManual(t,200000,"EGP","QA ATM","سحب نقدي"));long withdrawal=db.latestInserted().id;
