@@ -43,13 +43,17 @@ final class ImportResult {
             this.hintWritten = hintWritten; this.balanceWritten = balanceWritten;
             this.eventRecorded = eventRecorded; this.linksChanged = linksChanged;
         }
-        /** Nothing this row was asked to write actually changed a stored count. */
+        /** Nothing this row was asked to write actually changed a stored value. */
         boolean none() { return !(evidenceWritten||receiptWritten||hintWritten||balanceWritten||eventRecorded||linksChanged); }
         /** A stored effect other than the receipt: balance, hint, recorded event or commitment link. */
         boolean storedEffect() { return hintWritten||balanceWritten||eventRecorded||linksChanged; }
     }
 
-    /** Repair writes performed inside the batch transaction, on rows the selection did not name. */
+    /**
+     * Repair writes performed inside the batch transaction. Repair reconciles movement in the batch window and
+     * may name rows the selection did not name as well as rows it did; it is always reported here and never
+     * folded into the selected outcomes.
+     */
     static final class Repair {
         final int mergedRows, ownTransfers, feesCreated, archivedRows;
         final long movedMinor, feesMinor;
@@ -67,13 +71,21 @@ final class ImportResult {
         final Outcome outcome;
         final Reason reason;
         final Known knownBy;
-        final Long transactionId;
+        /** The row the write produced or matched while the batch ran; repair may archive it afterwards. */
+        final Long initialTransactionId;
+        /** That row's stored unique key at write time, so a reused row number can never stand in for it. */
+        final String identityKey;
         final Effects effects;
-        /** The ledger row this outcome names is still present after the batch finished; settled by the owner. */
+        /** The live row carrying this outcome: the same row, or the repair target it was merged into. */
+        Long transactionId;
+        /** True only while the row the write produced is still that same row, not a row that reused its id. */
         boolean surviving;
-        Row(SmsPreview source, Outcome outcome, Reason reason, Known knownBy, Long transactionId, Effects effects) {
+        Row(SmsPreview source, Outcome outcome, Reason reason, Known knownBy, Long initialTransactionId,
+            String identityKey, Effects effects) {
             this.source = source; this.outcome = outcome; this.reason = reason;
-            this.knownBy = knownBy; this.transactionId = transactionId; this.effects = effects;
+            this.knownBy = knownBy; this.initialTransactionId = initialTransactionId;
+            this.identityKey = identityKey; this.effects = effects;
+            this.transactionId = initialTransactionId;
         }
     }
 
@@ -130,10 +142,25 @@ final class ImportResult {
                 revisionBefore,revisionAfter);
     }
 
-    /** The writes between two stored observations of one row; a write already stored before it is not its own. */
+    /**
+     * Selected rows whose own ledger row is no longer live after the batch, because a merge archived it:
+     * repair reconciles the batch window, and a row's own write can also absorb an abbreviated copy.
+     * Repair's own archive writes are counted separately as {@link Repair#archivedRows}, which may also
+     * include rows the selection never named.
+     */
+    int archivedSelectedRows() {
+        int archived=0;
+        for (Row row : rows) if (row.initialTransactionId!=null && !row.surviving) archived++;
+        return archived;
+    }
+
+    /**
+     * The writes between two stored observations of one row; a write already stored before it is not its own.
+     * The hint and commitment tables are compared by value, so an in-place update is seen.
+     */
     static Effects effectsBetween(ExpenseDb.RowWrites before,ExpenseDb.RowWrites after) {
-        return new Effects(after.evidence&&!before.evidence,after.receipt&&!before.receipt,after.hints>before.hints,
-                after.balance&&!before.balance,after.event&&!before.event,after.linkedCommitments>before.linkedCommitments);
+        return new Effects(after.evidence&&!before.evidence,after.receipt&&!before.receipt,!after.hints.equals(before.hints),
+                after.balance&&!before.balance,after.event&&!before.event,!after.commitments.equals(before.commitments));
     }
 
     /** Keeps the capture vocabulary where the capture write names a reason; never invents one it cannot read. */

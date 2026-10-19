@@ -1337,16 +1337,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Read-only stored observation for one historical row. Its own keys are primary-key probes and the two
+     * Read-only stored observation for one historical row. Its own keys are primary-key probes, and the two
      * commitment tables are small, so reporting side effects never scans the ledger-sized evidence or balance
-     * tables. An in-place update that changes nothing observable is never claimed as a write.
+     * tables. The commitment and hint tables are compared by value, not by row count, so an in-place update
+     * (the next cycle's payment, a superseded suggestion) is reported while nothing observable is claimed.
      */
     static final class RowWrites {
         final boolean evidence, receipt, event, balance;
-        final long hints, linkedCommitments;
-        RowWrites(boolean evidence,boolean receipt,boolean event,boolean balance,long hints,long linkedCommitments) {
+        final String hints, commitments;
+        RowWrites(boolean evidence,boolean receipt,boolean event,boolean balance,String hints,String commitments) {
             this.evidence=evidence; this.receipt=receipt; this.event=event; this.balance=balance;
-            this.hints=hints; this.linkedCommitments=linkedCommitments;
+            this.hints=hints; this.commitments=commitments;
         }
     }
 
@@ -1360,8 +1361,50 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 storedIdentity("SELECT 1 FROM capture_events WHERE event_key IN (?,?) LIMIT 1",keys),
                 storedIdentity("SELECT 1 FROM balance_snapshots WHERE unique_key=? LIMIT 1",
                         new String[]{sha256("balance:"+row.sender+"\n"+row.captureAt+"\n"+row.body)}),
-                countOf("commitment_suggestions",null)+countOf("commitment_observations",null),
-                countOf("recurring","last_paid_date IS NOT NULL"));
+                hintFingerprint(),
+                commitmentFingerprint());
+    }
+
+    /**
+     * Values of the two small hint tables, keyed and ordered, so a status change (a superseded proposal) or a
+     * proposal that moved to another key is a change even though the row count stayed the same.
+     */
+    private String hintFingerprint() {
+        return storedValue("SELECT (SELECT GROUP_CONCAT(x) FROM (SELECT (hint_key||'|'||status||'|'||amount_minor||'|'||received_at) x " +
+                "FROM commitment_suggestions ORDER BY hint_key))||'#'||(SELECT GROUP_CONCAT(y) FROM (SELECT " +
+                "(message_key||'|'||hint_key||'|'||amount_minor||'|'||received_at) y FROM commitment_observations ORDER BY message_key))");
+    }
+
+    /** Values of the small commitment table, so a next-cycle payment on an already-paid item is still a change. */
+    private String commitmentFingerprint() {
+        return storedValue("SELECT GROUP_CONCAT(z) FROM (SELECT (id||'|'||next_due||'|'||paid_count||'|'||COALESCE(last_paid_date,'-')||'|'||" +
+                "status||'|'||COALESCE(last_paid_due,'-')) z FROM recurring ORDER BY id)");
+    }
+
+    private String storedValue(String sql) {
+        try(Cursor c=getReadableDatabase().rawQuery(sql,null)) {
+            return c.moveToFirst()&&!c.isNull(0)?c.getString(0):"";
+        }
+    }
+
+    /** The stored unique key of a live transaction; null when no such row is live. */
+    String rowIdentityKey(long id) {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT unique_key FROM transactions WHERE id=?",new String[]{Long.toString(id)})) {
+            return c.moveToFirst()?c.getString(0):null;
+        }
+    }
+
+    /**
+     * True only while the exact row is still live. Identity is the stored key, never the row number: SQLite
+     * reuses an id after a delete, so a new row can inherit an archived row's id while being a different row.
+     */
+    boolean rowHasIdentity(long id,String identityKey) {
+        try(Cursor c=getReadableDatabase().rawQuery(identityKey==null
+                ?"SELECT 1 FROM transactions WHERE id=? AND unique_key IS NULL LIMIT 1"
+                :"SELECT 1 FROM transactions WHERE id=? AND unique_key=? LIMIT 1",
+                identityKey==null?new String[]{Long.toString(id)}:new String[]{Long.toString(id),identityKey})) {
+            return c.moveToFirst();
+        }
     }
 
     /** Repair-level observation: rows this batch archived and fee rows it created, both counted at batch scope. */

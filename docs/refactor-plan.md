@@ -366,7 +366,8 @@ counts, dates, duplicate and rollback assertions remain identical. Final suites 
 The historical SMS batch and the CSV batch reported only a ledger row-count delta, so the number a
 user saw was the net table change: a row whose sole effect was a receipt, a balance snapshot, a
 hint, a recorded event or a commitment link reported nothing, and repair inside the same ±1 day
-window counted rows the user never selected.
+window moved rows the selection never named and, when both legs of a transfer were selected, rows it
+did name.
 
 `ImportBatch.executeDetailed` and `ImportBatch.applySelectedDetailed` return `ImportResult`;
 `ExpenseDb.importCsvBatchDetailed` returns `CsvImportResult`. Legacy `long execute`, `long
@@ -385,9 +386,18 @@ instead of claiming evidence was rewritten.
 Side effects (`evidenceWritten`, `receiptWritten`, `hintWritten`, `balanceWritten`, `eventRecorded`,
 `linksChanged`) and `repair` (`mergedRows`, `ownTransfers`, `feesCreated`, `archivedRows`,
 `movedMinor`, `feesMinor`) are separate observations and are never folded into the primary totals.
-Per row they are cheap key probes plus the two small commitment tables, so reporting never counts
-`capture_evidence` or `balance_snapshots` row by row; an in-place update that changes nothing
-observable is not claimed as a write.
+Per row they are cheap key probes, and the commitment and hint tables are compared by value, not by
+row count, so a next cycle paid on an already-paid commitment, a superseded proposal or a moved
+observation is a change: a naive `last_paid_date IS NOT NULL` count missed the second cycle and made
+an accepted service payment look refused. Reporting never scans `capture_evidence` or
+`balance_snapshots` row by row, and a write already stored before a row is not attributed to it.
+
+A row's identity after repair is its stored key, never its row number: SQLite reuses the id of a
+deleted row, so repair's own fee inherits the archived transfer leg's id. `Row.initialTransactionId`
+keeps the row the write produced, `Row.surviving` is true only while that same row is still live, and
+`transactionId` names the merge target when repair folded the row into another one.
+`ImportResult.archivedSelectedRows()` counts selected rows that no longer exist as their own row, so
+a consumer can separate them from `repair.archivedRows`.
 
 `committed`/`completion` follow the capture contract: `COMMITTED` only when the call owned the
 transaction, otherwise `PENDING_CALLER` with `dbChanged=false`. A fault — including a repair fault —
@@ -405,7 +415,15 @@ Open items elsewhere (this contract is not a fix for them): the CSV parser bound
 unreachable "row was not saved" branch, the ±120 s capture versus ±180 s repair window difference
 behind `A10`, and REV-L4.
 
+Review corrections (same batch, after the independent review of `ebad0a3`): a subsequent-cycle
+service payment is observed as a commitment change instead of a refusal; surviving identity is
+resolved through the stored key so a reused row number is never mistaken for a selected row, with
+`initialTransactionId` and the merge target both reported; and the import screen no longer calls every
+archived row unselected, naming the selected ones separately.
+
 Local verification: 26 baseline fixtures committed first against unmodified production, then 24
 contract fixtures with the compatibility pins. 17 JVM suites, debug/test builds, lint (0 errors, 66
 existing warnings), native groups 27/14/31/133/30 (235/0) and isolated lifetime (4/0) passed on the
-emulator. These are local results, not CI or independent approval.
+emulator. These are local results, not CI or independent approval. After the review corrections the
+same suites ran again with 30 contract fixtures: native groups 27/14/31/139/30 (241/0) and isolated
+lifetime (4/0).

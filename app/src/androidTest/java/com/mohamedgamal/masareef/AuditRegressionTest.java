@@ -28,6 +28,8 @@ final class AuditRegressionTest {
     AuditRegressionTest(Instrumentation runner){this.runner=runner;}
     private long at(LocalDate day,int hour){return day.atTime(hour,0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();}
     private void eq(long expected,long actual){if(expected!=actual)throw new AssertionError(expected+" != "+actual);}
+    private void eq(long expected,long actual,String detail){if(expected!=actual)throw new AssertionError(detail+": "+expected+" != "+actual);}
+    private void eq(String expected,String actual){if(!expected.equals(actual))throw new AssertionError(expected+" != "+actual);}
     private void ok(boolean value){if(!value)throw new AssertionError("expected true");}
     private void ok(boolean value,String detail){if(!value)throw new AssertionError(detail);}
     private void setup(){
@@ -62,6 +64,7 @@ final class AuditRegressionTest {
         return db.latestInserted().id;
     }
     private long scalar(String sql){try(Cursor cursor=db.getReadableDatabase().rawQuery(sql,null)){ok(cursor.moveToFirst());return cursor.getLong(0);}}
+    private String text(String sql){try(Cursor cursor=db.getReadableDatabase().rawQuery(sql,null)){ok(cursor.moveToFirst());return cursor.getString(0);}}
     private String archivePayload(long originalId){
         try(Cursor cursor=db.getReadableDatabase().rawQuery("SELECT payload FROM transaction_archive WHERE original_id=?",
                 new String[]{Long.toString(originalId)})){ok(cursor.moveToFirst());return cursor.getString(0);}
@@ -1679,6 +1682,7 @@ final class AuditRegressionTest {
         eq(1,result.created);eq(1,result.survivingCreated);
         eq(1,result.repair.ownTransfers);eq(1,result.repair.feesCreated);
         eq(1,result.repair.archivedRows);eq(1,result.repair.mergedRows);
+        eq(0,result.archivedSelectedRows(),"the archived row is pre-existing, not one the selection named");
         eq(10000,result.repair.movedMinor);eq(50,result.repair.feesMinor);
         long delta=db.transactionCount()-rows;
         eq(1,delta);
@@ -1695,6 +1699,7 @@ final class AuditRegressionTest {
         invariant(result);
         eq(1,result.created);eq(1,result.survivingCreated);
         eq(1,result.repair.mergedRows);eq(1,result.repair.archivedRows);
+        eq(0,result.archivedSelectedRows(),"the archived notification is not one the selection named");
         eq(0,result.repair.ownTransfers);eq(0,result.repair.feesCreated);
         ok(0==db.transactionCount()-rows,"repair removed a row the selection never named");
     }
@@ -1880,6 +1885,122 @@ final class AuditRegressionTest {
         CsvImportResult result=db.importCsvBatchDetailed("qa-contract-ignored",rows);
         eq(1,result.created);eq(0,result.excluded);eq(0,result.alreadyPresent);
         eq(1,scalar("SELECT COUNT(*) FROM transactions WHERE merchant='QA CS IGNORED'"));
+    }
+
+    // ---- P2-A review corrections: regressions for the reported defects (R1/R2), written against the
+    // existing API so they can be shown failing on the reviewed head before the correction lands. ----
+    public void testImportContractSecondCycleServicePaymentIsRecordedNotRefused(){
+        long t=at(LocalDate.now(),10);LocalDate previous=LocalDate.now().minusMonths(1);
+        ok(db.addRecurring("Netflix",5000,"EGP",LocalDate.now()));
+        db.getWritableDatabase().execSQL("UPDATE recurring SET last_paid_date=?,last_paid_due=?,paid_count=1",
+                new Object[]{previous.toString(),previous.toString()});
+        long beforePaid=scalar("SELECT paid_count FROM recurring");
+        SmsPreview row=SmsPreview.parse("Billing","Netflix bill paid successfully",t);
+        ok(row!=null&&!row.isTransaction());
+        ImportResult result=detailed(row);
+        invariant(result);
+        eq(beforePaid+1,scalar("SELECT paid_count FROM recurring"),"the payment must really be applied");
+        ok(result.rows.get(0).reason==ImportResult.Reason.SERVICE_MATCH_ACCEPTED);
+        eq(1,result.linksChanged,"a commitment that really changed must be reported as a change");
+        eq(1,result.noLedgerChange);
+        eq(0,result.refused,"an accepted service payment is not a refusal");
+    }
+
+    public void testImportContractPairSelectedTransferReportsOneSurvivingRow(){
+        long t=at(LocalDate.now(),10);
+        db.addPaymentSource("BankMisr","حساب","1111");
+        db.addPaymentSource("BankMisr","حساب","2222");
+        SmsPreview out=SmsPreview.parse("BankMisr","تم تحويل مبلغ 100.50 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222",t);
+        SmsPreview in=SmsPreview.parse("BankMisr","تم اضافة مبلغ 100 EGP لحساب رقم 2222 عن طريق التحويل اللحظي",t+60000);
+        ok(out!=null&&in!=null);
+        ImportResult result=detailed(out,in);
+        invariant(result);
+        eq(2,result.created);eq(1,result.repair.ownTransfers);eq(1,result.repair.archivedRows);
+        eq(1,result.survivingCreated,"only the leg that still exists may count as surviving");
+        long archived=scalar("SELECT original_id FROM transaction_archive ORDER BY id DESC LIMIT 1");
+        long fee=scalar("SELECT id FROM transactions WHERE fee_parent_id IS NOT NULL");
+        eq(archived,fee,"the fixture must exercise the reused rowid: the fee takes the archived leg's id");
+        ImportResult.Row incoming=result.rows.get(1);
+        ok(!incoming.surviving,"a leg repair archived is not a surviving selected row");
+        ok(incoming.transactionId==null||incoming.transactionId.longValue()!=fee,
+                "the reused fee rowid must never be reported as the selected leg");
+    }
+
+    // ---- R1: the commitment observation is a value, so a next cycle is a change, and a caller rollback
+    // restores it; an unmatched service stays a refusal with no commitment change. ----
+
+    public void testImportContractUnmatchedServiceIsStillRefused(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview row=SmsPreview.parse("Billing","QA UNKNOWN SERVICE bill paid successfully",t);ok(row!=null);
+        ImportResult result=detailed(row);
+        invariant(result);
+        eq(0,scalar("SELECT COUNT(*) FROM recurring"));
+        eq(1,result.refused);eq(0,result.noLedgerChange);eq(0,result.linksChanged);
+        ok(result.rows.get(0).reason==ImportResult.Reason.NO_LEDGER_CANDIDATE);
+    }
+
+    public void testImportContractSecondCycleServicePaymentRollsBackWithItsCaller(){
+        long t=at(LocalDate.now(),10);LocalDate previous=LocalDate.now().minusMonths(1);
+        ok(db.addRecurring("Netflix",5000,"EGP",LocalDate.now()));
+        db.getWritableDatabase().execSQL("UPDATE recurring SET last_paid_date=?,last_paid_due=?,paid_count=1",
+                new Object[]{previous.toString(),previous.toString()});
+        SmsPreview row=SmsPreview.parse("Billing","Netflix bill paid successfully",t);ok(row!=null);
+        SQLiteDatabase sql=db.getWritableDatabase();ImportResult result;
+        sql.beginTransaction();
+        try{
+            result=detailed(row);
+            invariant(result);
+            eq(1,result.linksChanged);eq(1,result.noLedgerChange);
+            ok(!result.committed&&result.completion==CaptureResult.Completion.PENDING_CALLER);
+            ok(!result.dbChanged,"a caller-owned transaction is not a committed change");
+            eq(2,scalar("SELECT paid_count FROM recurring"),"the payment is applied while the caller's transaction is open");
+        }finally{sql.endTransaction();}
+        invariant(result);
+        eq(1,scalar("SELECT paid_count FROM recurring"));
+        eq(previous.toString(),text("SELECT last_paid_date FROM recurring"));
+        eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
+    }
+
+    // ---- R2: identity after repair is the stored key, never a row number a new row can inherit ----
+
+    public void testImportContractArchivedLegKeepsItsCreationAndNamesItsMergeTarget(){
+        long t=at(LocalDate.now(),10);
+        db.addPaymentSource("BankMisr","حساب","1111");
+        db.addPaymentSource("BankMisr","حساب","2222");
+        SmsPreview out=SmsPreview.parse("BankMisr","تم تحويل مبلغ 100.50 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222",t);
+        SmsPreview in=SmsPreview.parse("BankMisr","تم اضافة مبلغ 100 EGP لحساب رقم 2222 عن طريق التحويل اللحظي",t+60000);
+        ok(out!=null&&in!=null);
+        ImportResult result=detailed(out,in);
+        invariant(result);
+        ImportResult.Row outgoing=result.rows.get(0),incoming=result.rows.get(1);
+        ok(outgoing.surviving);ok(!incoming.surviving);
+        eq(1,result.survivingCreated);eq(1,result.archivedSelectedRows());
+        eq(incoming.initialTransactionId.longValue(),scalar("SELECT original_id FROM transaction_archive ORDER BY id DESC LIMIT 1"));
+        ok(incoming.identityKey!=null&&!incoming.identityKey.equals(text("SELECT unique_key FROM transactions WHERE id="+incoming.initialTransactionId)),
+                "the row that now holds the archived leg's id is the fee, not the leg");
+        ok(incoming.transactionId!=null&&incoming.transactionId.longValue()==outgoing.transactionId.longValue(),
+                "the archived leg names the row it was merged into");
+    }
+
+    public void testImportContractPairSelectedTransferRollsBackWithItsCaller(){
+        long t=at(LocalDate.now(),10);
+        db.addPaymentSource("BankMisr","حساب","1111");
+        db.addPaymentSource("BankMisr","حساب","2222");
+        SmsPreview out=SmsPreview.parse("BankMisr","تم تحويل مبلغ 100.50 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222",t);
+        SmsPreview in=SmsPreview.parse("BankMisr","تم اضافة مبلغ 100 EGP لحساب رقم 2222 عن طريق التحويل اللحظي",t+60000);
+        ok(out!=null&&in!=null);
+        SQLiteDatabase sql=db.getWritableDatabase();long rows=db.transactionCount();ImportResult result;
+        sql.beginTransaction();
+        try{
+            result=detailed(out,in);
+            invariant(result);
+            eq(2,result.created);eq(1,result.survivingCreated);eq(1,result.archivedSelectedRows());
+            eq(rows+2,db.transactionCount(),"the kept leg and the fee are live while the caller is open");
+            ok(!result.committed);
+        }finally{sql.endTransaction();}
+        invariant(result);
+        eq(rows,db.transactionCount());eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
+        eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
     }
 
     private int archivePromotions(){

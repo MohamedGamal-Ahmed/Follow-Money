@@ -146,9 +146,13 @@ public final class SmsImportActivity extends Activity {
                 if(imported.refused>0)summary.append("\n• ").append(imported.refused).append(" مرفوضة (ليست مصروفًا)");
                 if(imported.excluded>0)summary.append("\n• ").append(imported.excluded).append(" مستبعدة عندك");
                 page.addView(text(summary.toString(),14));
-                // Repair happens in the same batch but on rows the user never selected; it is reported as repair.
+                // Repair runs inside the same batch and may move a row the user selected as well as pre-existing
+                // rows, so it is always reported as repair and the wording never claims a row was unselected.
+                int archivedSelected=imported.archivedSelectedRows();
                 if(imported.repair.archivedRows>0||imported.repair.ownTransfers>0||imported.repair.feesCreated>0)
-                    page.addView(text("الإصلاح الآلي في نفس دفعة الحفظ: أرشف "+imported.repair.archivedRows+" صفًا لم تختره، منها "+imported.repair.ownTransfers+" تحويل داخلي، وأضاف "+imported.repair.feesCreated+" عمولة. الرسوم تظهر في العمليات.",14));
+                    page.addView(text("الإصلاح الآلي في نفس دفعة الحفظ: سوّى "+imported.repair.ownTransfers+" تحويل داخلي، وأرشف "+imported.repair.archivedRows+" صفًا (قد تكون من صفوف سابقة أو من الصفوف التي اخترتها)، وأضاف "+imported.repair.feesCreated+" عمولة. الرسوم تظهر في العمليات.",14));
+                if(archivedSelected>0)
+                    page.addView(text("من الصفوف التي اخترتها، "+archivedSelected+" لم تعد قائمة كصف مستقل بعد الدفعة.",14));
             }
             page.addView(text("المكررات لا تُسجل مرتين. الرصيد والتذكيرات ليست مصروفات جديدة؛ إلغاء التحويل لا يلغي المشتريات الأصلية.",14));
             if(session.skipped>0)page.addView(text(session.skipped+" رسالة لم تُعرض على الدفعة: غير محددة أو مستبعدة سابقًا. تقدر تشوفها في التفاصيل.",14));
