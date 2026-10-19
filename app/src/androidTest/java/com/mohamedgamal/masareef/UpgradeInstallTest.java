@@ -41,7 +41,7 @@ public final class UpgradeInstallTest extends Instrumentation {
                 JSONObject before=new JSONObject(new String(Files.readAllBytes(expected.toPath()),StandardCharsets.UTF_8));
                 baselineTables=new ArrayList<>();JSONArray originalTables=before.getJSONArray("baseline_tables");
                 for(int i=0;i<originalTables.length();i++)baselineTables.add(originalTables.getString(i));
-                ok(db.getWritableDatabase().getVersion()==24,"Updated APK must migrate to v24");
+                ok(db.getWritableDatabase().getVersion()==25,"Updated APK must migrate to v25");
                 JSONObject after=snapshot();
                 ok(before.toString().equals(after.toString()),"Ledger/evidence/preferences/points changed: "+before+" -> "+after);
                 try(Cursor c=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM transactions WHERE time_precision IS NOT NULL",null)){
@@ -62,7 +62,7 @@ public final class UpgradeInstallTest extends Instrumentation {
                 waitForIdleSync();
                 ok(before.toString().equals(snapshot().toString()),"Opening the updated app changed the fixture");
                 runOnMainSync(activity::finish);
-                result.putString("stream","Installed update v20 -> v24 passed; all original table rows, encrypted evidence, source plaintext, repayments, budgets and points preserved; legacy precision NULL; integrity_check=ok; app opened\n"+after+"\n");
+                result.putString("stream","Installed update v20 -> v25 passed; all original table rows, encrypted evidence, source plaintext, repayments, budgets and points preserved; legacy precision NULL; integrity_check=ok; app opened\n"+after+"\n");
             }else throw new IllegalArgumentException("Use seed or verify");
         }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Installed upgrade FAILED: "+trace);}
         finally{if(db!=null)db.close();finish(status,result);}
@@ -97,7 +97,7 @@ public final class UpgradeInstallTest extends Instrumentation {
             try(Cursor c=db.getReadableDatabase().rawQuery("SELECT * FROM \""+table+"\" ORDER BY rowid",null)){
                 while(c.moveToNext()){
                     JSONArray row=new JSONArray();
-                    for(int i=0;i<c.getColumnCount();i++)if(!"time_precision".equals(c.getColumnName(i)))
+                    for(int i=0;i<c.getColumnCount();i++)if(!"time_precision".equals(c.getColumnName(i))&&!"settlement_key".equals(c.getColumnName(i)))
                         row.put(c.getColumnName(i)).put(c.isNull(i)?JSONObject.NULL:c.getString(i));
                     rows.put(row);
                 }

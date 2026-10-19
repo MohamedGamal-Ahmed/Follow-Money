@@ -25,10 +25,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final AccountRepository accounts = new AccountRepository(this);
     private final CommitmentRepository commitments = new CommitmentRepository(this);
     private final CommitmentMatcher commitmentMatcher = new CommitmentMatcher(this);
+    private final CommitmentPayments commitmentPayments = new CommitmentPayments(this);
     private final ReimbursementRepository reimbursements = new ReimbursementRepository(this);
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     public ExpenseDb(Context context) {
-        super(context, "masareef.db", null, 24);
+        super(context, "masareef.db", null, 25);
     }
 
     @Override public void onCreate(SQLiteDatabase db) {
@@ -67,7 +68,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         createReimbursements(db);
         db.execSQL("ALTER TABLE recurring ADD COLUMN last_paid_due TEXT");
         CardSettlements.create(db);CaptureEvents.create(db);createImportReceipts(db);
-        LedgerRevision.create(db);
+        CommitmentPayments.create(db);LedgerRevision.create(db);
     }
 
     /** v20: an incoming payment that returns money spent on someone else's behalf, linked to that purchase. */
@@ -195,11 +196,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if(oldVersion<21)db.execSQL("ALTER TABLE transactions ADD COLUMN time_precision TEXT CHECK(time_precision IN ('exact','date_only'))");
         if(oldVersion<22){CardSettlements.create(db);CaptureEvents.create(db);}
         if(oldVersion<23){CaptureEvents.ensureTimeline(db);createImportReceipts(db);}
+        if(oldVersion<25)CommitmentPayments.create(db);
         if(oldVersion<24){
             // Retain the existing own_handles recovery guard before installing its revision triggers.
             db.execSQL("CREATE TABLE IF NOT EXISTS own_handles (handle TEXT PRIMARY KEY)");
             LedgerRevision.create(db);
         }
+        if(oldVersion==24)LedgerRevision.create(db);
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
@@ -402,9 +405,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if (parsed == null) {
                 result.rowId=markRejectedCaptureForReview(hash, eventAt);
                 String service = ExpenseParser.paidService(body);
-                boolean paid = service != null && markServicePaid(service, receivedAt);
-                result.added=paid;
-                if(paid)result.reason=CaptureResult.Reason.SERVICE_MATCH_ACCEPTED;
+                if(service!=null){
+                    result.reason=commitmentMatcher.recordService(service,eventAt,receivedAt,key,body,automaticCancellation);
+                    result.added=result.reason==CaptureResult.Reason.SERVICE_MATCH_ACCEPTED||result.reason==CaptureResult.Reason.COMMITMENT_REVIEW_REQUIRED;
+                    if(result.added)result.evidence=CaptureResult.Evidence.PROVIDER_BODY;
+                }
                 writable.setTransactionSuccessful(); return result;
             }
             if(CaptureNotice.cardRepayment(body))parsed=new ExpenseParser.Parsed(parsed.amountMinor,parsed.currency,parsed.merchant,parsed.category,ExpenseParser.debitAccountLast4(body));
@@ -435,8 +440,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             if (existing >= 0) {
                 result.evidence=captureEvidence.record(key,existing,hash,normalized,reference,channel,label,receivedAt,direction,body);
-                if (added && !CaptureNotice.cardRepayment(body) && "expense".equals(direction) && !linkTransferToCommitment(existing))
-                    advanceRecurring(parsed.merchant, parsed.amountMinor, parsed.currency, receivedAt);
+                if (automaticCancellation && added && !CaptureNotice.cardRepayment(body) && "expense".equals(direction))
+                    commitmentPayments.automatic(existing);
             }
             if(automaticCancellation&&existing>=0){CaptureEvents.Event resolved=new CaptureEvents(this).reconcilePending(existing);if(resolved!=null)result.event=resolved;}
             result.added=added;result.inserted=added;result.rowId=existing;
@@ -885,10 +890,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                                   String category, Long sourceId, String kind, Long destinationId, String note) {
         if (!"expense".equals(kind) && !"income".equals(kind) && !"transfer".equals(kind)) return false;
         if ("transfer".equals(kind) && (sourceId == null || destinationId == null || accountId(sourceId)==accountId(destinationId))) return false;
-        boolean inserted = insertEntry("manual:" + java.util.UUID.randomUUID(), when, amountMinor, currency,
-                merchant.trim(), category, "يدوي", null, null, sourceId, kind, destinationId, note);
-        if (inserted && "expense".equals(kind)) advanceRecurring(merchant.trim(), amountMinor, currency, when);
-        return inserted;
+        SQLiteDatabase sql=getWritableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransaction();
+        try {
+            boolean inserted = insertEntry("manual:" + java.util.UUID.randomUUID(), when, amountMinor, currency,
+                    merchant.trim(), category, "يدوي", null, null, sourceId, kind, destinationId, note);
+            if(inserted && "expense".equals(kind))commitmentPayments.automatic(latestInserted().id);
+            if(own)sql.setTransactionSuccessful();return inserted;
+        }finally{if(own)sql.endTransaction();}
     }
 
     /** A split share must not be added on top of an already recorded bill. Check and save atomically. */
@@ -1155,7 +1163,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             for (String table : new String[]{"transactions", "excluded_messages", "recurring", "source_aliases", "payment_sources",
                     "budgets", "balance_snapshots", "merchant_rules", "budget_plan_categories", "budget_plans",
                     "assets", "debts", "own_handles", "capture_evidence", "transaction_archive", "commitment_suggestions", "commitment_observations",
-                    "reimbursements", "dismissed_patterns", "repair_log", "sms_import_receipts", "capture_events", "card_settlement_allocations", "card_settlements"}) db.delete(table, null, null);
+                    "reimbursements", "dismissed_patterns", "repair_log", "sms_import_receipts", "capture_events", "card_settlement_allocations", "card_settlements", "commitment_payments", "commitment_cycles"}) db.delete(table, null, null);
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }
     }
@@ -1362,7 +1370,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 storedIdentity("SELECT 1 FROM balance_snapshots WHERE unique_key=? LIMIT 1",
                         new String[]{sha256("balance:"+row.sender+"\n"+row.captureAt+"\n"+row.body)}),
                 hintFingerprint(),
-                commitmentFingerprint());
+                commitmentFingerprint()+storedValue("SELECT GROUP_CONCAT(x) FROM (SELECT (id||'|'||COALESCE(cycle_id,'-')||'|'||amount_minor||'|'||active||'|'||review_status) x FROM commitment_payments ORDER BY id)"));
     }
 
     /**
@@ -1809,6 +1817,22 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public List<Recurring> recurring() { return commitments.recurring(); }
 
     public Recurring recurringById(long id) { return commitments.recurringById(id); }
+    List<Recurring> storedRecurring(){return commitments.storedRecurring();}
+    Recurring storedRecurringById(long id){for(Recurring row:storedRecurring())if(row.id==id)return row;return null;}
+    List<CommitmentPayments.Cycle> commitmentCycles(long id){return commitmentPayments.cycles(id);}
+    List<CommitmentPayments.Payment> commitmentPayments(long id){return commitmentPayments.history(id);}
+    long linkCommitmentPayment(long id,LocalDate due,long transactionId,long amount){return commitmentPayments.link(id,due,transactionId,amount);}
+    boolean undoCommitmentPayment(long paymentId){return commitmentPayments.undo(paymentId);}
+    EvidenceVault.Read commitmentPaymentEvidence(long id){return commitmentPayments.evidence(id);}
+    CommitmentPayments.AllocationPreview commitmentPaymentPreview(long id,LocalDate due,long transactionId){return commitmentPayments.preview(id,due,transactionId);}
+    long linkCommitmentPayment(CommitmentPayments.AllocationPreview preview,long amount){return commitmentPayments.link(preview,amount);}
+    List<Transaction> commitmentPaymentCandidates(LocalDate due){return commitmentPayments.candidates(due);}
+    String commitmentIdentity(long id){return commitmentPayments.key(id);}
+    boolean confirmCommitmentCycle(long id,LocalDate due,String key,LocalDate day){return commitmentPayments.confirmCycle(id,due,key,day);}
+    List<CommitmentPayments.ProviderNotice> pendingCommitmentConfirmations(){return commitmentPayments.pendingProviders();}
+    boolean resolveCommitmentConfirmation(long notice,long id,LocalDate due){return commitmentPayments.resolveProvider(notice,id,due);}
+    boolean resolveCommitmentConfirmation(long notice,long id,LocalDate due,String key){return commitmentPayments.resolveProvider(notice,id,due,key);}
+    boolean dismissCommitmentConfirmation(long notice){return commitmentPayments.dismissProvider(notice);}
 
     public void setDueDay(long id, int day) { commitments.setDueDay(id,day); }
 
@@ -1832,38 +1856,6 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public boolean finishRecurring(long id, boolean allInstallmentsPaid) { return commitments.finishRecurring(id,allInstallmentsPaid); }
 
     public boolean reopenRecurring(long id) { return commitments.reopenRecurring(id); }
-
-    private void advanceRecurring(String merchant, long amount, String currency, long when) { commitmentMatcher.advanceRecurring(merchant,amount,currency,when); }
-
-    private static final java.util.regex.Pattern COMMITMENT_PAID = java.util.regex.Pattern.compile(
-            "(?i)(تم\\s*(?:سداد|دفع|استلام|خصم)|سداد\\s*(?:القسط|قسط)|سددت|paid\\s+successfully|successfully\\s+paid|" +
-                    "payment\\s+(?:of\\s+.{0,30})?(?:has\\s+been\\s+)?(?:received|successful)|installment\\s+(?:paid|received))");
-    private static final java.util.regex.Pattern NUMBER = java.util.regex.Pattern.compile("[0-9][0-9,]*(?:\\.[0-9]{1,2})?");
-
-    /** Marks an installment paid from a provider message such as valU or a bank, even when it is not a card purchase. */
-    private boolean matchCommitmentMessage(String sender, String body, long when) {
-        if (body == null) return false;
-        String text = ExpenseParser.normalizeDigits(body);
-        if (!COMMITMENT_PAID.matcher(text).find()) return false;
-        LocalDate day = Instant.ofEpochMilli(when).atZone(ZoneId.systemDefault()).toLocalDate();
-        String haystack = ((sender == null ? "" : sender) + " " + text).toLowerCase(Locale.ROOT);
-        boolean changed = false;
-        List<Recurring> all=recurring();
-        for (Recurring item : all) {
-            if (item.isDone() || item.needsReview || !item.matches(haystack)) continue;
-            if (Math.abs(java.time.temporal.ChronoUnit.DAYS.between(item.nextDue, day)) > 12) continue;
-            java.util.regex.Matcher number = NUMBER.matcher(text);
-            boolean amountFound = false;
-            while (number.find()) {
-                long minor = ExpenseParser.parseMinor(number.group().replace(",", ""));
-                if (minor > 0 && Math.abs(minor - item.amountMinor) <= Math.max(100, item.amountMinor / 50)) {
-                    amountFound = true; break;
-                }
-            }
-            if (amountFound) changed |= markRecurringPaid(item.id, day);
-        }
-        return changed;
-    }
 
     // ---- Reimbursements: money that came back for something bought on someone else's behalf ----
 
@@ -2182,7 +2174,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     /**
      * The user confirms a repeating transfer is an installment: its past payments move to «أقساط» under the given name,
      * and a monthly commitment is created that ends on lastDue. Future payments from that account with that exact
-     * amount are linked automatically (see linkTransferToCommitment).
+     * amount require named counterparty evidence or an explicit reviewed cycle allocation.
      */
     public long confirmRepeatingTransfer(RepairRules.RepeatingTransfer pattern,String name,LocalDate lastDue,int paidSoFar,LocalDate today) {
         if (name==null || name.isBlank() || lastDue==null || paidSoFar<0) throw new IllegalArgumentException("Invalid installment");
@@ -2211,24 +2203,6 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             sql.setTransactionSuccessful();
             return id;
         } finally {sql.endTransaction();}
-    }
-
-    /** A new outgoing transfer from the account and for the exact amount of one active installment becomes that installment. */
-    private boolean linkTransferToCommitment(long transactionId) {
-        Transaction tx=transactionById(transactionId);
-        if (tx==null || !"expense".equals(tx.kind) || !MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(tx.category) || tx.paymentSourceId==null) return false;
-        long account=accountId(tx.paymentSourceId);
-        Recurring match=null;int found=0;
-        for (Recurring item:recurring()) {
-            if (item.isDone() || item.needsReview || item.paymentSourceId==null || item.amountMinor!=tx.amountMinor ||
-                    !item.currency.equals(tx.currency) || accountId(item.paymentSourceId)!=account) continue;
-            match=item;found++;
-        }
-        if (found!=1) return false;
-        ContentValues values=new ContentValues();values.put("category",kindCategory(match.kind));values.put("merchant",match.merchant);
-        getWritableDatabase().update("transactions",values,"id=?",new String[]{Long.toString(transactionId)});
-        markRecurringPaid(match.id,Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate());
-        return true;
     }
 
     private static String kindCategory(String kind) {
@@ -2384,7 +2358,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** InstaPay bill payments name the service without an amount; they can still close a matching commitment. */
-    private boolean markServicePaid(String service, long when) { return commitmentMatcher.markServicePaid(service,when); }
+
 
     private static String sha256(String text) {
         try {

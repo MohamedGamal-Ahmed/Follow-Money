@@ -31,6 +31,7 @@ public final class ReconciliationTest extends Instrumentation {
     private String rescanAudit,expectedBefore;
     @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));rescanAudit=args.getString("rescan_audit");expectedBefore=args.getString("expected_before");featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
     @Override public void onStart() {
+        if("commitment_ui".equals(featureAudit)){new CommitmentPaymentUiTest(this).run();return;}
         if("lifetime".equals(featureAudit)){new ResourceLifetimeTest(this).run();return;}
         if(featureAudit!=null&&featureAudit.startsWith("review_alerts_")){new ReviewAlertsUiTest(this).run(!"review_alerts_light".equals(featureAudit),"review_alerts_large".equals(featureAudit)?1.3f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("sms_ui_")){new SmsImportUiTest(this).run(!"sms_ui_light".equals(featureAudit),"sms_ui_large".equals(featureAudit)?1.3f:1f);return;}
@@ -428,7 +429,7 @@ public final class ReconciliationTest extends Instrumentation {
         writable.execSQL("DROP TABLE reimbursements");writable.execSQL("DROP TABLE dismissed_patterns");writable.execSQL("DROP TABLE repair_log");
         writable.execSQL("ALTER TABLE transactions DROP COLUMN time_precision");
         writable.setVersion(17);db.close();db=new ExpenseDb(context);
-        assertEquals(24,db.getReadableDatabase().getVersion());assertEquals(2,db.paymentSources().size());
+        assertEquals(25,db.getReadableDatabase().getVersion());assertEquals(2,db.paymentSources().size());
         assertNull(db.transactionById(tx).timePrecision);
         assertEquals(1500,db.transactionById(tx).amountMinor);assertEquals(key,db.sourceEvidence(tx).get(0).body);
         assertEquals(724001,db.currentBalance(card,"EGP").amountMinor);assertNull(db.paymentSource(card).parentSourceId);
@@ -693,17 +694,17 @@ public final class ReconciliationTest extends Instrumentation {
         LocalDate day=LocalDate.of(2026,10,10);long when=AT+12*3600000;
         long a=db.putCommitment(null,"QA ambiguous A",10000,"EGP",day.plusDays(12),"monthly","bill",null,0,1,"qa merchant",null);
         long b=db.putCommitment(null,"QA ambiguous B",10000,"EGP",day.plusDays(12),"monthly","bill",null,0,1,"qa merchant",null);
-        assertTrue(db.addManual(when,10001,"EGP","QA merchant","فواتير"));long first=db.latestInserted().id;
+        assertTrue(db.addManual(when,10000,"EGP","QA merchant","فواتير"));long first=db.latestInserted().id;
         assertEquals(0,db.recurringById(a).paidCount);assertEquals(0,db.recurringById(b).paidCount);
         assertTrue(db.finishRecurring(b,false));
-        assertTrue(db.addManual(when+1000,10001,"EGP","QA merchant","فواتير"));
+        assertTrue(db.addManual(when+1000,10000,"EGP","QA merchant","فواتير"));
         assertEquals(1,db.recurringById(a).paidCount);assertEquals(day.plusDays(12).plusMonths(1),db.recurringById(a).nextDue);
         assertEquals(0,db.recurringById(b).paidCount);
         long far=db.putCommitment(null,"QA far plan",10000,"EGP",day.plusDays(13),"monthly","bill",null,0,1,"qa far vendor",null);
         assertTrue(db.addManual(when+2000,10000,"EGP","QA far vendor","فواتير"));assertEquals(0,db.recurringById(far).paidCount);
         long usd=db.putCommitment(null,"QA dollars",10000,"USD",day,"monthly","bill",null,0,1,"qa currency vendor",null);
         assertTrue(db.addManual(when+3000,10000,"EGP","QA currency vendor","فواتير"));assertEquals(0,db.recurringById(usd).paidCount);
-        assertEquals(4,db.transactionCount());assertEquals(10001,db.transactionById(first).amountMinor);
+        assertEquals(4,db.transactionCount());assertEquals(10000,db.transactionById(first).amountMinor);
     }
 
     public void testServiceCommitmentMatchingSkipsIneligiblePlansAndBorrowsCaptureRollback() {
@@ -733,8 +734,9 @@ public final class ReconciliationTest extends Instrumentation {
         ExpenseDb.Recurring paid=db.recurringById(id);assertEquals(february,paid.nextDue);assertEquals(1,paid.paidCount);
         assertEquals(31,paid.dueDay);assertEquals(january.toString(),paid.lastPaidDate);assertNull(paid.lastAlertDate);
         try(Cursor c=db.getReadableDatabase().rawQuery("SELECT last_paid_due FROM recurring WHERE id=?",new String[]{Long.toString(id)})){
-            assertTrue(c.moveToFirst());assertEquals(january.toString(),c.getString(0));
+            assertTrue(c.moveToFirst());assertNull(c.getString(0)); // Legacy baseline is not rewritten by a new confirmation.
         }
+        assertEquals(january,db.commitmentCycles(id).get(0).due);assertEquals(1,db.commitmentPayments(id).size());
         long revision=db.changes();assertFalse(db.markRecurringPaid(id,january.plusDays(1)));assertEquals(revision,db.changes());
         assertTrue(db.markRecurringPaid(id,february));assertEquals(march,db.recurringById(id).nextDue);
         assertTrue(db.markRecurringPaid(id,march));assertEquals(3,db.recurringById(id).paidCount);assertTrue(db.recurringById(id).isDone());

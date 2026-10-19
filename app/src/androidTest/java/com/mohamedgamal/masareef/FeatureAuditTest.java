@@ -54,6 +54,249 @@ final class FeatureAuditTest {
         }
         result.putString("stream", report + "Passed: " + passed + "; failed: " + failed + "\n"); runner.finish(failed == 0 ? -1 : 0, result);
     }
+    private long paymentPlan(LocalDate due){
+        return db.putCommitment(null,"QA provider",10000,"EGP",due,"monthly","installment",12,2,1,"qa provider",null);
+    }
+    public void testMatchedAutomaticPaymentClassificationPreservesEvidenceAndUserChoices(){
+        LocalDate due=LocalDate.now();long plan=paymentPlan(due);long t=at(due);
+        String body="Card purchase EGP 100 at QA provider";
+        ok(db.addSms("BANK",body,t));ExpenseDb.Transaction tx=db.lastCaptured();
+        eq("أقساط",db.transactionById(tx.id).category);eq(3,db.recurringById(plan).paidCount);
+        eq(body,db.sourceEvidence(tx.id).get(0).body);eq(1,db.transactionCount());
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",20000,due,0));
+        eq(0,DailySummary.load(context,db).currencies.get("EGP").expense);
+        eq(10000,db.monthlyTotalForKind(due,"EGP","expense"));
+        ok(db.undoCommitmentPayment(db.commitmentPayments(plan).get(0).id));
+        eq("أقساط",db.transactionById(tx.id).category);eq(2,db.recurringById(plan).paidCount);
+        ok(db.addManual(t+1000,10000,"EGP","QA provider",MoneyFlow.UNCATEGORIZED));
+        eq(MoneyFlow.UNCATEGORIZED,db.latestInserted().category);
+        db.removeRecurring(plan);long reviewed=paymentPlan(due);
+        ok(db.addSms("BANK","Card purchase EGP 60 at QA provider",t+2000));long partial=db.lastCaptured().id;
+        db.updateTransaction(partial,6000,"EGP","QA provider","مطاعم",null);
+        db.linkCommitmentPayment(reviewed,due,partial,6000);
+        eq("مطاعم",db.transactionById(partial).category);
+    }
+    public void testReviewedAutomaticTransferClassificationAndFailureAreAtomic(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);
+        ok(db.addHistoricalSms(SmsPreview.parse("BANK","Card purchase EGP 60 at QA provider",at(due))));
+        long id=db.lastCaptured().id;SQLiteDatabase sql=db.getWritableDatabase();
+        sql.execSQL("UPDATE transactions SET category=? WHERE id=?",new Object[]{MoneyFlow.OPEN_TRANSFER_CATEGORY,id});
+        long revision=db.changes();
+        sql.execSQL("CREATE TRIGGER reject_payment_category BEFORE UPDATE OF category ON transactions BEGIN SELECT RAISE(ABORT,'QA category fault'); END");
+        try{db.linkCommitmentPayment(plan,due,id,6000);throw new AssertionError("Classification fault swallowed");}
+        catch(android.database.sqlite.SQLiteException expected){}
+        eq(revision,db.changes());eq(0,db.commitmentCycles(plan).size());eq(0,db.commitmentPayments(plan).size());
+        eq(MoneyFlow.OPEN_TRANSFER_CATEGORY,db.transactionById(id).category);
+        sql.execSQL("DROP TRIGGER reject_payment_category");db.linkCommitmentPayment(plan,due,id,6000);
+        eq("أقساط",db.transactionById(id).category);eq(4000,db.commitmentCycles(plan).get(0).remaining());eq(1,db.transactionCount());
+    }
+    public void testAutomaticCommitmentAllocationFollowsLiveIdentityAndUndo(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due),t=at(due);
+        ok(db.addManual(t,10000,"EGP","QA provider","أقساط"));long tx=db.latestInserted().id;
+        eq(1,db.transactionCount());eq(3,db.recurringById(plan).paidCount);
+        ok(db.recurringById(plan).nextDue.equals(LocalDate.of(2026,11,30)));
+        eq(2,db.storedRecurringById(plan).paidCount); // Declared historical baseline remains unchanged.
+        long link=db.commitmentPayments(plan).get(0).id;
+        db.updateTransaction(tx,10000,"USD","QA provider","أقساط",null);
+        eq(2,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(due));
+        db.updateTransaction(tx,10000,"EGP","QA provider","أقساط",null);
+        eq(3,db.recurringById(plan).paidCount);
+        ok(db.undoCommitmentPayment(link));ok(!db.undoCommitmentPayment(link));
+        eq(2,db.recurringById(plan).paidCount);eq(1,db.transactionCount());
+        ok(!db.commitmentPayments(plan).get(0).active);
+    }
+    public void testPartialCommitmentPaymentsRefundAndAmountEditRecompute(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due),t=at(due);
+        ok(db.addManual(t,6000,"EGP","QA provider","أقساط"));long first=db.latestInserted().id;
+        eq(2,db.recurringById(plan).paidCount); // No amount-only partial guess.
+        db.linkCommitmentPayment(plan,due,first,6000);
+        eq(4000,db.commitmentCycles(plan).get(0).remaining());
+        ok(db.addManual(t+1000,4000,"EGP","QA provider","أقساط"));long second=db.latestInserted().id;
+        db.linkCommitmentPayment(plan,due,second,4000);
+        eq(3,db.recurringById(plan).paidCount);eq(2,db.transactionCount());
+        db.updateTransaction(first,5000,"EGP","QA provider","أقساط",null);
+        eq(2,db.recurringById(plan).paidCount);eq(1000,db.commitmentCycles(plan).get(0).remaining());
+        ok(db.addManualEntry(t+2000,2000,"EGP","QA refund","دخل",null,"income",null,null));
+        db.linkReimbursement(db.latestInserted().id,first);
+        eq(3000,db.commitmentCycles(plan).get(0).remaining());
+        db.unlinkReimbursement(first);eq(1000,db.commitmentCycles(plan).get(0).remaining());
+    }
+    public void testCommitmentDeleteAndCancellationCannotFollowAReusedRowId(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due),t=at(due);
+        ok(db.addManual(t,10000,"EGP","QA provider","أقساط"));long id=db.latestInserted().id;
+        eq(3,db.recurringById(plan).paidCount);
+        db.archiveEntry(id,"bank confirmed cancellation",true);
+        eq(2,db.recurringById(plan).paidCount);eq(0,db.transactionCount());
+        ok(db.addManual(t+1000,10000,"EGP","QA unrelated","أخرى"));
+        eq(id,db.latestInserted().id);eq(2,db.recurringById(plan).paidCount);
+        ok(!db.commitmentPayments(plan).get(0).valid);
+    }
+    public void testCommitmentMatchingRequiresUniqueNameAmountCurrencyAccountAndCycle(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due),t=at(due);
+        long other=db.putCommitment(null,"QA other",10000,"EGP",due,"monthly","bill",null,0,1,"qa provider",null);
+        ok(db.addManual(t,10000,"EGP","QA provider","أقساط"));
+        eq(2,db.recurringById(plan).paidCount);eq(0,db.recurringById(other).paidCount);
+        db.finishRecurring(other,false);
+        ok(db.addManual(t+1000,10000,"USD","QA provider","أقساط"));
+        ok(db.addManual(t+2000,10001,"EGP","QA provider","أقساط"));
+        ok(db.addManual(at(due.minusDays(13)),10000,"EGP","QA provider","أقساط"));
+        eq(2,db.recurringById(plan).paidCount);
+        long account=db.addPaymentSource("QA account","حساب","1234");
+        db.getWritableDatabase().execSQL("UPDATE recurring SET payment_source_id=? WHERE id=?",new Object[]{account,plan});
+        ok(db.addManual(t+3000,10000,"EGP","QA provider","أقساط"));eq(2,db.recurringById(plan).paidCount);
+        ok(db.addManual(t+4000,10000,"EGP","QA provider","أقساط",account));eq(3,db.recurringById(plan).paidCount);
+        ok(db.addManual(t+5000,10000,"EGP","QA provider","أقساط",account));eq(3,db.recurringById(plan).paidCount);
+        eq(1,db.commitmentPayments(plan).size());
+    }
+    public void testOutOfOrderCommitmentPaymentLeavesEarlierCycleDue(){
+        LocalDate october=LocalDate.of(2026,10,31),november=LocalDate.of(2026,11,30);long plan=paymentPlan(october);
+        ok(db.addManual(at(november),10000,"EGP","QA provider","أقساط"));
+        eq(3,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(october));
+        ok(db.addManual(at(october),10000,"EGP","QA provider","أقساط"));
+        eq(4,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(LocalDate.of(2026,12,31)));
+    }
+    public void testCommitmentAllocationAndScheduleRollbackWithFinancialWriter(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);long revision=db.changes();
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
+        try{ok(db.addManual(at(due),10000,"EGP","QA provider","أقساط"));eq(3,db.recurringById(plan).paidCount);}
+        finally{sql.endTransaction();}
+        eq(revision,db.changes());eq(0,db.transactionCount());eq(0,db.commitmentCycles(plan).size());
+        sql.execSQL("CREATE TRIGGER reject_commitment_payment BEFORE INSERT ON commitment_payments BEGIN SELECT RAISE(ABORT,'QA settlement fault'); END");
+        try{db.addManual(at(due),10000,"EGP","QA provider","أقساط");throw new AssertionError("Settlement fault swallowed");}
+        catch(android.database.sqlite.SQLiteException expected){}
+        eq(revision,db.changes());eq(0,db.transactionCount());eq(2,db.recurringById(plan).paidCount);
+        ok(db.recurringById(plan).nextDue.equals(due));
+    }
+    public void testHistoricalCommitmentPaymentIsStoredWithoutAdvancingSchedule(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 100 at QA provider",at(due));ok(row!=null);
+        ok(db.addHistoricalSms(row));eq(1,db.transactionCount());eq(2,db.recurringById(plan).paidCount);
+        eq(0,db.commitmentCycles(plan).size());
+        db.linkCommitmentPayment(plan,due,db.lastCaptured().id,10000);eq(3,db.recurringById(plan).paidCount);
+    }
+    public void testAmountlessConfirmationIsUniqueAndActualPaymentReplacesIt(){
+        LocalDate due=LocalDate.of(2026,10,31);long t=at(due);
+        long a=db.putCommitment(null,"Netflix",10000,"EGP",due,"monthly","subscription",null,0,1,"netflix",null);
+        long b=db.putCommitment(null,"Netflix dollars",10000,"USD",due,"monthly","subscription",null,0,1,"netflix",null);
+        String body="Netflix bill paid successfully";
+        CaptureResult ambiguous=db.captureSms("Billing",body,t);ok(ambiguous.accepted&&ambiguous.needsReview);
+        eq(0,db.recurringById(a).paidCount);eq(0,db.recurringById(b).paidCount);eq(1,db.pendingCommitmentConfirmations().size());
+        db.finishRecurring(b,false);
+        ok(db.resolveCommitmentConfirmation(db.pendingCommitmentConfirmations().get(0).id,a,due));
+        eq(1,db.recurringById(a).paidCount);eq(0,db.transactionCount());
+        ok(db.addSms("BANK","Card purchase EGP 100 at Netflix",t+2000));long tx=db.lastCaptured().id;
+        eq(1,db.recurringById(a).paidCount);eq(1,db.transactionCount());eq(2,db.commitmentPayments(a).size());
+        db.archiveEntry(tx,"bank confirmed cancellation",true);eq(0,db.recurringById(a).paidCount);
+        ok(!db.addSms("Billing",body,t+1000));eq(0,db.recurringById(a).paidCount);
+    }
+    public void testDeletedCommitmentIdentityDoesNotLeakIntoAReplacement(){
+        LocalDate due=LocalDate.of(2026,10,31);long first=paymentPlan(due);
+        ok(db.addManual(at(due),10000,"EGP","QA provider","أقساط"));eq(3,db.recurringById(first).paidCount);
+        db.removeRecurring(first);long replacement=paymentPlan(due);eq(first,replacement);
+        eq(2,db.recurringById(replacement).paidCount);eq(0,db.commitmentCycles(replacement).size());
+        eq(1,db.transactionCount());db.clearAllData();eq(0,countRows("commitment_payments"));eq(0,countRows("commitment_cycles"));
+    }
+    public void testCommitmentPreviewRejectsReusedIdentitiesAndChangedRowsAtomically(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);
+        ok(db.addManual(at(due),6000,"EGP","QA provider","أقساط"));long id=db.latestInserted().id;
+        CommitmentPayments.AllocationPreview preview=db.commitmentPaymentPreview(plan,due,id);
+        db.updateTransaction(id,5000,"EGP","QA provider","أقساط",null);long revision=db.changes();
+        try{db.linkCommitmentPayment(preview,5000);throw new AssertionError("Stale amount accepted");}catch(IllegalArgumentException expected){}
+        eq(revision,db.changes());eq(0,db.commitmentCycles(plan).size());
+        preview=db.commitmentPaymentPreview(plan,due,id);db.deleteTransaction(id);
+        ok(db.addManual(at(due),5000,"EGP","QA provider","أقساط"));eq(id,db.latestInserted().id);
+        revision=db.changes();try{db.linkCommitmentPayment(preview,5000);throw new AssertionError("Reused transaction id accepted");}catch(IllegalArgumentException expected){}
+        eq(revision,db.changes());
+        preview=db.commitmentPaymentPreview(plan,due,id);db.removeRecurring(plan);eq(plan,paymentPlan(due));
+        revision=db.changes();try{db.linkCommitmentPayment(preview,5000);throw new AssertionError("Reused commitment id accepted");}catch(IllegalArgumentException expected){}
+        eq(revision,db.changes());eq(0,db.commitmentCycles(plan).size());
+    }
+    public void testAutomaticCommitmentCompletionRefundReopensAndReadsDoNotWrite(){
+        LocalDate due=LocalDate.of(2026,10,31);
+        long plan=db.putCommitment(null,"QA final",10000,"EGP",due,"monthly","installment",3,2,1,"qa final",null);
+        ok(db.addManual(at(due),10000,"EGP","QA final","أقساط"));long paid=db.latestInserted().id;
+        ok(db.recurringById(plan).isDone());String key=db.commitmentIdentity(plan);long revision=db.changes();
+        for(int i=0;i<3;i++){db.recurring();db.commitmentCycles(plan);db.commitmentPayments(plan);}eq(revision,db.changes());
+        ok(!db.confirmCommitmentCycle(plan,due,key,due.plusMonths(1)));eq(revision,db.changes());
+        ok(db.addManualEntry(at(due)+1000,10000,"EGP","QA refund","دخل",null,"income",null,null));
+        long refund=db.latestInserted().id;db.linkReimbursement(refund,paid);
+        ok(!db.recurringById(plan).isDone());eq(2,db.recurringById(plan).paidCount);eq(10000,db.commitmentCycles(plan).get(0).remaining());
+        db.unlinkReimbursement(paid);ok(db.recurringById(plan).isDone());eq(3,db.recurringById(plan).paidCount);
+    }
+    public void testV24CommitmentUpgradeKeepsLegacyStateWithoutInventingPayments(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);
+        ok(db.addSms("BANK","Card purchase EGP 50 at QA old shop",at(due)));long tx=db.lastCaptured().id;
+        String identity=db.rowIdentityKey(tx),body=db.sourceEvidence(tx).get(0).body;
+        SQLiteDatabase sql=db.getWritableDatabase();
+        sql.execSQL("DROP TABLE commitment_payments");sql.execSQL("DROP TABLE commitment_cycles");
+        sql.execSQL("ALTER TABLE recurring DROP COLUMN settlement_key");sql.setVersion(24);db.close();db=new ExpenseDb(context);
+        eq(25,db.getWritableDatabase().getVersion());eq(2,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(due));
+        eq("legacy:"+plan,db.commitmentIdentity(plan));eq(identity,db.rowIdentityKey(tx));eq(body,db.sourceEvidence(tx).get(0).body);
+        eq(5000,db.transactionById(tx).amountMinor);eq(0,countRows("commitment_cycles"));eq(0,countRows("commitment_payments"));
+    }
+    public void testPendingProviderEvidenceIsEncryptedAndHistoricalConfirmationNeedsACycle(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);
+        String body="تم دفع خدمة QA provider بنجاح";SmsPreview row=SmsPreview.parse("InstaPay",body,at(due));ok(row!=null);
+        ImportResult result=new ImportBatch(db).executeDetailed(Collections.singletonList(row));
+        eq(1,result.noLedgerChange);eq(0,result.refused);ok(result.rows.get(0).reason==ImportResult.Reason.REVIEW_REQUIRED);
+        eq(2,db.recurringById(plan).paidCount);eq(0,db.transactionCount());
+        CommitmentPayments.ProviderNotice notice=db.pendingCommitmentConfirmations().get(0);eq(body,notice.body);
+        try(android.database.Cursor c=db.getReadableDatabase().rawQuery("SELECT amount_minor,encrypted_body FROM commitment_payments",null)){
+            ok(c.moveToFirst());eq(0,c.getLong(0));ok(!body.equals(c.getString(1)));ok(c.getString(1).contains(":"));
+        }
+        long revision=db.changes();
+        try{db.resolveCommitmentConfirmation(notice.id,plan,due,"stale-key");throw new AssertionError("Stale commitment accepted");}catch(IllegalArgumentException expected){}
+        eq(revision,db.changes());eq(1,db.pendingCommitmentConfirmations().size());
+        ok(db.resolveCommitmentConfirmation(notice.id,plan,due,db.commitmentIdentity(plan)));
+        eq(3,db.recurringById(plan).paidCount);eq(0,db.pendingCommitmentConfirmations().size());
+        eq(0,db.transactionCount());
+    }
+    public void testCommitmentAliasCannotMatchInsideAnotherPayeesName(){
+        LocalDate due=LocalDate.of(2026,10,31);
+        long plan=db.putCommitment(null,"TRU",10000,"EGP",due,"monthly","installment",3,0,1,"tru|ترو",null);
+        ok(db.addManual(at(due),10000,"EGP","Truecaller","اشتراكات"));eq(0,db.recurringById(plan).paidCount);
+        ok(db.addManual(at(due)+1000,10000,"EGP","TRU installment","أقساط"));eq(1,db.recurringById(plan).paidCount);
+    }
+    public void testStaleCommitmentReminderCannotPayTheNextCycleOrAReplacement(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);String key=db.commitmentIdentity(plan);
+        ok(ReminderReceiver.markPaid(context,plan,due,due.toString(),key));eq(3,db.recurringById(plan).paidCount);
+        long revision=db.changes();ok(!ReminderReceiver.markPaid(context,plan,due.plusMonths(1),due.toString(),key));
+        eq(revision,db.changes());eq(3,db.recurringById(plan).paidCount);eq(0,db.transactionCount());
+        db.removeRecurring(plan);eq(plan,paymentPlan(due));revision=db.changes();
+        ok(!ReminderReceiver.markPaid(context,plan,due,due.toString(),key));eq(revision,db.changes());eq(2,db.recurringById(plan).paidCount);
+        ok(!ReminderReceiver.markPaid(context,plan,due,null,null));eq(0,db.transactionCount());
+    }
+    public void testProviderAfterTheBankPaymentIsOnlyEvidenceAndCannotOverrideCancellation(){
+        LocalDate due=LocalDate.of(2026,10,31);long t=at(due);
+        long plan=db.putCommitment(null,"Netflix",10000,"EGP",due,"monthly","subscription",null,0,1,"netflix",null);
+        ok(db.addSms("BANK","Card purchase EGP 100 at Netflix",t));long tx=db.lastCaptured().id;
+        CaptureResult proof=db.captureSms("Billing","Netflix bill paid successfully",t+1000);
+        ok(proof.accepted&&!proof.needsReview);eq(1,db.recurringById(plan).paidCount);eq(1,db.transactionCount());
+        eq(2,db.commitmentPayments(plan).size());eq(0,db.pendingCommitmentConfirmations().size());
+        db.archiveEntry(tx,"bank confirmed cancellation",true);eq(0,db.recurringById(plan).paidCount);
+        CaptureResult conflict=db.captureSms("Billing","Netflix bill paid successfully",t+180000);
+        ok(conflict.accepted&&conflict.needsReview);eq(0,db.recurringById(plan).paidCount);eq(1,db.pendingCommitmentConfirmations().size());
+    }
+    public void testProviderPaymentForALaterCycleDoesNotSkipTheUnpaidCycle(){
+        LocalDate october=LocalDate.of(2026,10,31),november=LocalDate.of(2026,11,30);long plan=paymentPlan(october);
+        ok(db.addSms("InstaPay","تم دفع خدمة QA provider بنجاح",at(november)));
+        eq(3,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(october));eq(2,db.commitmentCycles(plan).size());eq(0,db.transactionCount());
+    }
+    public void testCommitmentEditsPreserveBaselineAnchorsAndStartedCyclePrices(){
+        LocalDate october=LocalDate.of(2026,10,31),november=LocalDate.of(2026,11,30);long plan=paymentPlan(october);
+        ok(db.addManual(at(october),10000,"EGP","QA provider","أقساط"));
+        ExpenseDb.Recurring view=db.recurringById(plan);
+        db.putCommitment(plan,"QA provider",11000,"EGP",view.nextDue,"monthly","installment",12,view.paidCount,2,"qa provider",null);
+        eq(2,db.storedRecurringById(plan).paidCount);eq(31,db.recurringById(plan).dueDay);eq(10000,db.commitmentCycles(plan).get(0).expected);
+        ok(db.addManual(at(november),11000,"EGP","QA provider","أقساط"));eq(4,db.recurringById(plan).paidCount);
+        eq(11000,db.commitmentCycles(plan).get(1).expected);ok(db.recurringById(plan).nextDue.equals(LocalDate.of(2026,12,31)));
+        LocalDate newDue=LocalDate.of(2026,12,15);
+        db.putCommitment(plan,"QA provider",12000,"USD",newDue,"monthly","installment",12,4,2,"qa provider",null);
+        eq(4,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(newDue));eq("USD",db.recurringById(plan).currency);
+        long revision=db.changes();
+        try{db.putCommitment(plan,"QA provider",12000,"USD",newDue,"monthly","installment",3,4,2,"qa provider",null);throw new AssertionError("Historical cycles truncated");}
+        catch(IllegalArgumentException expected){}eq(revision,db.changes());eq(2,db.transactionCount());
+    }
     public void testSupportFormEncodesOnlyEnvironmentMetadata() {
         android.net.Uri uri = GitHubSupport.bugUri(context);
         ok("https".equals(uri.getScheme()));

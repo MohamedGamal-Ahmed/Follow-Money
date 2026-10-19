@@ -3,10 +3,10 @@ package com.mohamedgamal.masareef;
 /** Immutable observations after capture/repair return; a caller-owned transaction is still pending. */
 final class CaptureResult {
     enum Reason { MISSING_BODY, VERIFICATION, EXCLUDED, FUTURE_ONLY, UNSUCCESSFUL,
-        NOTICE_RECORDED, NOTICE_DUPLICATE, NO_LEDGER_CANDIDATE, SERVICE_MATCH_ACCEPTED,
+        NOTICE_RECORDED, NOTICE_DUPLICATE, NO_LEDGER_CANDIDATE, SERVICE_MATCH_ACCEPTED, COMMITMENT_REVIEW_REQUIRED,
         INSERTED, EXISTING_MATCH, INSERT_NOT_APPLIED }
     /** Describes the attempted source write, even if repair later moves it into an archive. */
-    enum Evidence { NOT_ATTEMPTED, SAVED_WITH_BODY, SAVED_WITHOUT_BODY, NOT_APPLIED, EVENT_BODY }
+    enum Evidence { NOT_ATTEMPTED, SAVED_WITH_BODY, SAVED_WITHOUT_BODY, NOT_APPLIED, EVENT_BODY, PROVIDER_BODY }
     enum Completion { COMMITTED, COMMITTED_REPAIR_FAILED, PENDING_CALLER }
 
     /** Request-local storage observations; never stored on the shared helper. */
@@ -43,6 +43,6 @@ final class CaptureResult {
         event = write.event;
         reason = write.reason;
         evidence = write.evidence;
-        needsReview = affected != null && affected.needsReview || event != null && !event.cancelled();
+        needsReview = affected != null && affected.needsReview || event != null && !event.cancelled() || reason==Reason.COMMITMENT_REVIEW_REQUIRED;
     }
 }

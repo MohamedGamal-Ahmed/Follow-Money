@@ -29,6 +29,16 @@ final class CommitmentRepository {
     long putCommitment(Long id, String merchant, long amount, String currency, LocalDate nextDue,
                               String cycle, String kind, Integer totalCount, int paidCount, int remindDays,
                               String matchText, Long paymentSourceId) {
+        SQLiteDatabase sql=db.getWritableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransaction();
+        try{
+            long saved=putCommitmentRow(id,merchant,amount,currency,nextDue,cycle,kind,totalCount,paidCount,remindDays,matchText,paymentSourceId);
+            if(own)sql.setTransactionSuccessful();return saved;
+        }finally{if(own)sql.endTransaction();}
+    }
+    private long putCommitmentRow(Long id,String merchant,long amount,String currency,LocalDate nextDue,
+                                 String cycle,String kind,Integer totalCount,int paidCount,int remindDays,
+                                 String matchText,Long paymentSourceId){
+        if(merchant==null||merchant.isBlank()||amount<=0)throw new IllegalArgumentException("Invalid commitment");
         ContentValues values = new ContentValues();
         values.put("merchant", merchant.trim());
         values.put("amount_minor", amount);
@@ -37,25 +47,45 @@ final class CommitmentRepository {
         values.put("cycle", cycle);
         values.put("kind", kind);
         if (totalCount == null) values.putNull("total_count"); else values.put("total_count", totalCount);
-        values.put("paid_count", Math.max(0, paidCount));
+        Recurring before = id == null ? null : recurringById(id);
+        Recurring stored = id == null ? null : db.storedRecurringById(id);
+        // The editor submits the displayed total; only its explicit delta changes the declared baseline.
+        int baselinePaid=stored==null?Math.max(0,paidCount):Math.max(0,stored.paidCount+paidCount-before.paidCount);
+        values.put("paid_count",baselinePaid);
+        List<CommitmentPayments.Cycle> cycles=stored==null?new ArrayList<>():new CommitmentPayments(db).cycles(id);
+        if(totalCount!=null&&baselinePaid+cycles.size()>totalCount)throw new IllegalArgumentException("عدد الأقساط أقل من الدورات المحفوظة");
+        if(stored!=null&&nextDue.equals(before.nextDue))values.put("next_due",stored.nextDue.toString());
+        else for(CommitmentPayments.Cycle saved:cycles)if(saved.remaining()>0||!nextDue.isAfter(saved.due))
+            throw new IllegalArgumentException("راجع تسويات الدورات قبل تغيير تاريخ الجدول");
         values.put("remind_days", remindDays);
         values.put("match_text", matchText == null || matchText.isBlank() ? merchant.trim().toLowerCase(Locale.ROOT) :
                 matchText.trim().toLowerCase(Locale.ROOT));
         if (paymentSourceId == null) values.putNull("payment_source_id"); else values.put("payment_source_id", paymentSourceId);
-        Recurring previous = id == null ? null : recurringById(id);
+        Recurring previous = stored;
         values.put("status", previous != null && previous.isDone() ||
-                totalCount != null && paidCount >= totalCount ? "done" : "active");
-        values.put("due_day", nextDue.getDayOfMonth());
+                totalCount != null && baselinePaid >= totalCount ? "done" : "active");
+        values.put("due_day",stored!=null&&nextDue.equals(before.nextDue)?stored.dueDay:nextDue.getDayOfMonth());
         values.put("needs_review", ExpenseParser.genericMerchant(merchant) ? 1 : 0);
         values.putNull("last_alert_date");
         if (id != null) {
             db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
             return id;
         }
+        values.put("settlement_key",java.util.UUID.randomUUID().toString());
         return db.getWritableDatabase().insertWithOnConflict("recurring", null, values, SQLiteDatabase.CONFLICT_IGNORE);
     }
 
     List<Recurring> recurring() {
+        SQLiteDatabase sql=db.getReadableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransactionNonExclusive();
+        try{
+            List<Recurring> rows=new ArrayList<>();CommitmentPayments payments=new CommitmentPayments(db);
+            for(Recurring row:storedRecurring())rows.add(payments.project(row));
+            rows.sort(java.util.Comparator.comparing(Recurring::isDone).thenComparing(r->r.nextDue));
+            if(own)sql.setTransactionSuccessful();return rows;
+        }finally{if(own)sql.endTransaction();}
+    }
+
+    List<Recurring> storedRecurring() {
         List<Recurring> result = new ArrayList<>();
         try (Cursor cursor = db.getReadableDatabase().query("recurring",
                 new String[]{"id", "merchant", "amount_minor", "currency", "next_due", "last_alert_date", "cycle", "kind",
@@ -106,7 +136,7 @@ final class CommitmentRepository {
         try (Cursor c = db.getReadableDatabase().rawQuery("SELECT id,last_paid_due FROM recurring WHERE last_paid_due IS NOT NULL", null)) {
             while (c.moveToNext()) coveredDue.put(c.getLong(0), c.getString(1));
         }
-        for (Recurring item : recurring()) {
+        for (Recurring item : storedRecurring()) {
             if (item.isDone() || item.lastPaidDate == null) continue;
             LocalDate paid;
             try { paid = LocalDate.parse(item.lastPaidDate); } catch (RuntimeException invalid) { continue; }
@@ -137,25 +167,12 @@ final class CommitmentRepository {
     }
 
     boolean markRecurringPaid(long id, LocalDate day) {
-        normalizeEarlyPayments();
-        Recurring item = recurringById(id);
-        if (item == null || item.isDone()) return false;
-        if (item.lastPaidDate != null) {
-            long gap = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.parse(item.lastPaidDate), day);
-            if (gap < ("weekly".equals(item.cycle) ? 4 : 15)) return false;
-        }
-        LocalDate next = item.nextAfter(item.nextDue);
-        while (!next.isAfter(day)) next = item.nextAfter(next);
-        int paid = item.paidCount + 1;
-        ContentValues values = new ContentValues();
-        values.put("last_paid_due", item.nextDue.toString());
-        values.put("next_due", next.toString());
-        values.put("paid_count", paid);
-        values.put("last_paid_date", day.toString());
-        values.putNull("last_alert_date");
-        if (item.totalCount != null && paid >= item.totalCount) values.put("status", "done");
-        db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)});
-        return true;
+        SQLiteDatabase sql=db.getWritableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransaction();
+        try{
+            normalizeEarlyPayments();
+            boolean changed=new CommitmentPayments(db).confirm(id,day,"manual:"+java.util.UUID.randomUUID(),"manual");
+            if(own)sql.setTransactionSuccessful();return changed;
+        }finally{if(own)sql.endTransaction();}
     }
 
     boolean finishRecurring(long id, boolean allInstallmentsPaid) {

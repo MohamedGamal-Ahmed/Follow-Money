@@ -11,7 +11,7 @@ final class LedgerRevision {
             "budgets","balance_snapshots","merchant_rules","budget_plan_categories","budget_plans",
             "assets","debts","own_handles","capture_evidence","transaction_archive","commitment_suggestions",
             "commitment_observations","reimbursements","dismissed_patterns","repair_log","sms_import_receipts",
-            "capture_events","card_settlement_allocations","card_settlements"};
+            "capture_events","card_settlement_allocations","card_settlements","commitment_cycles","commitment_payments"};
 
     static void create(SQLiteDatabase sql){
         sql.execSQL("CREATE TABLE IF NOT EXISTS ledger_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL)");

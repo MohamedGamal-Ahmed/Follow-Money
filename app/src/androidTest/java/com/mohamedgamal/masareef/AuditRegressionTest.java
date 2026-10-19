@@ -133,7 +133,7 @@ final class AuditRegressionTest {
         }
         for(String trigger:triggers)sql.execSQL("DROP TRIGGER \""+trigger.replace("\"","\"\"")+"\"");
         sql.execSQL("DROP TABLE ledger_revision");sql.setVersion(23);db.close();db=new ExpenseDb(context);
-        eq(24,db.getWritableDatabase().getVersion());ok(before.equals(revisionData(db.getReadableDatabase())),"v23 upgrade changed financial tables/schema/evidence");
+        eq(25,db.getWritableDatabase().getVersion());ok(before.equals(revisionData(db.getReadableDatabase())),"v23 upgrade changed financial tables/schema/evidence");
         eq(0,db.changes());eq(500,db.reimbursedOf(purchase));ok(!db.sourceEvidence(purchase).isEmpty());
         try(ExpenseDb external=new ExpenseDb(context)){ok(external.addManual(t+2000,700,"EGP","QA after upgrade","تسوق"));}
         long committed=db.changes();ok(committed>0);db.close();db=new ExpenseDb(context);eq(committed,db.changes());
@@ -820,7 +820,7 @@ final class AuditRegressionTest {
             old.execSQL("INSERT INTO reimbursements VALUES(2,1,4000)");
             old.execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,received_at,encrypted_body) VALUES('qa-evidence',1,'SMS',2000,'opaque-legacy-evidence')");
         }
-        db=new ExpenseDb(context);eq(24,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
+        db=new ExpenseDb(context);eq(25,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
         eq(4000,db.reimbursedOf(1));eq(6000,ExpenseDb.effectiveAmount(db.transactionById(1),db.reimbursementOffsets()));
         ok(db.transactionById(1).timePrecision==null&&db.transactionById(2).timePrecision==null);
         eq(1,scalar("SELECT user_edited FROM transactions WHERE id=2"));
@@ -1436,7 +1436,7 @@ final class AuditRegressionTest {
         eq(1,scalar("SELECT COUNT(*) FROM commitment_observations"));ok(db.changes()>revision);
     }
 
-    public void testImportBaselineServiceOnlyRowChangesACommitmentWithoutALedgerRow(){
+    public void testImportServiceOnlyRowStoresAReviewWithoutAdvancingTheLegacyBaseline(){
         long t=at(LocalDate.now(),10);
         ok(db.addRecurring("Netflix",5000,"EGP",LocalDate.now()));
         long commitment=scalar("SELECT id FROM recurring ORDER BY id DESC LIMIT 1");
@@ -1444,8 +1444,9 @@ final class AuditRegressionTest {
         long revision=db.changes();
         eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
         eq(0,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
-        eq(1,scalar("SELECT COUNT(*) FROM recurring WHERE id="+commitment+" AND last_paid_date IS NOT NULL"));
-        ok(db.changes()>revision,"a commitment update is not a no-op import");
+        eq(0,scalar("SELECT COUNT(*) FROM recurring WHERE id="+commitment+" AND last_paid_date IS NOT NULL"));
+        eq(1,db.pendingCommitmentConfirmations().size());eq(0,db.recurringById(commitment).paidCount);
+        ok(db.changes()>revision,"a saved provider review is not a no-op import");
     }
 
     public void testImportBaselineApplySelectedStillCountsOnlyLedgerRows(){
@@ -1727,25 +1728,26 @@ final class AuditRegressionTest {
         eq(0,result.created);
     }
 
-    public void testImportContractServiceMatchReportsTheCommitmentChange(){
+    public void testImportContractServiceReviewReportsTheStoredCommitmentEffect(){
         long t=at(LocalDate.now(),10);
         ok(db.addRecurring("Netflix",5000,"EGP",LocalDate.now()));
         SmsPreview row=SmsPreview.parse("Billing","Netflix bill paid successfully",t);ok(row!=null);
         ImportResult result=detailed(row);
         invariant(result);
         eq(1,result.noLedgerChange);eq(1,result.linksChanged);eq(1,result.receiptWritten);eq(0,result.created);
-        ok(result.rows.get(0).reason==ImportResult.Reason.SERVICE_MATCH_ACCEPTED);
+        ok(result.rows.get(0).reason==ImportResult.Reason.REVIEW_REQUIRED);
+        eq(1,db.pendingCommitmentConfirmations().size());
     }
 
-    public void testImportContractIneligibleServiceIsRefusedWithoutACommitmentChange(){
+    public void testImportContractOutOfWindowServiceKeepsReviewEvidenceWithoutPaying(){
         long t=at(LocalDate.now(),10);
         ok(db.addRecurring("QA INELIGIBLE",5000,"EGP",LocalDate.now().plusDays(20)));
         long commitment=scalar("SELECT id FROM recurring ORDER BY id DESC LIMIT 1");
         SmsPreview row=SmsPreview.parse("Billing","QA INELIGIBLE bill paid successfully",t);ok(row!=null);
         ImportResult result=detailed(row);
         invariant(result);
-        eq(1,result.refused);eq(0,result.noLedgerChange);eq(0,result.linksChanged);
-        ok(result.rows.get(0).reason==ImportResult.Reason.NO_LEDGER_CANDIDATE);
+        eq(0,result.refused);eq(1,result.noLedgerChange);eq(1,result.linksChanged);
+        ok(result.rows.get(0).reason==ImportResult.Reason.REVIEW_REQUIRED);
         ok(result.rows.get(0).effects.receiptWritten);
         eq(0,scalar("SELECT COUNT(*) FROM recurring WHERE id="+commitment+" AND last_paid_date IS NOT NULL"));
     }
@@ -1889,7 +1891,7 @@ final class AuditRegressionTest {
 
     // ---- P2-A review corrections: regressions for the reported defects (R1/R2), written against the
     // existing API so they can be shown failing on the reviewed head before the correction lands. ----
-    public void testImportContractSecondCycleServicePaymentIsRecordedNotRefused(){
+    public void testImportContractSecondCycleServiceIsSavedForCycleReviewNotRefused(){
         long t=at(LocalDate.now(),10);LocalDate previous=LocalDate.now().minusMonths(1);
         ok(db.addRecurring("Netflix",5000,"EGP",LocalDate.now()));
         db.getWritableDatabase().execSQL("UPDATE recurring SET last_paid_date=?,last_paid_due=?,paid_count=1",
@@ -1899,9 +1901,9 @@ final class AuditRegressionTest {
         ok(row!=null&&!row.isTransaction());
         ImportResult result=detailed(row);
         invariant(result);
-        eq(beforePaid+1,scalar("SELECT paid_count FROM recurring"),"the payment must really be applied");
-        ok(result.rows.get(0).reason==ImportResult.Reason.SERVICE_MATCH_ACCEPTED);
-        eq(1,result.linksChanged,"a commitment that really changed must be reported as a change");
+        eq(beforePaid,scalar("SELECT paid_count FROM recurring"),"history must not advance a schedule without a reviewed cycle");
+        ok(result.rows.get(0).reason==ImportResult.Reason.REVIEW_REQUIRED);
+        eq(1,result.linksChanged,"the saved provider review must be reported as a stored effect");
         eq(1,result.noLedgerChange);
         eq(0,result.refused,"an accepted service payment is not a refusal");
     }
@@ -1926,17 +1928,17 @@ final class AuditRegressionTest {
                 "the reused fee rowid must never be reported as the selected leg");
     }
 
-    // ---- R1: the commitment observation is a value, so a next cycle is a change, and a caller rollback
-    // restores it; an unmatched service stays a refusal with no commitment change. ----
+    // Historical provider evidence now waits for an explicit cycle; it is still observed truthfully and
+    // restored by caller rollback. An unknown provider is preserved for review rather than silently dropped.
 
-    public void testImportContractUnmatchedServiceIsStillRefused(){
+    public void testImportContractUnmatchedServiceIsSavedForReviewWithoutInventingAPlan(){
         long t=at(LocalDate.now(),10);
         SmsPreview row=SmsPreview.parse("Billing","QA UNKNOWN SERVICE bill paid successfully",t);ok(row!=null);
         ImportResult result=detailed(row);
         invariant(result);
         eq(0,scalar("SELECT COUNT(*) FROM recurring"));
-        eq(1,result.refused);eq(0,result.noLedgerChange);eq(0,result.linksChanged);
-        ok(result.rows.get(0).reason==ImportResult.Reason.NO_LEDGER_CANDIDATE);
+        eq(0,result.refused);eq(1,result.noLedgerChange);eq(1,result.linksChanged);
+        ok(result.rows.get(0).reason==ImportResult.Reason.REVIEW_REQUIRED);eq(1,db.pendingCommitmentConfirmations().size());
     }
 
     public void testImportContractSecondCycleServicePaymentRollsBackWithItsCaller(){
@@ -1953,12 +1955,14 @@ final class AuditRegressionTest {
             eq(1,result.linksChanged);eq(1,result.noLedgerChange);
             ok(!result.committed&&result.completion==CaptureResult.Completion.PENDING_CALLER);
             ok(!result.dbChanged,"a caller-owned transaction is not a committed change");
-            eq(2,scalar("SELECT paid_count FROM recurring"),"the payment is applied while the caller's transaction is open");
+            eq(1,scalar("SELECT paid_count FROM recurring"),"the historical baseline does not change even inside the caller");
+            eq(1,db.pendingCommitmentConfirmations().size());
         }finally{sql.endTransaction();}
         invariant(result);
         eq(1,scalar("SELECT paid_count FROM recurring"));
         eq(previous.toString(),text("SELECT last_paid_date FROM recurring"));
         eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
+        eq(0,db.pendingCommitmentConfirmations().size());
     }
 
     // ---- R2: identity after repair is the stored key, never a row number a new row can inherit ----

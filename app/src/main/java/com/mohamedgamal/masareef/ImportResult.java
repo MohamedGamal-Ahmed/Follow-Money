@@ -173,6 +173,7 @@ final class ImportResult {
             case INSERT_NOT_APPLIED: return Reason.INSERT_NOT_APPLIED;
             case NO_LEDGER_CANDIDATE: return Reason.NO_LEDGER_CANDIDATE;
             case SERVICE_MATCH_ACCEPTED: return Reason.SERVICE_MATCH_ACCEPTED;
+            case COMMITMENT_REVIEW_REQUIRED: return Reason.REVIEW_REQUIRED;
             case NOTICE_RECORDED: return Reason.REVIEW_REQUIRED;
             case NOTICE_DUPLICATE: return Reason.NOTICE_DUPLICATE;
             case EXCLUDED: return Reason.EXCLUDED;

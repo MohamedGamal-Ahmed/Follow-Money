@@ -3481,6 +3481,13 @@ public final class MainActivity extends Activity {
                 new LinearLayout.LayoutParams(dp(44), dp(44)));
         page.addView(bar);
         // Fixed monthly transfers (e.g. an apartment installment paid by instant transfer) are offered as installments.
+        List<CommitmentPayments.ProviderNotice> pendingPayments=db.pendingCommitmentConfirmations();
+        if(!pendingPayments.isEmpty()){
+            LinearLayout reviews=card();reviews.addView(label(pendingPayments.size()+" تأكيد سداد محتاج تحديد دورة",14,ORANGE,true));
+            TextView review=label("راجع التأكيدات",13,ACCENT,true);reviews.addView(review);
+            review.setOnClickListener(v->{String[] titles=new String[pendingPayments.size()];for(int i=0;i<titles.length;i++)titles[i]=pendingPayments.get(i).service+" · تاريخ الرسالة "+pendingPayments.get(i).date;
+                new ChoiceDialogBuilder().setTitle("تأكيدات بدون مبلغ · لا تضيف مصروفًا").setItems(titles,(d,i)->providerPaymentDialog(pendingPayments.get(i))).show();});
+        }
         List<RepairRules.RepeatingTransfer> repeating = db.repeatingTransferSuggestions();
         for (int i = 0; i < Math.min(2, repeating.size()); i++) repeatingCard(repeating.get(i));
         // Subscriptions charged every month but never saved (e.g. ChatGPT).
@@ -3884,13 +3891,15 @@ public final class MainActivity extends Activity {
             TextView paid = label("علّمه مدفوع", 14, Color.WHITE, true);
             paid.setGravity(Gravity.CENTER); paid.setBackground(rounded(0x1fffffff, 14));
             paid.setOnClickListener(v -> {
-                if (db.markRecurringPaid(item.id, LocalDate.now())) toast("اتسجل مدفوع");
-                else {
-                    ExpenseDb.Recurring now = db.recurringById(item.id);
-                    toast(now == null || now.lastPaidDate == null ? "الدفعة دي متسجلة مدفوعة بالفعل" :
-                            "آخر دفعة اتسجلت " + LocalDate.parse(now.lastPaidDate).format(DATE_LABEL) + " · الجاي " + now.nextDue.format(DATE_LABEL));
-                }
-                render();
+                String key=db.commitmentIdentity(item.id);
+                new ChoiceDialogBuilder().setTitle("سداد دورة "+item.nextDue)
+                        .setItems(new String[]{"اربط عملية مسجلة · يشمل الدفع الجزئي","تأكيد يدوي فقط · بدون مصروف جديد"},(d,choice)->{
+                            if(choice==0)commitmentLinkDialog(item);
+                            else new ChoiceDialogBuilder().setTitle("تأكيد سداد بدون قيد مالي")
+                                    .setMessage(item.merchant+" · دورة "+item.nextDue+"\nالتأكيد يعلّم المتبقي مدفوعًا ولا يضيف مصروفًا. تقدر تتراجع من التسويات.")
+                                    .setPositiveButton("تأكيد",(a,b)->commitmentWrite(()->db.confirmCommitmentCycle(item.id,item.nextDue,key,LocalDate.now())))
+                                    .setNegativeButton("إلغاء",null).show();
+                        }).show();
             });
             LinearLayout.LayoutParams paidParams = new LinearLayout.LayoutParams(-1, dp(46)); paidParams.topMargin = dp(10);
             next.addView(paid, paidParams);
@@ -3909,6 +3918,14 @@ public final class MainActivity extends Activity {
             page.addView(reopen);
         }
 
+        LinearLayout settlements=card();
+        settlements.addView(label("السداد بيتحدّث تلقائيًا عند تطابق الجهة والمبلغ والعملة والدورة. الاختلاف فقط يحتاج مراجعة.",12,MUTED,false));
+        for(CommitmentPayments.Cycle cycle:db.commitmentCycles(item.id))if(cycle.due.equals(item.nextDue)&&cycle.remaining()>0){
+            settlements.addView(label("دورة "+cycle.due+" · المسدد "+money(cycle.paid,cycle.currency)+" · المتبقي "+money(cycle.remaining(),cycle.currency),13,INK,true));
+            if(cycle.invalid>0)settlements.addView(label("دفع مرتبط اتغيّر أو اتحذف أو رجع منه مبلغ؛ راجع التسويات.",12,ORANGE,false));
+        }
+        TextView settlementHistory=label("عرض التسويات وفك الربط",13,ACCENT,true);settlements.addView(settlementHistory);
+        settlementHistory.setOnClickListener(v->commitmentPaymentsDialog(item.id));
         LinearLayout settings = card();
         LinearLayout reminder = new LinearLayout(this); reminder.setGravity(Gravity.CENTER_VERTICAL);
         reminder.setPadding(0, dp(4), 0, dp(4));
@@ -3977,6 +3994,89 @@ public final class MainActivity extends Activity {
         page.addView(delete, deleteParams);
     }
 
+    private interface CommitmentChange{boolean apply();}
+    private void commitmentWrite(CommitmentChange change){
+        Context app=getApplicationContext();
+        CaptureQueue.submit(()->{
+            final boolean changed;
+            final long before=db.changes();
+            try{changed=change.apply();}
+            catch(RuntimeException failed){postUi(()->toast("تعذر اعتماد التسوية؛ راجع العملية والدورة وحاول تاني"));return;}
+            if(changed||db.changes()!=before)try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException output){postUi(()->toast("التسوية محفوظة؛ تعذر تحديث التنبيهات"));}
+            postUi(()->{toast(changed?"اتحدثت التسوية بدون مصروف جديد":"ما اتسجلش سداد جديد؛ راجع الحالة الحالية");render();});
+        });
+    }
+    private void commitmentLinkDialog(ExpenseDb.Recurring item){
+        LinearLayout form=form();EditText due=dateInput("دورة الاستحقاق",form,item.nextDue);
+        form.addView(label("اختار دورة من الجدول؛ هنجيب العمليات المسجلة في الشهر المحيط بها.",12,MUTED,false));
+        new ChoiceDialogBuilder().setTitle("اربط دفع موجود · بدون مصروف إضافي").setView(form)
+                .setPositiveButton("اختار العملية",(d,w)->{
+                    LocalDate selected=dateValue(due);if(selected==null)return;
+                    List<ExpenseDb.Transaction> candidates=db.commitmentPaymentCandidates(selected);
+                    if(candidates.isEmpty()){toast("مفيش دفعات مؤهلة في الفترة دي. راجع تاريخ الدورة أو فك رابط سابق من التسويات.");return;}
+                    String[] titles=new String[candidates.size()];for(int i=0;i<titles.length;i++){
+                        ExpenseDb.Transaction tx=candidates.get(i);titles[i]=tx.merchant+" · "+money(tx.amountMinor,tx.currency)+" · "+Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate();
+                    }
+                    new ChoiceDialogBuilder().setTitle("اختار الدفعة اللي تخص "+item.merchant).setItems(titles,(a,i)->{
+                        try{commitmentAllocationDialog(db.commitmentPaymentPreview(item.id,selected,candidates.get(i).id));}
+                        catch(IllegalArgumentException changed){toast("الدورة مش متاحة بنفس العملة أو العملية اتغيرت؛ راجع الاختيار");}
+                    }).show();
+                }).setNegativeButton("إلغاء",null).show();
+    }
+    private void commitmentAllocationDialog(CommitmentPayments.AllocationPreview preview){
+        LinearLayout form=form();
+        form.addView(label(preview.transaction.merchant+" · "+money(preview.transaction.amountMinor,preview.transaction.currency)+"\nدورة "+preview.due+" · المطلوب "+money(preview.expected,preview.currency),14,INK,true));
+        EditText amount=input("المبلغ المخصص للدورة",form);decimalInput(amount);
+        amount.setText(String.format(Locale.ROOT,"%.2f",preview.max/100.0));
+        form.addView(label("حد الربط "+money(preview.max,preview.currency)+". الربط يستخدم العملية الحالية ولا يضيف مصروفًا.",12,MUTED,false));
+        form.addView(label("لو الدفعة التلقائية غير مصنفة أو تحويلات، هتاخد تصنيف الالتزام. أي تصنيف عدّلته بنفسك محفوظ.",12,MUTED,false));
+        AlertDialog dialog=new ChoiceDialogBuilder().setTitle("راجع ربط الدفعة").setView(form).setPositiveButton("اعتماد الربط",null).setNegativeButton("إلغاء",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            if(rejectMisreadAmount(amount))return;
+            long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
+            if(minor<=0||minor>preview.max){toast("اكتب مبلغًا موجبًا لحد المبلغ المتاح");return;}
+            dialog.dismiss();commitmentWrite(()->{db.linkCommitmentPayment(preview,minor);return true;});
+        }));dialog.show();
+    }
+    private void commitmentPaymentsDialog(long id){
+        List<CommitmentPayments.Payment> payments=db.commitmentPayments(id);
+        if(payments.isEmpty()){toast("مفيش تسويات مرتبطة؛ العدد السابق إقرار محفوظ بدون روابط دفعات");return;}
+        String[] titles=new String[payments.size()];for(int i=0;i<titles.length;i++){
+            CommitmentPayments.Payment p=payments.get(i);
+            String origin="manual".equals(p.origin)?"تأكيد يدوي":"provider".equals(p.origin)?"تأكيد مقدم الخدمة":"automatic".equals(p.origin)?"ربط تلقائي":"ربط راجعته";
+            titles[i]=p.due+" · "+origin+" · "+(!p.active?p.amount==0?"مصدر تأكيد إضافي بدون مبلغ":"اتلغى الربط":!p.valid?"غير مطبق · العملية اتغيرت أو اتحذفت":money(p.applied,p.currency)+" من "+money(p.amount,p.currency));
+        }
+        new ChoiceDialogBuilder().setTitle("تسويات الدورات").setItems(titles,(d,i)->{
+            CommitmentPayments.Payment p=payments.get(i);
+            AlertDialog.Builder detail=new ChoiceDialogBuilder().setTitle("دورة "+p.due)
+                    .setMessage(titles[i]+"\nفك الربط يعيد حساب الدورة ويحافظ على العملية المالية وتصنيفها والمصدر.").setNegativeButton("إغلاق",null);
+            if(p.active)detail.setPositiveButton("فك الربط",(a,b)->commitmentWrite(()->db.undoCommitmentPayment(p.id)));
+            if(p.transactionId!=null)detail.setNeutralButton("عرض العملية",(a,b)->{selectedTransaction=db.transactionById(p.transactionId);if(selectedTransaction!=null){transactionReturnTab=11;selectedTab=10;render();}});
+            else if("provider".equals(p.origin))detail.setNeutralButton("عرض رسالة التأكيد",(a,b)->{
+                EvidenceVault.Read evidence=db.commitmentPaymentEvidence(p.id);
+                new ChoiceDialogBuilder().setTitle("المصدر المحفوظ").setMessage(evidence.body==null?"المصدر المشفر غير متاح":evidence.body).setPositiveButton("إغلاق",null).show();
+            });
+            detail.show();
+        }).show();
+    }
+    private void providerPaymentDialog(CommitmentPayments.ProviderNotice notice){
+        new ChoiceDialogBuilder().setTitle(notice.service+" · تأكيد بدون مبلغ")
+                .setMessage((notice.failed||notice.body==null?"المصدر المشفر غير متاح":notice.body)+"\nتاريخ المصدر: "+notice.date+"\nاختار الالتزام ودورة الاستحقاق. التأكيد لا يضيف مصروفًا.")
+                .setPositiveButton("اختار الالتزام",(d,w)->{
+                    List<ExpenseDb.Recurring> plans=new ArrayList<>();for(ExpenseDb.Recurring plan:db.recurring())if(!plan.isDone())plans.add(plan);
+                    if(plans.isEmpty()){toast("مفيش التزام نشط؛ التأكيد محفوظ لحد ما تضيف الالتزام");return;}
+                    String[] titles=new String[plans.size()];for(int i=0;i<titles.length;i++)titles[i]=plans.get(i).merchant+" · "+money(plans.get(i).amountMinor,plans.get(i).currency);
+                    new ChoiceDialogBuilder().setTitle("التزام التأكيد").setItems(titles,(a,i)->{
+                        ExpenseDb.Recurring plan=plans.get(i);String key=db.commitmentIdentity(plan.id);
+                        LinearLayout form=form();EditText due=dateInput("دورة الاستحقاق",form,plan.nextDue);
+                        new ChoiceDialogBuilder().setTitle(plan.merchant+" · تأكيد حالة فقط").setView(form)
+                                .setPositiveButton("اعتماد التأكيد",(b,c)->{LocalDate date=dateValue(due);if(date!=null)commitmentWrite(()->db.resolveCommitmentConfirmation(notice.id,plan.id,date,key));})
+                                .setNegativeButton("إلغاء",null).show();
+                    }).show();
+                }).setNeutralButton("مش متعلق بالتزاماتي",(d,w)->commitmentWrite(()->db.dismissCommitmentConfirmation(notice.id)))
+                .setNegativeButton("لاحقًا",null).show();
+    }
+
     private void finishCommitmentAction(ExpenseDb.Recurring item, boolean installment) {
         TextView finish = label("إنهاء الالتزام", 14, ACCENT, true);
         finish.setGravity(Gravity.CENTER);
@@ -4031,6 +4131,7 @@ public final class MainActivity extends Activity {
 
     private void commitmentEditorScreen() {
         ExpenseDb.Recurring existing = editingCommitment;
+        ExpenseDb.Recurring futureTerms=existing==null?null:db.storedRecurringById(existing.id);
         ExpenseDb.Suggestion suggestion=editingSuggestion;
         LocalDate[] chosenDue={suggestion!=null?suggestion.date:existing!=null?existing.nextDue:nextDueForDay(LocalDate.now().getDayOfMonth())};
         LinearLayout toolbar = new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
@@ -4041,7 +4142,7 @@ public final class MainActivity extends Activity {
         page.addView(toolbar);
 
         String[] kind = {existing == null ? suggestion==null?"installment":suggestion.kind : existing.kind};
-        int[] dueDay = {chosenDue[0].getDayOfMonth()};
+        int[] dueDay = {existing==null?chosenDue[0].getDayOfMonth():existing.dueDay};
         int[] remind = {existing == null ? 1 : existing.remindDays};
 
         LinearLayout segments = new LinearLayout(this);
@@ -4068,6 +4169,8 @@ public final class MainActivity extends Activity {
         }
 
         caption("المبلغ");
+        if(existing!=null&&!db.commitmentCycles(existing.id).isEmpty())
+            note("الدورات التي بدأت تحتفظ بمبلغها وعملتها؛ تعديل المبلغ يخص الدورات الجديدة. تسويات الدفعات محفوظة.");
         LinearLayout amountRow = new LinearLayout(this); amountRow.setGravity(Gravity.CENTER_VERTICAL);
         page.addView(amountRow, new LinearLayout.LayoutParams(-1, -2));
         EditText amount = input(kind[0].equals("installment") ? "القسط الشهري" : "المبلغ", amountRow);
@@ -4075,13 +4178,13 @@ public final class MainActivity extends Activity {
         ((LinearLayout.LayoutParams) amount.getLayoutParams()).weight = 1;
         amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         if(suggestion!=null && suggestion.amount>0) amount.setText(String.format(Locale.ROOT,"%.2f",suggestion.amount/100.0));
-        else if (existing != null) amount.setText(String.format(Locale.ROOT, "%.2f", existing.amountMinor / 100.0));
+        else if (futureTerms != null) amount.setText(String.format(Locale.ROOT, "%.2f", futureTerms.amountMinor / 100.0));
         Spinner currency = new AppChoiceSpinner("العملة", CURRENCIES);
         currency.setBackground(outlined(SURFACE, BORDER, 12));
         LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(dp(96), dp(50));
         currencyParams.topMargin = dp(10); currencyParams.setMarginStart(dp(8));
         amountRow.addView(currency, currencyParams);
-        if (existing != null) for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(existing.currency)) currency.setSelection(i);
+        if (futureTerms != null) for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(futureTerms.currency)) currency.setSelection(i);
         if (suggestion != null) for (int i=0;i<CURRENCIES.length;i++) if(CURRENCIES[i].equals(suggestion.currency)) currency.setSelection(i);
 
         LinearLayout installmentBox = new LinearLayout(this); installmentBox.setOrientation(LinearLayout.VERTICAL);
@@ -4261,7 +4364,7 @@ public final class MainActivity extends Activity {
             long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
             if (merchant.isEmpty() || minor <= 0) { toast("اكتب اسم الجهة والمبلغ"); return; }
             Integer totalCount = null;
-            int paidCount = 0;
+            int paidCount = existing==null?0:existing.paidCount;
             if ("installment".equals(kind[0])) {
                 try {
                     String totalText = ExpenseParser.normalizeDigits(total.getText().toString().trim());
@@ -4281,9 +4384,11 @@ public final class MainActivity extends Activity {
             String match = merchant.startsWith("TRU") ? "tru|ترو" : provider != null ? provider.keywords :
                     existing != null && merchant.equalsIgnoreCase(existing.merchant) ? existing.matchText :
                             merchant.toLowerCase(Locale.ROOT);
-            long id = db.putCommitment(existing == null ? null : existing.id, merchant, minor,
+            long id;
+            try{id = db.putCommitment(existing == null ? null : existing.id, merchant, minor,
                     currency.getSelectedItem().toString(), due, cycleValue, kind[0], totalCount, paidCount, remind[0],
-                    match, selectedSource(account, sources));
+                    match, selectedSource(account, sources));}
+            catch(IllegalArgumentException changed){toast("راجع تسويات الدورات قبل تغيير تاريخ الجدول؛ الدفعات والعمليات محفوظة");return;}
             if (id == -1) { toast("الالتزام ده متسجل بالفعل"); return; }
             if (!"weekly".equals(cycleValue)) db.setDueDay(id, dueDay[0]);
             if (remind[0] >= 0) askNotificationPermission();

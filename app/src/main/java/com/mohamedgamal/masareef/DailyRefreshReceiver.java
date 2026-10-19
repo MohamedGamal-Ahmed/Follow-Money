@@ -26,6 +26,7 @@ public final class DailyRefreshReceiver extends BroadcastReceiver {
     }
     static void refresh(Context context) {
         DailyPointsStore.observeToday(context);
+        ReminderReceiver.refreshExisting(context);
         SummaryWidget.refresh(context);DailySummaryNotifier.refresh(context);MonthlySummaryReceiver.refresh(context);schedule(context);
     }
     @Override public void onReceive(Context context,Intent intent) {
