@@ -111,6 +111,11 @@ public final class MainActivity extends Activity {
     private Button bulkApply;
     private AlertDialog dailyDetails;
     private LinearLayout dailyDetailsContent;
+    private AlertDialog pointsSheet;
+    private String pointsSheetCurrency;
+    private boolean pointsSheetAll;
+    private long pointsSheetRevision;
+    private LocalDate pointsSheetDate;
     private static final int PROFILE_PHOTO_REQUEST=12;
     private String introName="",introDaily="",introSalary="";
     private int introCurrency,introPayDay;
@@ -162,6 +167,7 @@ public final class MainActivity extends Activity {
     private Long ledgerChanges;
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
+            refreshPointsSheet();
             ledgerRedrawPending = true;
             boolean visible = selectedTab == 0 || selectedTab == 1 || selectedTab == 2 || selectedTab == 6 || selectedTab == 11 || selectedTab == 15;
             refreshLedger(visible);
@@ -991,6 +997,13 @@ public final class MainActivity extends Activity {
     private void refreshWidgets() {
         DailyRefreshReceiver.refresh(this);
         if(dailyDetails!=null&&dailyDetails.isShowing())fillDailyDetails();
+        refreshPointsSheet();
+    }
+    private void refreshPointsSheet(){
+        if(pointsSheet==null||!pointsSheet.isShowing()||isFinishing()||isDestroyed())return;
+        if(pointsSheetRevision==db.changes()&&LocalDate.now().equals(pointsSheetDate))return;
+        String code=pointsSheetCurrency;boolean all=pointsSheetAll;
+        pointsSheet.dismiss();pointsDialog(code,all);
     }
 
     private void previewCsvImport(Uri uri) {
@@ -4514,6 +4527,7 @@ public final class MainActivity extends Activity {
 
     private void pointsDialog(String code,boolean all) {
         DailyPointsStore.observeToday(this);LocalDate today=LocalDate.now();boolean enabled=DailyPointsStore.enabled(this,code);
+        long revision=db.changes();
         List<DailyPoints.Day> days=DailyPointsStore.load(this,db,code,today);
         DailyPoints.Day current=null,yesterday=null;int waiting=0,confirmed=0;
         for(DailyPoints.Day day:days) {
@@ -4544,7 +4558,10 @@ public final class MainActivity extends Activity {
         summary.addView(todayTile,todayParams);summary.addView(yesterdayTile,new LinearLayout.LayoutParams(0,-1,1));
         LinearLayout.LayoutParams summaryParams=new LinearLayout.LayoutParams(-1,-2);summaryParams.topMargin=dp(12);content.addView(summary,summaryParams);
         if(current!=null)content.addView(label((current.difference<0?"فوق حدك النهارده: ":"المتبقي من حدك النهارده: ")+money(Math.abs(current.difference),code),13,current.difference<0?CORAL:MUTED,false));
-        if(waiting>0)content.addView(label(waiting+" يوم لسه برّه الرصيد · راجع تسجيلهم عشان تعتمد نتيجتهم",13,MUTED,true));
+        if(waiting>0)content.addView(label(waiting+" يوم برّه الرصيد بسبب عمليات محتاجة مراجعة",13,MUTED,true));
+        long unknown=DailyPointsStore.unknownDays(this,code,today);
+        if(unknown>0)content.addView(label(unknown+" يوم قديم خارج الحساب لأن الحد التاريخي مش معروف؛ مش هنفترض له حد النهارده.",13,MUTED,true));
+        content.addView(label("النقاط تعتمد على العمليات المسجلة؛ لو رسالة وصلت متأخر أو عملية اتصححت، يومها بيتحسب من جديد تلقائيًا.",12,MUTED,false));
 
         AlertDialog dialog=new ChoiceDialogBuilder().setTitle("نقاط الالتزام · "+code).setView(scrollForm(content))
                 .setPositiveButton("إغلاق",null).setNeutralButton(all?"رجوع للملخص":"سجل الأيام",(d,w)->pointsDialog(code,!all))
@@ -4562,15 +4579,17 @@ public final class MainActivity extends Activity {
                 DailyPoints.Day day=days.get(i);LinearLayout row=card(content);
                 row.addView(label(dayLabel(day.date)+" · "+pointsNumber(day.points())+" نقطة",16,day.difference<0?CORAL:ACCENT,true));
                 row.addView(label("حد اليوم "+money(day.limit,code)+" · صافي الصرف "+money(day.spending,code),12,MUTED,false));
-                row.addView(label(day.finalized?"معتمدة · ضمن رصيدك":day.date.equals(today)?"مؤقتة · لسه برّه الرصيد":day.needsReview?"راجع العمليات أولًا · برّه الرصيد":"في انتظار تأكيد التسجيل · برّه الرصيد",12,MUTED,false));
+                row.addView(label(day.finalized?"معتمدة · ضمن رصيدك":day.date.equals(today)?"مؤقتة · لسه برّه الرصيد":day.needsReview?"راجع العمليات أولًا · برّه الرصيد":"الحد التاريخي غير معروف · برّه الرصيد",12,MUTED,false));
                 pointsDayActions(row,day,code,today,dialog,true);
             }
         }
         TextView help=label("النقاط بتتحسب إزاي؟",13,ACCENT,true);help.setPadding(0,dp(12),0,dp(8));
         help.setOnClickListener(v->new ChoiceDialogBuilder().setTitle("طريقة حساب النقاط")
-                .setMessage("كل 10 وحدات من "+code+" تحت حد اليوم = نقطة، والزيادة تخصم بنفس النسبة. نتيجة كل يوم بتتقرب لأقرب عدد صحيح؛ نصف نقطة يتقرب بعيدًا عن الصفر. رصيدك هو مجموع نتائج الأيام المعتمدة.\n\nالنهارده مؤقت. اليوم يدخل الرصيد بعد نهايته وتأكيد تسجيل كل المصروفات. سحب الكاش مش مصروف ومش داخل في الحساب. العمليات المحتاجة مراجعة تمنع اعتماد اليوم.\n\nحد النقاط بيتثبت أول مرة في اليوم؛ تعديل الميزانية يسري على حد النقاط من بكرة. الاسترداد يصحح يوم الشراء. الأيام غير المسجلة ما تاخدش نقاط تلقائيًا.\n\nمحطات الـ100 نقطة للتشجيع فقط. النقاط مش فلوس أو مكافآت نقدية، وكل عملة لها رصيد منفصل.")
+                .setMessage("كل 10 وحدات من "+code+" تحت حد اليوم = نقطة، والزيادة تخصم بنفس النسبة. نتيجة كل يوم بتتقرب لأقرب عدد صحيح؛ نصف نقطة يتقرب بعيدًا عن الصفر. رصيدك هو مجموع نتائج الأيام المعتمدة.\n\nالنهارده مؤقت. اليوم يدخل الرصيد تلقائيًا بعد نهايته حسب العمليات المسجلة، من غير قفل أو تأكيد يومي. سحب الكاش مش مصروف ومش داخل في الحساب. العمليات المحتاجة مراجعة تمنع اعتماد اليوم.\n\nحد النقاط بيتثبت أول مرة في اليوم؛ تعديل الميزانية يسري على حد النقاط من بكرة. الاسترداد يصحح يوم الشراء. لو التطبيق ما اتفتحش، الأيام بتتلحق من سجل الحد الساري وقتها. الأيام القديمة ذات الحد غير المعروف تفضل خارج الرصيد.\n\nمحطات الـ100 نقطة للتشجيع فقط. النقاط مش فلوس أو مكافآت نقدية، وكل عملة لها رصيد منفصل.")
                 .setPositiveButton("تمام",null).show());content.addView(help);
-        if(days.isEmpty())content.addView(label("فعّل النقاط وابدأ بالنهارده. أول رصيد معتمد يظهر بعد نهاية اليوم وتأكيد تسجيله.",13,MUTED,false));
+        if(days.isEmpty())content.addView(label("فعّل النقاط وابدأ بالنهارده. أول رصيد معتمد يظهر تلقائيًا بعد نهاية اليوم.",13,MUTED,false));
+        dialog.setOnDismissListener(d->{if(pointsSheet==dialog)pointsSheet=null;});
+        pointsSheet=dialog;pointsSheetCurrency=code;pointsSheetAll=all;pointsSheetRevision=revision;pointsSheetDate=today;
         dialog.show();
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(ACCENT);
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(enabled?MUTED:ACCENT);
@@ -4581,28 +4600,11 @@ public final class MainActivity extends Activity {
         tile.setBackground(rounded(current?ACCENT_PALE:SURFACE,18));
         tile.addView(label(title,14,INK,true));
         tile.addView(label(day==null?"—":pointsNumber(day.points())+" نقطة",24,day!=null&&day.difference<0?CORAL:ACCENT,true));
-        String status=day==null?(current&&!enabled?"فعّل النقاط لتبدأ":"مفيش يوم مسجل"):current?"مؤقتة · برّه الرصيد":day.finalized?"معتمدة · ضمن رصيدك":day.needsReview?"محتاج مراجعة":"مستنية تأكيدك";
+        String status=day==null?(current&&!enabled?"فعّل النقاط لتبدأ":"مفيش يوم مسجل"):current?"مؤقتة · برّه الرصيد":day.finalized?"معتمدة · ضمن رصيدك":day.needsReview?"محتاج مراجعة":"الحد التاريخي غير معروف";
         tile.addView(label(status,12,MUTED,false));return tile;
     }
 
     private void pointsDayActions(LinearLayout parent,DailyPoints.Day day,String code,LocalDate today,AlertDialog dialog,boolean all) {
-        if(day.date.isBefore(today)) {
-            Button confirm=new Button(this);confirm.setTypeface(day.complete?REGULAR:BOLD);
-            confirm.setText(day.complete?"إلغاء تأكيد اكتمال اليوم":"تأكيد اكتمال تسجيل اليوم");
-            confirm.setEnabled(day.complete||!day.needsReview);
-            if(!day.complete){confirm.setBackground(rounded(ACCENT,16));confirm.setTextColor(onPrimary());}
-            LinearLayout.LayoutParams actionParams=new LinearLayout.LayoutParams(-1,-2);actionParams.topMargin=dp(10);parent.addView(confirm,actionParams);
-            confirm.setOnClickListener(v->{
-                if(day.complete){DailyPointsStore.revoke(this,code,day.date);dialog.dismiss();render();pointsDialog(code,all);return;}
-                new ChoiceDialogBuilder().setTitle("كل مصروفات "+dayLabel(day.date)+" متسجلة؟")
-                        .setMessage("بعد التأكيد، نتيجة اليوم "+pointsNumber(day.points())+" نقطة هتدخل رصيدك. راجع الشراء والرسوم والمصروفات الناقصة؛ تقدر تلغي التأكيد بعدين.")
-                        .setPositiveButton("التسجيل كامل",(d,w)->{
-                            try{DailyPointsStore.confirm(this,db,code,day.date,LocalDate.now());}
-                            catch(IllegalArgumentException changed){toast("اليوم محتاج مراجعة أو لسه مفتوح");}
-                            dialog.dismiss();render();pointsDialog(code,all);
-                        }).setNegativeButton("لسه هراجع",null).show();
-            });
-        }
         TextView operations=label(all?"راجع عمليات اليوم ←":day.date.equals(today)?"راجع عمليات اليوم ←":"راجع عمليات امبارح ←",13,ACCENT,true);
         operations.setPadding(0,dp(10),0,dp(8));operations.setMinHeight(dp(48));
         operations.setOnClickListener(v->{

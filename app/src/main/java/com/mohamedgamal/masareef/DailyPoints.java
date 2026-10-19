@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 
-/** Whole daily points: ten currency units per point, rounded once per day. No award for missing coverage. */
+/** Whole daily points: ten currency units per point, rounded once per day with a known dated limit. */
 final class DailyPoints {
     static final class Day {
         final LocalDate date;
@@ -18,7 +18,7 @@ final class DailyPoints {
         }
         BigDecimal points(){return BigDecimal.valueOf(difference,3).setScale(0,RoundingMode.HALF_UP);}
         String status(LocalDate today){return date.equals(today)?"مؤقتة لحد نهاية اليوم":needsReview?"راجع العمليات المحتاجة مراجعة":
-                complete?"معتمدة · تتحدث لو البيانات اتصححت":"في انتظار تأكيد اكتمال التسجيل";}
+                complete?"معتمدة تلقائيًا · تتحدث لو البيانات اتصححت":"الحد التاريخي غير معروف";}
     }
     static BigDecimal total(Iterable<Day> days){BigDecimal total=BigDecimal.ZERO;for(Day day:days)if(day.finalized)total=total.add(day.points());return total;}
     static String format(BigDecimal points){return (points.signum()>0?"+":"")+points.stripTrailingZeros().toPlainString();}

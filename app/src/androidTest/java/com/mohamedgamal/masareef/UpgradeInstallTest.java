@@ -108,6 +108,7 @@ public final class UpgradeInstallTest extends Instrumentation {
         JSONArray financialPrefs=new JSONArray();
         for(String name:new String[]{DailySummary.SETTINGS,DailyPointsStore.SETTINGS,"widget_settings"}){
             java.util.TreeMap<String,?> entries=new java.util.TreeMap<>(target.getSharedPreferences(name,0).getAll());
+            entries.keySet().removeIf(key->key.startsWith("auto_")); // New derived continuity metadata; all original preference values still compare exactly.
             financialPrefs.put(name).put(entries.toString());
         }
         result.put("financial_preferences_sha256",digest(financialPrefs.toString()));

@@ -61,8 +61,7 @@ final class ReleaseVisualTest {
                 db.addManualEntry(at(today,8),amount,"EGP",merchant,"تسوق",null,"expense",null,"=1+1");amount+=100;
             }
             DailySummary.save(target,new DailyAllowance.Plan("EGP",25000,today.minusDays(1),0));
-            DailyPointsStore.enable(target,"EGP",today);DailyPointsStore.observe(target,"EGP",today.minusDays(1));
-            DailyPointsStore.confirm(target,db,"EGP",today.minusDays(1),today);
+            DailyPointsStore.enable(target,"EGP",today.minusDays(1));DailyPointsStore.observe(target,"EGP",today.minusDays(1));
             ok(db.reimbursementCandidates(db.transactionById(income)).stream().anyMatch(tx->tx.id==dateOnly),"Date-only purchase excluded by morning receipt");
             ok(db.reimbursementCandidates(db.transactionById(income)).stream().noneMatch(tx->tx.id==exact),"Exact noon purchase incorrectly treated as date-only");
             activity=(MainActivity)runner.startActivitySync(new android.content.Intent(target,MainActivity.class)

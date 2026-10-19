@@ -894,8 +894,7 @@ final class FeatureAuditTest {
         db.addManual(at(yesterday)+1000,2500,"EGP","Coffee","مقاهي");long coffee=db.latestInserted().id;
         db.addManual(at(today),1000,"EGP","today","مقاهي");
         db.addManualEntry(at(today)+1000,29500,"EGP","colleague","دخل",null,"income",null,null);long back=db.latestInserted().id;
-        ok(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)).signum()==0);
-        DailyPointsStore.confirm(context,db,"EGP",yesterday,today);DailyPointsStore.confirm(context,db,"EGP",yesterday,today);
+        // Closed days derive automatically, without a confirmation write.
         ok("-19".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)))));
         db.linkReimbursement(back,buy);
         java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",today);
@@ -906,20 +905,17 @@ final class FeatureAuditTest {
         days=DailyPointsStore.load(context,db,"EGP",today);eq(25000,days.get(0).limit);eq(25000,days.get(1).limit);
         DailyPointsStore.disable(context,"EGP");DailyPointsStore.enable(context,"EGP",today);eq(25000,DailyPointsStore.load(context,db,"EGP",today).get(1).limit);
         try{DailyPointsStore.confirm(context,db,"EGP",today,today);throw new AssertionError("Open day finalized");}catch(IllegalArgumentException expected){}
-        DailyPointsStore.revoke(context,"EGP",yesterday);ok(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)).signum()==0);
+        ok("+9".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)))));
     }
 
-    public void testPointsRequireCoverageAndKeepCurrenciesAndUnknownDaysSeparate() {
+    public void testPointsCloseAutomaticallyAndKeepCurrenciesAndUnknownDaysSeparate() {
         LocalDate today=LocalDate.now(),yesterday=today.minusDays(1);
         DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,yesterday.minusDays(1),0));
         DailySummary.save(context,new DailyAllowance.Plan("USD",1000,yesterday,0));
         DailyPointsStore.enable(context,"EGP",yesterday);DailyPointsStore.enable(context,"USD",yesterday);
         db.addManual(at(yesterday),100,"USD","USD coffee","مقاهي");
-        eq(1,DailyPointsStore.load(context,db,"EGP",today).size());eq(0,DailyPointsStore.load(context,db,"EGP",today).get(0).spending);
-        ok(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)).signum()==0);
-        DailyPointsStore.confirm(context,db,"EGP",yesterday,today);
+        eq(2,DailyPointsStore.load(context,db,"EGP",today).size());eq(0,DailyPointsStore.load(context,db,"EGP",today).get(0).spending);
         ok("+25".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today)))));
-        DailyPointsStore.confirm(context,db,"USD",yesterday,today);
         ok("+1".equals(DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"USD",today)))));
         db.addManual(at(yesterday),100,"EGP","needs review","أخرى");long id=db.latestInserted().id;
         db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{id});
@@ -928,6 +924,75 @@ final class FeatureAuditTest {
         try{DailyPointsStore.confirm(context,db,"EGP",yesterday.minusDays(1),today);throw new AssertionError("Unobserved day finalized");}catch(IllegalArgumentException expected){}
     }
 
+    public void testAutomaticPointsCatchUpWithoutOpeningAndRecomputeLateChanges(){
+        LocalDate first=LocalDate.of(2026,10,1),today=first.plusDays(10);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,first,0),first);DailyPointsStore.enable(context,"EGP",first);
+        long revision=db.changes();java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",today);
+        eq(11,days.size());eq("+250",DailyPoints.format(DailyPoints.total(days)));ok(!days.get(10).finalized);eq(revision,db.changes());
+        eq("+250",DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today))));
+        ok(db.addManual(at(first.plusDays(2)),15000,"EGP","QA late shop","بقالة"));long id=db.latestInserted().id;
+        eq("+235",DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today))));
+        db.archiveEntry(id,"bank confirmed cancellation",true);
+        eq("+250",DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today))));
+    }
+    public void testAutomaticPointsRespectDatedLimitsRemovalAndFutureStart(){
+        LocalDate first=LocalDate.of(2026,10,1);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",10000,first,0),first);DailyPointsStore.enable(context,"EGP",first);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",20000,first,0),first.plusDays(3));
+        java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",first.plusDays(7));
+        eq(10000,days.get(3).limit);eq(20000,days.get(4).limit);eq("+100",DailyPoints.format(DailyPoints.total(days)));
+        DailySummary.remove(context,"EGP",first.plusDays(7));
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",30000,first.plusDays(10),0),first.plusDays(10));
+        days=DailyPointsStore.load(context,db,"EGP",first.plusDays(13));
+        eq("+180",DailyPoints.format(DailyPoints.total(days)));
+        for(DailyPoints.Day day:days)ok(day.date.isBefore(first.plusDays(8))||!day.date.isBefore(first.plusDays(11)));
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",40000,first.plusDays(15),0),first.plusDays(13));
+        days=DailyPointsStore.load(context,db,"EGP",first.plusDays(17));
+        for(DailyPoints.Day day:days){ok(!day.date.equals(first.plusDays(14)));if(!day.date.isBefore(first.plusDays(15)))eq(40000,day.limit);}
+    }
+    public void testAutomaticPointsPauseDoesNotAwardDisabledDays(){
+        LocalDate first=LocalDate.of(2026,10,1);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",10000,first,0),first);DailyPointsStore.enable(context,"EGP",first);
+        DailyPointsStore.disable(context,"EGP",first.plusDays(2));
+        java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",first.plusDays(6));
+        eq(3,days.size());eq("+30",DailyPoints.format(DailyPoints.total(days)));
+        DailyPointsStore.enable(context,"EGP",first.plusDays(6));DailyPointsStore.enable(context,"EGP",first.plusDays(6));
+        days=DailyPointsStore.load(context,db,"EGP",first.plusDays(9));eq(7,days.size());eq("+60",DailyPoints.format(DailyPoints.total(days)));
+        eq(0,DailyPointsStore.unknownDays(context,"EGP",first.plusDays(9)));
+    }
+    public void testLegacyPointsCloseKnownDaysButDoNotInventGapLimits(){
+        LocalDate first=LocalDate.of(2026,10,1),today=first.plusDays(5);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",10000,first,0),today);
+        SharedPreferences prefs=context.getSharedPreferences(DailyPointsStore.SETTINGS,0);
+        prefs.edit().putBoolean("enabled_EGP",true).putLong("limit_EGP_"+first,10000).putLong("limit_EGP_"+first.plusDays(2),10000)
+                .putBoolean("complete_EGP_"+first,false).commit();
+        java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",today);
+        eq(3,days.size());eq("+20",DailyPoints.format(DailyPoints.total(days)));eq(3,DailyPointsStore.unknownDays(context,"EGP",today));
+        eq("+40",DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",today.plusDays(2)))));
+        ok(prefs.contains("complete_EGP_"+first));ok(!prefs.getBoolean("complete_EGP_"+first,true));
+    }
+    public void testAutomaticPointsUseLocalCalendarAcrossShortDstDay(){
+        java.util.TimeZone original=java.util.TimeZone.getDefault();
+        try{
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Europe/Berlin"));LocalDate first=LocalDate.of(2026,3,28);
+            DailySummary.save(context,new DailyAllowance.Plan("EGP",25000,first,0),first);DailyPointsStore.enable(context,"EGP",first);
+            db.addManual(first.plusDays(1).atTime(23,45).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),1000,"EGP","QA DST late","بقالة");
+            db.addManual(first.plusDays(2).atTime(0,15).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),2000,"EGP","QA DST early","بقالة");
+            java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",first.plusDays(3));
+            eq(4,days.size());eq(1000,days.get(1).spending);eq(2000,days.get(2).spending);eq("+72",DailyPoints.format(DailyPoints.total(days)));
+        }finally{java.util.TimeZone.setDefault(original);}
+    }
+    public void testUntrackedBudgetChangeLeavesMissingDaysUnknownAndClockCannotRewriteHistory(){
+        LocalDate first=LocalDate.of(2026,10,1);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",10000,first,0),first);DailyPointsStore.enable(context,"EGP",first);
+        // Simulate an interrupted settings/history update. The new limit does not prove the intervening days.
+        context.getSharedPreferences(DailySummary.SETTINGS,0).edit().putLong("amount_EGP",30000).commit();
+        java.util.List<DailyPoints.Day> days=DailyPointsStore.load(context,db,"EGP",first.plusDays(6));
+        eq(2,days.size());eq("+10",DailyPoints.format(DailyPoints.total(days)));eq(5,DailyPointsStore.unknownDays(context,"EGP",first.plusDays(6)));
+        eq("+40",DailyPoints.format(DailyPoints.total(DailyPointsStore.load(context,db,"EGP",first.plusDays(7)))));
+        java.util.Map<String,?> before=context.getSharedPreferences(DailyPointsStore.SETTINGS,0).getAll();
+        DailyPointsStore.observe(context,"EGP",first.plusDays(2));ok(before.equals(context.getSharedPreferences(DailyPointsStore.SETTINGS,0).getAll()));
+    }
     private long oldPurchase(String merchant,String category,long t,boolean edited) {
         db.addManual(t,8250,"EGP",merchant,category);long id=db.latestInserted().id;
         ContentValues values=new ContentValues();values.put("source","SMS");values.put("user_edited",edited?1:0);

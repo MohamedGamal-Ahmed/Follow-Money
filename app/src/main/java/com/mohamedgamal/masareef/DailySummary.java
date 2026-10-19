@@ -43,14 +43,28 @@ final class DailySummary {
         catch(RuntimeException invalid) {return null;}
     }
     static void save(Context context,DailyAllowance.Plan plan) {
-        SharedPreferences prefs=context.getSharedPreferences(SETTINGS,Context.MODE_PRIVATE);
-        java.util.Set<String> codes=new java.util.HashSet<>(prefs.getStringSet("currencies",java.util.Collections.emptySet()));codes.add(plan.currency);
-        prefs.edit().putStringSet("currencies",codes).putLong("amount_"+plan.currency,plan.limit)
-                .putString("start_"+plan.currency,plan.starts.toString()).putInt("salary_"+plan.currency,plan.salaryDay).apply();
+        save(context,plan,LocalDate.now());
+    }
+    static void save(Context context,DailyAllowance.Plan plan,LocalDate today) {
+        synchronized(DailyPointsStore.class){
+            DailyPointsStore.observe(context,plan.currency,today);
+            SharedPreferences prefs=context.getSharedPreferences(SETTINGS,Context.MODE_PRIVATE);
+            java.util.Set<String> codes=new java.util.HashSet<>(prefs.getStringSet("currencies",java.util.Collections.emptySet()));codes.add(plan.currency);
+            prefs.edit().putStringSet("currencies",codes).putLong("amount_"+plan.currency,plan.limit)
+                    .putString("start_"+plan.currency,plan.starts.toString()).putInt("salary_"+plan.currency,plan.salaryDay).apply();
+            DailyPointsStore.planChanged(context,plan.currency,today);
+        }
     }
     static void remove(Context context,String currency) {
-        SharedPreferences prefs=context.getSharedPreferences(SETTINGS,Context.MODE_PRIVATE);
-        prefs.edit().remove("amount_"+currency).remove("start_"+currency).apply();
+        remove(context,currency,LocalDate.now());
+    }
+    static void remove(Context context,String currency,LocalDate today) {
+        synchronized(DailyPointsStore.class){
+            DailyPointsStore.observe(context,currency,today);
+            SharedPreferences prefs=context.getSharedPreferences(SETTINGS,Context.MODE_PRIVATE);
+            prefs.edit().remove("amount_"+currency).remove("start_"+currency).apply();
+            DailyPointsStore.planChanged(context,currency,today);
+        }
     }
     static void saveSalary(Context context,String currency,long monthlyAmount,int day) {
         if(monthlyAmount<0||day<0||day>DailyAllowance.MONTH_END)throw new IllegalArgumentException("Invalid salary");
