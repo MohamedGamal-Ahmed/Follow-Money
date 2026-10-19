@@ -1218,6 +1218,324 @@ final class AuditRegressionTest {
     public void testIncomeBroadcastKeepsTheCommitmentEditorDraft(){
         new LedgerRefreshRegressionTest(runner,context,db).check("income",true,false);
     }
+    // ---- P2-A import baseline. These fixtures run against unmodified production code and record what the
+    // historical SMS/CSV entry points do today: the legacy number is a ledger row-count delta, so a committed
+    // row that the selection never named, a refused insert and a side-effect-only import all report 0. ----
+    private long receipts(){return scalar("SELECT COUNT(*) FROM sms_import_receipts");}
+    private long evidenceCount(){return scalar("SELECT COUNT(*) FROM capture_evidence");}
+    private long imported(SmsPreview... rows){return new ImportBatch(db).execute(Arrays.asList(rows));}
+    private long selectedDirect(SmsPreview... rows){return new ImportBatch(db).applySelected(Arrays.asList(rows));}
+
+    public void testImportBaselineFreshRowCommitsOneRowWithReceiptAndEvidence(){
+        long t=at(LocalDate.now(),10),rows=db.transactionCount(),revision=db.changes();
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 100 at QA IMPORT FRESH",t);ok(row!=null);
+        eq(1,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(rows+1,db.transactionCount());eq(1,receipts());eq(1,evidenceCount());ok(db.changes()>revision);
+        ExpenseDb.Transaction created=db.latestInserted();
+        eq(10000,created.amountMinor);ok("expense".equals(created.kind));ok(!created.needsReview);
+        eq(created.id,scalar("SELECT transaction_id FROM capture_evidence"));
+    }
+
+    public void testImportBaselineIdenticalRowTwiceIsReceiptedOnceAndReplacesNoEvidence(){
+        long t=at(LocalDate.now(),10),rows=db.transactionCount(),revision=db.changes();
+        String body="Card purchase EGP 120 at QA DUPLICATE";
+        SmsPreview first=SmsPreview.parse("BANK",body,t),second=SmsPreview.parse("BANK",body,t);
+        ok(first!=null&&second!=null);ok(first.body.equals(second.body));
+        eq(1,new ImportBatch(db).execute(Arrays.asList(first,second)));
+        eq(rows+1,db.transactionCount());eq(1,receipts());eq(1,evidenceCount());ok(db.changes()>revision);
+    }
+
+    public void testImportBaselineDistinctKeyMatchingTheSamePaymentReportsNoSecondRow(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview first=SmsPreview.parse("BANK","Card purchase EGP 200 at QA SEMANTIC",t);
+        SmsPreview second=SmsPreview.parse("BANK","Card  purchase EGP 200 at QA SEMANTIC",t+1000);
+        ok(first!=null&&second!=null);ok(!first.body.equals(second.body));
+        long rows=db.transactionCount(),revision=db.changes();
+        eq(1,new ImportBatch(db).execute(Arrays.asList(first,second)));
+        eq(rows+1,db.transactionCount());eq(2,receipts());eq(2,evidenceCount());ok(db.changes()>revision);
+        eq(1,scalar("SELECT COUNT(*) FROM transactions WHERE amount_minor=20000"));
+    }
+
+    public void testImportBaselineRowCapturedEarlierIsSkippedWithoutNewReceipt(){
+        long t=at(LocalDate.now(),10);String body="Card purchase EGP 300 at QA ALREADY";
+        ok(db.addSms("BANK",body,t));
+        SmsPreview row=SmsPreview.parse("BANK",body,t);ok(row!=null);
+        long rows=db.transactionCount(),revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(rows,db.transactionCount());eq(0,receipts());eq(1,evidenceCount());eq(revision,db.changes());
+        eq(1,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
+    }
+
+    public void testImportBaselineExcludedKeyIsSkippedWithoutReceiptOrRow(){
+        long t=at(LocalDate.now(),10);String body="Card purchase EGP 400 at QA EXCLUDED IMPORT";
+        SmsPreview row=SmsPreview.parse("BANK",body,t);ok(row!=null);
+        db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES(?)",
+                new Object[]{CaptureIdentity.smsKey(row.sender,row.body,t)});
+        long rows=db.transactionCount(),revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
+        eq(2,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
+    }
+
+    public void testImportBaselineOtpAndNullBodiesNeverReachTheBatch(){
+        long t=at(LocalDate.now(),10);
+        ok(SmsPreview.parse("BANK","Your OTP is 123456 for payment EGP 227",t)==null);
+        ok(SmsPreview.parse("BANK",null,t)==null);
+        SmsPreview kept=SmsPreview.parse("BANK","Card purchase EGP 500 at QA NULL GUARD",t);ok(kept!=null);
+        long rows=db.transactionCount(),revision=db.changes();
+        try{new ImportBatch(db).execute(Arrays.asList(kept,null));throw new AssertionError("A null row was accepted into the batch");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(rows,db.transactionCount());eq(0,receipts());eq(revision,db.changes());
+        ok(db.getWritableDatabase().isOpen()&&!db.getWritableDatabase().inTransaction());
+    }
+
+    public void testImportBaselineBalanceOnlyRowWritesSnapshotAndReceiptWithoutALedgerRow(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview row=SmsPreview.parse("BANK","Account ending 1234 available balance EGP 1000",t);
+        ok(row!=null);ok("balance".equals(row.kind));
+        long revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
+        eq(1,scalar("SELECT COUNT(*) FROM balance_snapshots"));eq(100000,scalar("SELECT balance_minor FROM balance_snapshots"));
+        ok(db.changes()>revision);eq(1,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
+    }
+
+    public void testImportBaselineUnmatchedCancellationRecordsReviewWithoutArchive(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview row=SmsPreview.parse("BANK",CANCEL_NOTICE,t);ok(row!=null);ok("correction".equals(row.kind));
+        long revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,db.transactionCount());eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
+        eq(1,scalar("SELECT COUNT(*) FROM capture_events WHERE status='needs_confirmation'"));
+        eq(0,evidenceCount());eq(1,receipts());ok(db.changes()>revision);
+    }
+
+    public void testImportBaselineMatchedCancellationStillWaitsForReviewWithoutArchiving(){
+        long t=at(LocalDate.now(),10),account=db.addPaymentSource("BANK","حساب","1111");
+        ok(db.addManualEntry(t-120000,22700,"EGP","تحويل QA","تحويلات",account,"expense",null,null));
+        long debit=db.latestInserted().id;
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0 WHERE id=?",new Object[]{debit});
+        SmsPreview row=SmsPreview.parse("BANK",CANCEL_NOTICE,t);ok(row!=null);
+        long rows=db.transactionCount(),revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(rows,db.transactionCount());eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
+        ok(db.transactionById(debit)!=null,"A historical cancellation archived the debit it should only flag");
+        eq(22700,db.transactionById(debit).amountMinor);ok("expense".equals(db.transactionById(debit).kind));
+        eq(1,scalar("SELECT COUNT(*) FROM capture_events WHERE status='needs_confirmation'"));
+        eq(1,receipts());ok(db.changes()>revision);
+    }
+
+    public void testImportBaselineRepairTouchesARowTheSelectionNeverNamed(){
+        long t=at(LocalDate.now(),10);
+        db.addPaymentSource("BankMisr","حساب","1111");
+        long incomingAccount=db.addPaymentSource("BankMisr","حساب","2222");
+        ok(db.addManualEntry(t+60000,10000,"EGP","QA in","دخل",incomingAccount,"income",null,null));
+        long incoming=db.latestInserted().id;
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0 WHERE id=?",new Object[]{incoming});
+        SmsPreview row=SmsPreview.parse("BankMisr","تم تحويل مبلغ 100.50 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222",t);
+        ok(row!=null);ok(row.isTransaction(),"the selected row is not a ledger candidate");
+        long rows=db.transactionCount(),revision=db.changes();
+        eq(1,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(rows+1,db.transactionCount());
+        long transfer=scalar("SELECT id FROM transactions WHERE kind='transfer' LIMIT 1");
+        eq(10000,db.transactionById(transfer).amountMinor);eq(50,db.transferFee(transfer));
+        eq(1,scalar("SELECT COUNT(*) FROM transactions WHERE fee_parent_id="+transfer));
+        ok(db.transactionById(incoming)==null,"repair removed a row the selection never named");
+        eq(1,scalar("SELECT COUNT(*) FROM transaction_archive WHERE original_id="+incoming));
+        eq(2,db.transactionCount());ok(db.changes()>revision);
+    }
+
+    public void testImportBaselineCrossChannelDuplicateIsMergedAfterTheSelectedRowIsSaved(){
+        long t=at(LocalDate.now(),10);
+        ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 100 at QA SHOP",t+150000);ok(row!=null);
+        long rows=db.transactionCount(),revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(rows,db.transactionCount());
+        eq(1,scalar("SELECT COUNT(*) FROM transaction_archive"));eq(1,scalar("SELECT COUNT(*) FROM transactions"));
+        ok(db.changes()>revision);
+    }
+
+    public void testImportBaselineFaultOnTheLastSelectedRowLeavesNothingSaved(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview first=SmsPreview.parse("BANK","Card purchase EGP 10 at QA KEEP",t);
+        SmsPreview fault=SmsPreview.parse("BANK","Card purchase EGP 20 at QA FAULT",t+1000);
+        ok(first!=null&&fault!=null);
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_import_fault BEFORE INSERT ON transactions WHEN NEW.merchant='QA FAULT' BEGIN SELECT RAISE(ABORT,'qa import fault'); END");
+        long rows=db.transactionCount(),revision=db.changes();
+        try{new ImportBatch(db).execute(Arrays.asList(first,fault));throw new AssertionError("A faulty batch was reported as imported");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
+        ok(db.getWritableDatabase().isOpen()&&!db.getWritableDatabase().inTransaction());
+    }
+
+    public void testImportBaselineRepairFaultAfterAnEarlierRepairWriteRollsBackEverything(){
+        long t=at(LocalDate.now(),10);
+        db.addPaymentSource("BankMisr","حساب","1111");
+        long incomingAccount=db.addPaymentSource("BankMisr","حساب","2222");
+        ok(db.addManualEntry(t+60000,10000,"EGP","QA in","دخل",incomingAccount,"income",null,null));
+        long incoming=db.latestInserted().id;
+        db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0 WHERE id=?",new Object[]{incoming});
+        // The fee row is written before the incoming leg is archived, so the archive fault lands after a repair write.
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_import_archive_fault BEFORE INSERT ON transaction_archive BEGIN SELECT RAISE(ABORT,'qa archive fault'); END");
+        SmsPreview row=SmsPreview.parse("BankMisr","تم تحويل مبلغ 100.50 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222",t);
+        ok(row!=null);
+        long rows=db.transactionCount(),revision=db.changes();
+        try{new ImportBatch(db).execute(Collections.singletonList(row));throw new AssertionError("A failed repair was reported as a saved import");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
+        eq(0,scalar("SELECT COUNT(*) FROM transactions WHERE fee_parent_id IS NOT NULL"));
+        ok(db.transactionById(incoming)!=null&&"income".equals(db.transactionById(incoming).kind));
+        eq(revision,db.changes());ok(db.getWritableDatabase().isOpen()&&!db.getWritableDatabase().inTransaction());
+    }
+
+    public void testImportBaselineCallerTransactionNeverReportsACommittedImport(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA PENDING",t);ok(row!=null);
+        SQLiteDatabase sql=db.getWritableDatabase();
+        long rows=db.transactionCount(),revision=db.changes(),value;
+        sql.beginTransaction();
+        try{
+            value=new ImportBatch(db).execute(Collections.singletonList(row));
+            eq(1,value);eq(rows+1,db.transactionCount());eq(1,receipts());ok(sql.inTransaction());
+        }finally{sql.endTransaction();}
+        eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
+        ok(sql.isOpen()&&!sql.inTransaction());
+    }
+
+    public void testImportBaselineEmptySelectionWritesNothing(){
+        long revision=db.changes();
+        eq(0,new ImportBatch(db).execute(java.util.Collections.<SmsPreview>emptyList()));
+        eq(0,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
+    }
+
+    public void testImportBaselineIgnoredMerchantRuleRefusesTheRowButStillWritesAReceipt(){
+        long t=at(LocalDate.now(),10);db.putMerchantRule("QA IGNORED IMPORT","تسوق",true);
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 40 at QA IGNORED IMPORT",t);ok(row!=null);
+        long rows=db.transactionCount(),revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(rows,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
+        ok(db.changes()>revision,"a refused insert still committed its receipt");
+        eq(1,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
+    }
+
+    public void testImportBaselineHintOnlyRowWritesASuggestionWithoutALedgerRow(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview row=SmsPreview.parse("AnotherFinance","نذكرك بسداد القسط الشهري، يرجى مراجعة التطبيق للمبلغ",t);
+        ok(row!=null);ok("commitment".equals(row.kind));
+        long revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
+        eq(1,scalar("SELECT COUNT(*) FROM commitment_suggestions"));
+        eq(1,scalar("SELECT COUNT(*) FROM commitment_observations"));ok(db.changes()>revision);
+    }
+
+    public void testImportBaselineServiceOnlyRowChangesACommitmentWithoutALedgerRow(){
+        long t=at(LocalDate.now(),10);
+        ok(db.addRecurring("Netflix",5000,"EGP",LocalDate.now()));
+        long commitment=scalar("SELECT id FROM recurring ORDER BY id DESC LIMIT 1");
+        SmsPreview row=SmsPreview.parse("Billing","Netflix bill paid successfully",t);ok(row!=null);ok(!row.isTransaction());
+        long revision=db.changes();
+        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
+        eq(1,scalar("SELECT COUNT(*) FROM recurring WHERE id="+commitment+" AND last_paid_date IS NOT NULL"));
+        ok(db.changes()>revision,"a commitment update is not a no-op import");
+    }
+
+    public void testImportBaselineApplySelectedStillCountsOnlyLedgerRows(){
+        long t=at(LocalDate.now(),10);
+        SmsPreview fresh=SmsPreview.parse("BANK","Card purchase EGP 90 at QA APPLY",t);
+        SmsPreview balance=SmsPreview.parse("BANK","Account ending 1234 available balance EGP 1000",t+1000);
+        ok(fresh!=null&&balance!=null);
+        eq(1,selectedDirect(fresh,balance));
+        eq(1,db.transactionCount());eq(2,receipts());eq(1,evidenceCount());
+        eq(1,scalar("SELECT COUNT(*) FROM balance_snapshots"));
+    }
+
+    public void testImportBaselineCsvFreshFileThenReimportCountsTheSameRowsBothWays(){
+        String csv="Date,Merchant,Amount\n2026-10-15,QA ONE,-1.00\n2026-10-15,QA TWO,-2.00\n2026-10-15,QA THREE,-3.00\n2026-10-15,QA FOUR,-4.00";
+        List<CsvImport.Row> rows=CsvImport.parse(csv);eq(4,rows.size());
+        long revision=db.changes();
+        ExpenseDb.CsvBatchResult first=db.importCsvBatch("qa-baseline-file",rows);
+        eq(4,first.saved);eq(0,first.duplicates);
+        eq(4,db.transactionCount());eq(0,evidenceCount());eq(0,receipts());
+        eq(4,scalar("SELECT COUNT(*) FROM transactions WHERE time_precision='date_only'"));
+        ok(db.changes()>revision);
+        long afterFirst=db.changes();
+        ExpenseDb.CsvBatchResult again=db.importCsvBatch("qa-baseline-file",rows);
+        eq(0,again.saved);eq(4,again.duplicates);eq(4,db.transactionCount());eq(afterFirst,db.changes());
+    }
+
+    public void testImportBaselineCsvExcludedKeyIsCountedAsADuplicateForLegacy(){
+        List<CsvImport.Row> rows=CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA EXCLUDED CSV,-5.00\n2026-10-15,QA CSV TWO,-6.00");
+        eq(2,rows.size());
+        db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES(?)",
+                new Object[]{"csv:qa-excluded-file:"+rows.get(0).line});
+        long revision=db.changes();
+        ExpenseDb.CsvBatchResult result=db.importCsvBatch("qa-excluded-file",rows);
+        eq(1,result.saved);eq(1,result.duplicates);
+        eq(1,db.transactionCount());eq(0,scalar("SELECT COUNT(*) FROM transactions WHERE merchant='QA EXCLUDED CSV'"));
+        ok(db.changes()>revision,"the saved row still invalidated the ledger");
+    }
+
+    public void testImportBaselineCsvIgnoredMerchantRuleIsBypassedAndTheRowIsSaved(){
+        db.putMerchantRule("QA CSV IGNORED","تسوق",true);
+        List<CsvImport.Row> rows=CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA CSV IGNORED,-7.00");
+        eq(1,rows.size());
+        ExpenseDb.CsvBatchResult result=db.importCsvBatch("qa-ignored-file",rows);
+        eq(1,result.saved);eq(0,result.duplicates);
+        eq(1,scalar("SELECT COUNT(*) FROM transactions WHERE merchant='QA CSV IGNORED'"));
+        eq(0,evidenceCount());eq(0,receipts());
+    }
+
+    public void testImportBaselineCsvInvalidAmountIsRejectedBeforeTheBatchOwnsIt(){
+        try{CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA ZERO,0.00");throw new AssertionError("A non-positive CSV row was parsed");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(0,db.transactionCount());eq(0,receipts());
+    }
+
+    public void testImportBaselineCsvInvalidRowsAreRejectedWithNothingSaved(){
+        // The parser is the failure surface for an unsaveable row: a non-positive amount and a blank merchant
+        // never reach the batch, so "not saved" cannot be misreported as a duplicate or a refusal.
+        for(String row:new String[]{"2026-10-15,QA ZERO,0.00","2026-10-15,,-9.00"}){
+            try{CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA FINE CSV,-8.00\n"+row);
+                throw new AssertionError("An invalid CSV row was accepted: "+row);}
+            catch(AssertionError wrong){throw wrong;}
+            catch(RuntimeException expected){}
+        }
+        eq(0,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());
+        ok(db.getWritableDatabase().isOpen()&&!db.getWritableDatabase().inTransaction());
+    }
+
+    public void testImportBaselineCsvFaultMidFileLeavesNothingSavedAndTheHelperOpen(){
+        List<CsvImport.Row> rows=CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA ONE CSV,-1.00\n2026-10-15,QA CSV FAULT,-2.00\n2026-10-15,QA CSV THREE,-3.00");
+        eq(3,rows.size());
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_baseline_csv_fault BEFORE INSERT ON transactions WHEN NEW.merchant='QA CSV FAULT' BEGIN SELECT RAISE(ABORT,'qa baseline csv fault'); END");
+        long revision=db.changes();
+        try{db.importCsvBatch("qa-fault-file",rows);throw new AssertionError("A faulty CSV batch was reported as imported");}
+        catch(AssertionError wrong){throw wrong;}
+        catch(RuntimeException expected){}
+        eq(0,db.transactionCount());eq(revision,db.changes());
+        ok(db.getWritableDatabase().isOpen()&&!db.getWritableDatabase().inTransaction());
+    }
+
+    public void testImportBaselineCsvBatchInsideACallerTransactionIsNeverReportedAsCommitted(){
+        List<CsvImport.Row> rows=CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA CSV PENDING,-1.00\n2026-10-15,QA CSV PENDING TWO,-2.00");
+        eq(2,rows.size());
+        SQLiteDatabase sql=db.getWritableDatabase();
+        long revision=db.changes();
+        sql.beginTransaction();
+        try{
+            ExpenseDb.CsvBatchResult result=db.importCsvBatch("qa-pending-file",rows);
+            eq(2,result.saved);eq(2,db.transactionCount());ok(sql.inTransaction());
+        }finally{sql.endTransaction();}
+        eq(0,db.transactionCount());eq(revision,db.changes());ok(sql.isOpen()&&!sql.inTransaction());
+    }
+
     private int archivePromotions(){
         try{java.lang.reflect.Method method=ExpenseDb.class.getDeclaredMethod("archivePromotions",ExpenseDb.RepairReport.class);
             method.setAccessible(true);return (Integer)method.invoke(db,new ExpenseDb.RepairReport());}
