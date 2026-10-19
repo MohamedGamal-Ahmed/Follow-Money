@@ -112,7 +112,6 @@ public final class ParserSmokeTest {
         String[] withdrawals = {
                 "تم سحب 2000 جنيه من حسابك",
                 "تم سحب مبلغ 2,000 جنيه من حسابك",
-                "تم سحب 2000 جنيه من حسابك بدون رسوم",
                 "Cash withdrawal of EGP 2,000.00 from account ****1234",
                 "You have withdrawn EGP 500.00 from your account",
                 "Cash withdrawal at ATM for EGP 2,000.00 from account ****1234"
@@ -124,11 +123,43 @@ public final class ParserSmokeTest {
                         (cash == null ? "null" : cash.category));
             checked++;
         }
+        // The fee word belongs to its own amount, so the stated principal stays cash.
+        String[][] principalWithFee = {
+                {"تم سحب 2000 جنيه من حسابك برسوم 5 جنيه", "200000"},
+                {"Cash withdrawal of EGP 2,000.00 from account ****1234 with a fee of EGP 5.00", "200000"},
+                {"تم سحب 2000 جنيه من حسابك برسوم", "200000"},
+                {"Cash withdrawal of EGP 2000 from account ****1234 with a fee", "200000"}
+        };
+        for (String[] probe : principalWithFee) {
+            ExpenseParser.Parsed cash = ExpenseParser.parse("BANK", probe[0]);
+            if (cash == null || cash.amountMinor != Long.parseLong(probe[1]) || !"سحب نقدي".equals(cash.category))
+                throw new AssertionError("Principal swallowed by its own fee: " + probe[0] + " -> " +
+                        (cash == null ? "null" : cash.category + "/" + cash.amountMinor));
+            checked++;
+        }
+        // A negated fee describes the withdrawal; it must not turn the principal into spending.
+        String[][] withoutFee = {
+                {"تم سحب 2000 جنيه من حسابك بدون رسوم", "200000"},
+                {"تم سحب 2000 جنيه من حسابك دون رسوم", "200000"},
+                {"Cash withdrawal of EGP 2000 from account ****1234 without commission", "200000"},
+                {"Cash withdrawal of EGP 1,000.00 from account ****1234 with no fees", "100000"},
+                {"Cash withdrawal of EGP 2,000.00 from account ****1234 free of charge", "200000"},
+                {"Cash withdrawal of EGP 2,000.00 from account ****1234 commission-free", "200000"}
+        };
+        for (String[] probe : withoutFee) {
+            ExpenseParser.Parsed cash = ExpenseParser.parse("BANK", probe[0]);
+            if (cash == null || cash.amountMinor != Long.parseLong(probe[1]) || !"سحب نقدي".equals(cash.category))
+                throw new AssertionError("Negated fee turned cash into spending: " + probe[0] + " -> " +
+                        (cash == null ? "null" : cash.category + "/" + cash.amountMinor));
+            checked++;
+        }
         String[] fees = {
                 "Your account has been charged EGP 5.00 as a cash withdrawal fee at ATM",
                 "Your account was charged EGP 5.00 as a cash withdrawal fee",
                 "تم خصم 5 جنيه رسوم سحب نقدي من حسابك",
-                "تم خصم 5 جنيه عمولة سحب من ماكينة الصراف الآلي"
+                "تم خصم 5 جنيه عمولة سحب من ماكينة الصراف الآلي",
+                "رسوم سحب نقدي 5 جنيه من حسابك",
+                "تم خصم 5 جنيه مصاريف سحب من حسابك"
         };
         for (String body : fees) {
             ExpenseParser.Parsed fee = ExpenseParser.parse("BANK", body);
