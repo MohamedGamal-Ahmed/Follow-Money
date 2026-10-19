@@ -1024,7 +1024,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         MerchantRule rule = matchingRule(merchant);
         if (rule != null && !"يدوي".equals(source) && !"CSV".equals(source)) {
             if (rule.ignored) return false;
-            if ("expense".equals(kind) && !java.util.Arrays.asList("تحويلات","رسوم تحويل","سحب نقدي").contains(category)
+            if ("expense".equals(kind) && !java.util.Arrays.asList("تحويلات","رسوم تحويل","سحب نقدي",MoneyFlow.BANK_FEE_CATEGORY).contains(category)
                     && !rule.category.isBlank()) values.put("category", rule.category);
         }
         return getWritableDatabase().insertWithOnConflict("transactions", null, values,
@@ -1453,8 +1453,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         long end = month.plusMonths(1).withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
         java.util.Map<String, Long> totals = new java.util.LinkedHashMap<>();
         try (Cursor cursor = getReadableDatabase().rawQuery(
-                "SELECT currency, SUM(amount_minor) FROM transactions WHERE kind='expense' AND occurred_at>=? AND occurred_at<? GROUP BY currency",
-                new String[]{Long.toString(start), Long.toString(end)})) {
+                "SELECT currency, SUM(amount_minor) FROM transactions WHERE kind='expense' AND category<>? AND occurred_at>=? AND occurred_at<? GROUP BY currency",
+                new String[]{MoneyFlow.CASH_WITHDRAWAL_CATEGORY, Long.toString(start), Long.toString(end)})) {
             while (cursor.moveToNext()) totals.put(cursor.getString(0), cursor.getLong(1));
         }
         return totals;
@@ -1464,8 +1464,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         long start = month.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
         long end = month.plusMonths(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
         try (Cursor cursor = getReadableDatabase().rawQuery(
-                "SELECT COALESCE(SUM(amount_minor),0) FROM transactions WHERE kind=? AND currency=? AND occurred_at>=? AND occurred_at<?",
-                new String[]{kind, currency, Long.toString(start), Long.toString(end)})) {
+                "SELECT COALESCE(SUM(amount_minor),0) FROM transactions WHERE kind=? AND currency=? AND NOT(kind='expense' AND category=?) AND occurred_at>=? AND occurred_at<?",
+                new String[]{kind, currency, MoneyFlow.CASH_WITHDRAWAL_CATEGORY, Long.toString(start), Long.toString(end)})) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         }
     }
@@ -1476,8 +1476,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         List<CategoryTotal> result = new ArrayList<>();
         try (Cursor cursor = getReadableDatabase().rawQuery(
                 "SELECT category, currency, SUM(amount_minor) FROM transactions " +
-                "WHERE kind='expense' AND occurred_at>=? AND occurred_at<? GROUP BY category, currency ORDER BY currency, SUM(amount_minor) DESC",
-                new String[]{Long.toString(start), Long.toString(end)})) {
+                "WHERE kind='expense' AND category<>? AND occurred_at>=? AND occurred_at<? GROUP BY category, currency ORDER BY currency, SUM(amount_minor) DESC",
+                new String[]{MoneyFlow.CASH_WITHDRAWAL_CATEGORY, Long.toString(start), Long.toString(end)})) {
             while (cursor.moveToNext()) result.add(new CategoryTotal(cursor.getString(0),
                     cursor.getString(1), cursor.getLong(2)));
         }
@@ -1664,7 +1664,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 "AND occurred_at>=? AND occurred_at<?",
                 new String[]{plan.currency, Long.toString(start), Long.toString(end)})) {
             while (cursor.moveToNext())
-                if (plan.categories.contains(cursor.getString(0))) spent += cursor.getLong(1);
+                if (plan.categories.contains(cursor.getString(0)) &&
+                        MoneyFlow.bucket("expense", cursor.getString(0)) != MoneyFlow.Bucket.CASH_WITHDRAWAL)
+                    spent += cursor.getLong(1);
         }
         return spent;
     }
@@ -1878,6 +1880,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     /** The purchase an incoming payment repaid, or null. */
     public Transaction reimbursedExpense(long incomeId) { return reimbursements.reimbursedExpense(incomeId); }
+
+    /** A stored link that can no longer apply (the purchase became a cash withdrawal); kept for audit and undo. */
+    public Transaction ignoredReimbursement(long incomeId) { return reimbursements.ignoredLinkedExpense(incomeId); }
 
     public List<Transaction> reimbursingIncomes(long expenseId) { return reimbursements.reimbursingIncomes(expenseId); }
 

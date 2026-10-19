@@ -22,12 +22,18 @@ final class ReimbursementUseCase {
         LocalDate day=Instant.ofEpochMilli(income.when).atZone(ZoneId.systemDefault()).toLocalDate();
         for (Transaction tx:db.transactionsBetween(older?LocalDate.of(1970,1,1):day,older?day:day.plusDays(1)))
             if ("expense".equals(tx.kind) && tx.currency.equals(income.currency) && reimbursementPrecedes(tx,income) &&
-                    ExpenseDb.effectiveAmount(tx,offsets)>0 && MoneyFlow.bucket(tx.kind,tx.category)!=MoneyFlow.Bucket.OPEN_TRANSFER) result.add(tx);
+                    ExpenseDb.effectiveAmount(tx,offsets)>0 && isReimbursable(tx)) result.add(tx);
         result.sort((a,b)->{
             int byTime=Long.compare(b.when,a.when);
             return byTime!=0?byTime:Long.compare(b.id,a.id);
         });
         return result;
+    }
+
+    /** A repayment offsets a purchase; open transfers and cash withdrawals are not purchases. */
+    private static boolean isReimbursable(Transaction expense) {
+        MoneyFlow.Bucket bucket=MoneyFlow.bucket(expense.kind,expense.category);
+        return bucket!=MoneyFlow.Bucket.OPEN_TRANSFER && !MoneyFlow.isCashWithdrawal(expense.kind,expense.category);
     }
 
     private static boolean reimbursementPrecedes(Transaction expense,Transaction income) {
@@ -43,7 +49,7 @@ final class ReimbursementUseCase {
         Transaction income=db.transactionById(incomeId),expense=db.transactionById(expenseId);
         if(income==null || expense==null || !"income".equals(income.kind) || !"expense".equals(expense.kind) ||
                 !income.currency.equals(expense.currency) || !reimbursementPrecedes(expense,income) || db.reimbursedExpense(incomeId)!=null ||
-                MoneyFlow.bucket(expense.kind,expense.category)==MoneyFlow.Bucket.OPEN_TRANSFER)
+                !isReimbursable(expense))
             throw new IllegalArgumentException("Purchase or repayment changed");
         java.util.Map<Long,Long> offsets=db.reimbursementOffsets();
         long left=ExpenseDb.effectiveAmount(expense,offsets),applied=Math.min(left,income.amountMinor);

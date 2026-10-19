@@ -159,6 +159,176 @@ final class FeatureAuditTest {
         AccountMovement movement=new AccountMovement();movement.add("transfer","تحويلات",5000,true,true);
         eq(0,movement.ownIncoming);eq(0,movement.ownOutgoing);eq(0,movement.outgoing());eq(1,countRows("transactions"));
     }
+    public void testCashWithdrawalIsNeitherSpendingNorBudgetUse() {
+        LocalDate day=LocalDate.now();
+        ok(db.addManual(at(day),50000,"EGP","QA ATM","سحب نقدي"));
+        ok(db.addManual(at(day),10000,"EGP","QA grocery","بقالة"));
+        ok(db.addManual(at(day),500,"EGP","QA fee","رسوم تحويل"));
+        long planId=db.putBudgetPlan(null,"QA cash budget",100000,"EGP","monthly",day.withDayOfMonth(1),30,
+                Arrays.asList("سحب نقدي","بقالة","رسوم تحويل"));
+        ok(planId>0);
+        ExpenseDb.BudgetPlan plan=null;
+        for(ExpenseDb.BudgetPlan item:db.budgetPlans())if(item.id==planId)plan=item;
+        ok(plan!=null);
+        eq(10500,db.spentForBudget(plan,day));
+        eq(10500,db.monthlyTotals(day).get("EGP"));
+        eq(10500,db.monthlyTotalForKind(day,"EGP","expense"));
+        long categoryTotal=0;
+        for(ExpenseDb.CategoryTotal item:db.monthlyCategoryTotals(day))categoryTotal+=item.amountMinor;
+        eq(10500,categoryTotal);
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",100000,day,0));
+        DailySummary summary=DailySummary.load(context,db);
+        eq(10500,summary.currencies.get("EGP").expense);
+        eq(89500,summary.currencies.get("EGP").remaining);
+        eq(3,countRows("transactions")); // Historical rows are not rewritten or re-categorized.
+    }
+    public void testCapturedCashPrincipalAndStandaloneFeeUseEventWording() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        ok(db.addSms("BANK","تم سحب 2000 جنيه من حسابك",t));
+        ExpenseDb.Transaction cash=db.lastCaptured();
+        ok(cash!=null && "سحب نقدي".equals(cash.category));eq(200000,cash.amountMinor);
+        ok(db.addSms("BANK","Your account has been charged EGP 5.00 as a cash withdrawal fee at ATM",t+60000));
+        ExpenseDb.Transaction fee=db.lastCaptured();
+        ok(fee!=null && !"سحب نقدي".equals(fee.category));eq(500,fee.amountMinor);
+        // The withdrawal principal is visible but not spending; the standalone fee stays spending.
+        eq(500,db.monthlyTotals(day).get("EGP"));
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",100000,day,0));
+        DailySummary summary=DailySummary.load(context,db);
+        eq(500,summary.currencies.get("EGP").expense);
+        eq(99500,summary.currencies.get("EGP").remaining);
+        eq(2,countRows("transactions"));
+    }
+    public void testMixedPrincipalAndNegatedFeesStayCash() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        String[] withdrawals={
+                "تم سحب 2000 جنيه من حسابك برسوم 5 جنيه",
+                "Cash withdrawal of EGP 2,000.00 from account ****1234 with a fee of EGP 5.00",
+                "Cash withdrawal of EGP 500 from account ****1234 without commission",
+                "تم سحب 500 جنيه من حسابك بدون رسوم",
+                "Cash withdrawal of EGP 1,000.00 from account ****1234 with no fees"
+        };
+        long cashMinor=0;
+        for(int i=0;i<withdrawals.length;i++) {
+            ok(db.addSms("BANK",withdrawals[i],t+i*60000L));
+            ExpenseDb.Transaction row=db.lastCaptured();
+            ok(row!=null && "سحب نقدي".equals(row.category));
+            cashMinor+=row.amountMinor;
+        }
+        eq(600000,cashMinor);
+        ok(db.addSms("BANK","Your account has been charged EGP 5.00 as a cash withdrawal fee at ATM",t+10*60000L));
+        ExpenseDb.Transaction fee=db.lastCaptured();
+        ok(fee!=null && !"سحب نقدي".equals(fee.category));eq(500,fee.amountMinor);
+        // One row per message: a stated fee never splits or inflates the principal.
+        eq(6,countRows("transactions"));
+        eq(500,db.monthlyTotals(day).get("EGP"));
+        eq(500,db.monthlyTotalForKind(day,"EGP","expense"));
+        Map<Long,Long> offsets=db.reimbursementOffsets();
+        java.util.List<MoneyFlow.Item> items=new java.util.ArrayList<>();
+        for(ExpenseDb.Transaction tx:db.transactionsBetween(day,day.plusDays(1))) {
+            long amount=ExpenseDb.effectiveAmount(tx,offsets);
+            if(amount>0)items.add(new MoneyFlow.Item(tx.id,tx.when,amount,tx.currency,tx.kind,tx.category,tx.merchant));
+        }
+        MoneyFlow.Summary summary=MoneyFlow.summarize(items,
+                MoneyFlow.period(MoneyFlow.Range.MONTH,day,day),ZoneId.systemDefault()).get("EGP");
+        eq(600000,summary.of(MoneyFlow.Bucket.CASH_WITHDRAWAL));
+        eq(500,summary.of(MoneyFlow.Bucket.LIVING));
+        eq(500,summary.totalOut());
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",100000,day,0));
+        DailySummary daily=DailySummary.load(context,db);
+        eq(500,daily.currencies.get("EGP").expense);
+        eq(99500,daily.currencies.get("EGP").remaining);
+    }
+    public void testCashFeeOwnershipIsStableAcrossWordOrder() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        String[] messages={
+                "Cash withdrawal at ATM for EGP 2000 from account ****1234 with a fee",
+                "تم سحب من حسابك مبلغ 2000 جنيه مع رسوم",
+                "Your account was debited EGP 2000 at ATM with a fee",
+                "ATM cash withdrawal fee of EGP 5 from account ****1234",
+                "Cash withdrawal at ATM for EGP 5 from account ****1234 with a fee of EGP 5",
+                "Your account was charged EGP 5 from account ****1234 as a cash withdrawal fee"
+        };
+        long cash=0,fees=0;
+        for(int i=0;i<messages.length;i++) {
+            ok(db.addSms("BANK",messages[i],t+i*3600000L));
+            ExpenseDb.Transaction row=db.lastCaptured();ok(row!=null);
+            if(i==3 || i==5) {
+                ok(MoneyFlow.BANK_FEE_CATEGORY.equals(row.category));fees+=row.amountMinor;
+            } else {
+                ok(MoneyFlow.CASH_WITHDRAWAL_CATEGORY.equals(row.category));cash+=row.amountMinor;
+            }
+        }
+        eq(600500,cash);eq(1000,fees);eq(6,countRows("transactions"));
+        eq(1000,db.monthlyTotals(day).get("EGP"));
+        eq(1000,db.monthlyTotalForKind(day,"EGP","expense"));
+        DailySummary.save(context,new DailyAllowance.Plan("EGP",100000,day,0));
+        DailySummary summary=DailySummary.load(context,db);
+        eq(1000,summary.currencies.get("EGP").expense);
+        eq(99000,summary.currencies.get("EGP").remaining);
+    }
+    public void testWithdrawnVerbDoesNotHideNamedPayments() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        String[][] cases={
+                {"تم سحب مبلغ 1500 جنيه من حسابك قسط القرض","أقساط"},
+                {"EGP 1,500.00 withdrawn from your account for loan installment","أقساط"},
+                {"EGP 500 withdrawn from your account as transfer to Mohamed","تحويلات"},
+                {"تم سحب 250 جنيه من حسابك لصالح Vodafone","فواتير"},
+                {"EGP 220 withdrawn from your account at OPENAI *CHATGPT SUBSCR","اشتراكات"},
+                {"Cash withdrawal of EGP 2000 at Vodafone ATM","سحب نقدي"}
+        };
+        for(int i=0;i<cases.length;i++) {
+            ok(db.addSms("BANK",cases[i][0],t+i*3600000L));
+            ExpenseDb.Transaction row=db.lastCaptured();ok(row!=null);eq(cases[i][1],row.category);
+        }
+        eq(6,countRows("transactions"));
+        eq(397000,db.monthlyTotals(day).get("EGP"));
+        eq(397000,db.monthlyTotalForKind(day,"EGP","expense"));
+        ok(db.addSms("BANK","EGP 100 withdrawn from your account for purchase at CARREFOUR",t+7*3600000L));
+        ok(!MoneyFlow.isCashWithdrawal(db.lastCaptured().kind,db.lastCaptured().category));
+        eq(407000,db.monthlyTotalForKind(day,"EGP","expense"));
+    }
+    public void testLegacyReimbursementLinkToCashWithdrawalIsKeptButNotApplied() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        ok(db.addManual(t,200000,"EGP","QA ATM","سحب نقدي"));long withdrawal=db.latestInserted().id;
+        ok(db.addManualEntry(t+60000,50000,"EGP","QA refund","دخل",null,"income",null,null));long income=db.latestInserted().id;
+        // An earlier version could link a withdrawal; the stored link stays as audit history.
+        db.getWritableDatabase().execSQL("INSERT INTO reimbursements(income_id,expense_id,amount_minor) VALUES(?,?,?)",
+                new Object[]{income,withdrawal,50000});
+        Map<Long,Long> offsets=db.reimbursementOffsets();
+        eq(0,offsets.getOrDefault(withdrawal,0L));eq(0,offsets.getOrDefault(income,0L));
+        eq(200000,ExpenseDb.effectiveAmount(db.transactionById(withdrawal),offsets));
+        eq(50000,ExpenseDb.effectiveAmount(db.transactionById(income),offsets));
+        java.util.List<MoneyFlow.Item> items=new java.util.ArrayList<>();
+        for(ExpenseDb.Transaction tx:db.transactionsBetween(day,day.plusDays(1))) {
+            long amount=ExpenseDb.effectiveAmount(tx,offsets);
+            if(amount>0)items.add(new MoneyFlow.Item(tx.id,tx.when,amount,tx.currency,tx.kind,tx.category,tx.merchant));
+        }
+        MoneyFlow.Summary summary=MoneyFlow.summarize(items,
+                MoneyFlow.period(MoneyFlow.Range.MONTH,day,day),ZoneId.systemDefault()).get("EGP");
+        eq(200000,summary.of(MoneyFlow.Bucket.CASH_WITHDRAWAL));
+        eq(0,summary.totalOut());
+        eq(50000,summary.of(MoneyFlow.Bucket.INFLOW));
+        // Stored movements and the link itself are unchanged; undo removes only the link.
+        eq(1,countRows("reimbursements"));
+        eq(200000,db.transactionById(withdrawal).amountMinor);eq(50000,db.transactionById(income).amountMinor);
+        db.unlinkReimbursement(withdrawal);
+        eq(0,countRows("reimbursements"));
+        eq(2,countRows("transactions"));
+    }
+    public void testPurchaseReclassifiedToCashStopsApplyingItsReimbursement() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        ok(db.addManual(t,50000,"EGP","QA shop","بقالة"));long purchase=db.latestInserted().id;
+        ok(db.addManualEntry(t+60000,20000,"EGP","QA refund","دخل",null,"income",null,null));long income=db.latestInserted().id;
+        eq(20000,db.linkReimbursement(income,purchase));
+        eq(20000,db.reimbursementOffsets().get(purchase));
+        db.updateCategory(purchase,"سحب نقدي");
+        Map<Long,Long> offsets=db.reimbursementOffsets();
+        eq(0,offsets.getOrDefault(purchase,0L));eq(0,offsets.getOrDefault(income,0L));
+        eq(50000,ExpenseDb.effectiveAmount(db.transactionById(purchase),offsets));
+        eq(20000,ExpenseDb.effectiveAmount(db.transactionById(income),offsets));
+        eq(1,countRows("reimbursements"));
+        eq(2,countRows("transactions"));
+    }
     public void testMonthlySummaryUsesEffectiveAmountsAndNeverWritesLedger() {
         LocalDate day=LocalDate.of(2026,9,10);
         ok(db.addManual(at(day),10000,"EGP","QA purchase","بقالة"));long purchase=db.latestInserted().id;

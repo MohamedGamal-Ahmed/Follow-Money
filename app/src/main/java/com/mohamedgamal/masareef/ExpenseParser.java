@@ -78,6 +78,44 @@ public final class ExpenseParser {
             "\\bpurchase\\s+(?:at|from|of)\\b|transaction\\s+of|\\bwas\\s+charged\\b|successfully\\s+purchased|" +
             "\\bwithdrawn\\b|\\b(?:was|been)\\s+used\\b|you(?:\\s+have)?\\s+(?:paid|sent|received|transferred))");
 
+    /**
+     * The completed event itself is the cash principal. The merchant text alone is not enough:
+     * "تم سحب 2000 جنيه من حسابك" names no ATM but is still a withdrawal.
+     */
+    private static final Pattern CASH_WITHDRAWAL_EVENT = Pattern.compile(
+            "(?i)((?<![\\p{L}])تم\\s+سحب|سحب\\s+نقدي|\\bcash\\s+withdrawal\\b|\\bwithdrawn\\b|" +
+            "\\bwithdraw(?:al)?\\b|\\batm\\s+withdrawal\\b)");
+    /** Explicit fee wording, which a bank uses for its own charge rather than for withdrawn cash. */
+    private static final Pattern CASH_FEE_WORD = Pattern.compile(
+            "(?i)(\\bfees?\\b|\\bcommission\\b|\\bservice\\s+charge\\b|رسوم|عمولة|مصاريف|أتعاب|اتعاب)");
+    /** A fee can only be recognized next to cash/ATM/withdrawal wording; other fees keep their own category. */
+    private static final Pattern CASH_WITHDRAWAL_CONTEXT = Pattern.compile(
+            "(?i)(\\batm\\b|cash\\s+withdraw(?:al)?|\\bwithdraw(?:al|n)?\\b|سحب|صراف|ماكينة|كاش)");
+    /** A bare debit verb is weaker than a named bill/installment/transfer; literal cash/ATM is not. */
+    private static final Pattern EXPLICIT_CASH_CONTEXT = Pattern.compile(
+            "(?i)(\\batm\\b|\\bcash\\s+withdrawal\\b|\\bAAIBN\\d+\\b|سحب\\s+نقد[يى]|صراف|ماكينة)");
+    private static final Pattern CASH_PURCHASE_CONTEXT = Pattern.compile("(?i)(\\bpurchase\\b|شراء|مشتريات)");
+    /** "بدون رسوم" / "without commission" describes the withdrawal, not a charge. */
+    private static final Pattern CASH_FEE_NEGATED = Pattern.compile(
+            "(?i)(?<![\\p{L}])(?:بدون|بلا|دون|من\\s+غير|لا\\s+(?:توجد\\s+)?|no|without|free\\s+of)\\s*" +
+            "(?:(?:أي|اي|any|a|an|extra|additional)\\s*)?-?\\s*$|\\bzero\\s*-?\\s*$");
+    private static final Pattern CASH_FEE_ADJECTIVE = Pattern.compile("(?i)\\b(?:low|high)\\s*-?\\s*$");
+    /** "fee-free" / "commission-free" right after the fee word also negates it. */
+    private static final Pattern CASH_FEE_FREE_SUFFIX = Pattern.compile("(?i)^\\s*-?\\s*free\\b");
+    private static final Pattern CASH_CLAUSE_BOUNDARY = Pattern.compile(
+            "(?i)[;،!?\\n]|(?<![0-9])[.,]|[.,](?![0-9])|\\b(?:and|but)\\b");
+    /** A fee noun may own a following amount through a descriptor or an explicit charge predicate. */
+    private static final Pattern CASH_FEE_AMOUNT_PREFIX = Pattern.compile(
+            "(?i)(?:\\s|[:=()\\-–—]|\\b(?:of|is|was|has|been|charged|debited|deducted|amount|cash|withdrawal|atm|a|an|the)\\b|" +
+            "سحب|نقدي|نقدى|نقدية|عملية|عمليه|بمبلغ|بقيمة|مبلغ|قيمة|قدرها|قيمتها|تم|خصم)*");
+    /** 'Charged 5 as a withdrawal fee' names the charge; 'withdrawn 2000 with a fee' does not. */
+    private static final Pattern CASH_FEE_AMOUNT_SUFFIX = Pattern.compile(
+            "(?i)(?:\\s|[:=()\\-–—]|\\b(?:as|a|an|the|for|cash|withdrawal|atm)\\b|عن|مقابل|عملية|عمليه|سحب|نقدي|نقدى|كـ?)*");
+    private static final Pattern CASH_FEE_ROLE = Pattern.compile(
+            "(?i)\\b(?:as|for)\\b|(?<![\\p{L}])(?:عن|مقابل|كـ?)(?![\\p{L}])");
+    private static final Pattern CASH_WITHDRAWAL_ACTION = Pattern.compile(
+            "(?i)(تم\\s+سحب|\\b(?:withdrawn|withdrew)\\b)");
+
     /** A promotional SMS that only mentions an amount (e.g. "cash back up to 50,000 EGP") is not a transaction. */
     static boolean isPromotion(String body) {
         if (body == null) return false;
@@ -174,6 +212,7 @@ public final class ExpenseParser {
         long amount = -1;
         int bestRank = Integer.MAX_VALUE;
         int bestPosition = Integer.MAX_VALUE;
+        int bestEnd = -1;
         Matcher after = AMOUNT_AFTER_CURRENCY.matcher(transaction);
         Matcher before = AMOUNT_BEFORE_CURRENCY.matcher(transaction);
         while (after.find()) {
@@ -181,7 +220,9 @@ public final class ExpenseParser {
             int rank = after.start() >= event.end() ? 0 : 1;
             if (candidate > 0 && (rank < bestRank || rank == bestRank && after.start() < bestPosition)) {
                 amount = candidate; currency = currency(after.group(1));
-                bestRank = rank; bestPosition = after.start();
+                bestRank = rank; bestPosition = after.start(); bestEnd = after.end();
+                // The numeric matcher permits trailing punctuation; a sentence separator is not money.
+                while(bestEnd>after.start(2) && !Character.isDigit(transaction.charAt(bestEnd-1)))bestEnd--;
             }
         }
         while (before.find()) {
@@ -191,7 +232,7 @@ public final class ExpenseParser {
             int rank = before.start() >= event.end() ? 0 : 1;
             if (candidate > 0 && (rank < bestRank || rank == bestRank && before.start() < bestPosition)) {
                 amount = candidate; currency = currency(before.group(2));
-                bestRank = rank; bestPosition = before.start();
+                bestRank = rank; bestPosition = before.start(); bestEnd = before.end();
             }
         }
         if (amount <= 0) return null;
@@ -206,7 +247,74 @@ public final class ExpenseParser {
         else if (normalized.matches("(?is).*(transfer|تحويل|حولت).*") &&
                 !java.util.Arrays.asList("أقساط","فواتير","اشتراكات").contains(category))
             category = "تحويلات";
+        // Event wording wins over the merchant descriptor: a stated fee stays spending, and an
+        // explicit withdrawal is recognized even when the message never names an ATM.
+        String cashCategory=cashMovementCategory(transaction,bestPosition,bestEnd,category);
+        if(cashCategory!=null)category=cashCategory;
         return new Parsed(amount, currency, merchant, category, last4(normalized));
+    }
+
+    /**
+     * A fee is charged against the amount stated with it. When the message names the withdrawal
+     * principal and its fee separately, the selected principal stays cash; only a fee that owns
+     * the selected amount becomes spending. Ambiguous wording is not guessed.
+     */
+    private static String cashMovementCategory(String text, int amountStart, int amountEnd, String baseCategory) {
+        // Keep the selected monetary span, not just its numeric value: principal and fee can be equal.
+        int from=0,to=text.length();
+        Matcher boundary=CASH_CLAUSE_BOUNDARY.matcher(text);
+        while(boundary.find()) {
+            if(boundary.end()<=amountStart)from=boundary.end();
+            else if(boundary.start()>=amountEnd){to=boundary.start();break;}
+        }
+        if (!CASH_WITHDRAWAL_CONTEXT.matcher(text.substring(from,to)).find()) return null;
+        Matcher fee = CASH_FEE_WORD.matcher(text);
+        fee.region(from,to);
+        while (fee.find()) {
+            if (cashFeeNegated(text, fee.start(), fee.end())) continue;
+            if(fee.end()<=amountStart) {
+                String link=text.substring(fee.end(),amountStart);
+                // 'low-fee ATM withdrawal of 2000' describes the withdrawal price, not a fee amount.
+                if(CASH_FEE_ADJECTIVE.matcher(text.substring(from,fee.start())).find() &&
+                        EXPLICIT_CASH_CONTEXT.matcher(link).find())continue;
+                // Only a fee's own noun/charge phrase can bind this exact amount. Account text,
+                // another amount, or a new withdrawal action cannot be borrowed as a fee amount.
+                if(CASH_FEE_AMOUNT_PREFIX.matcher(link).matches() &&
+                        !CASH_WITHDRAWAL_ACTION.matcher(link).find())return MoneyFlow.BANK_FEE_CATEGORY;
+            } else if(fee.start()>=amountEnd) {
+                String link=text.substring(amountEnd,fee.start());
+                Matcher withdrawal=CASH_WITHDRAWAL_EVENT.matcher(text);
+                withdrawal.region(from,amountStart);
+                // An explicit withdrawal owns its following amount across account/location wording.
+                // A later fee without an amount must not turn that principal into spending.
+                if(!withdrawal.find() && feeOwnsPrecedingAmount(link))return MoneyFlow.BANK_FEE_CATEGORY;
+            }
+        }
+        Matcher withdrawal=CASH_WITHDRAWAL_EVENT.matcher(text);
+        withdrawal.region(from,to);
+        if(!withdrawal.find())return null;
+        boolean namedPayment=(!MoneyFlow.UNCATEGORIZED.equals(baseCategory) &&
+                !MoneyFlow.CASH_WITHDRAWAL_CATEGORY.equals(baseCategory)) ||
+                CASH_PURCHASE_CONTEXT.matcher(text.substring(from,to)).find();
+        return namedPayment && !EXPLICIT_CASH_CONTEXT.matcher(text.substring(from,to)).find()
+                ?null:MoneyFlow.CASH_WITHDRAWAL_CATEGORY;
+    }
+
+    private static boolean feeOwnsPrecedingAmount(String link) {
+        if(CASH_FEE_AMOUNT_SUFFIX.matcher(link).matches())return true;
+        // Account/card metadata may precede an explicit 'as/for a fee' role, but another monetary
+        // amount cannot: equal values at two different source spans are still different amounts.
+        if(AMOUNT_AFTER_CURRENCY.matcher(link).find() || AMOUNT_BEFORE_CURRENCY.matcher(link).find())return false;
+        Matcher role=CASH_FEE_ROLE.matcher(link);
+        while(role.find())if(CASH_FEE_AMOUNT_SUFFIX.matcher(link.substring(role.start())).matches())return true;
+        return false;
+    }
+
+    /** Only a negation directly on the fee word counts; a negation elsewhere in the message does not. */
+    private static boolean cashFeeNegated(String text, int feeStart, int feeEnd) {
+        String before = text.substring(Math.max(0, feeStart - 40), feeStart);
+        return CASH_FEE_NEGATED.matcher(before).find() ||
+                CASH_FEE_FREE_SUFFIX.matcher(text.substring(feeEnd)).find();
     }
 
     /** A credit is kept separate from expenses so it never inflates spending totals. */

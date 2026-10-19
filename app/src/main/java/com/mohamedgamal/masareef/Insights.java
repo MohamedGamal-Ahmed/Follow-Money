@@ -157,7 +157,7 @@ final class Insights {
         long yearAgoMs = yearAgo.atStartOfDay(zone).toInstant().toEpochMilli(), endMs = period[1].atStartOfDay(zone).toInstant().toEpochMilli();
         for (MoneyFlow.Item item : history) {
             if (!"EGP".equals(item.currency) || item.bucket != MoneyFlow.Bucket.LIVING && item.bucket != MoneyFlow.Bucket.COMMITMENT) continue;
-            if (item.when < yearAgoMs || item.when >= endMs || ExpenseParser.genericMerchant(item.merchant) || "سحب نقدي".equals(item.category) ||
+            if (item.when < yearAgoMs || item.when >= endMs || ExpenseParser.genericMerchant(item.merchant) ||
                     "أقساط".equals(item.category)) continue; // installments have their own line above
             String key = item.merchant.trim();
             merchantMonths.computeIfAbsent(key, k -> new HashSet<>()).add(YearMonth.from(Instant.ofEpochMilli(item.when).atZone(zone).toLocalDate()));
@@ -184,7 +184,7 @@ final class Insights {
                 categoryAmounts.computeIfAbsent(item.category, k -> new ArrayList<>()).add(item.amountMinor);
         MoneyFlow.Item unusual = null; long unusualMedian = 0;
         for (MoneyFlow.Item item : s.outflows) {
-            if (item.bucket != MoneyFlow.Bucket.LIVING || MoneyFlow.UNCATEGORIZED.equals(item.category) || "سحب نقدي".equals(item.category)) continue;
+            if (item.bucket != MoneyFlow.Bucket.LIVING || MoneyFlow.UNCATEGORIZED.equals(item.category)) continue;
             List<Long> values = categoryAmounts.get(item.category);
             if (values == null || values.size() < 5) continue;
             long median = median(values);
@@ -207,17 +207,7 @@ final class Insights {
                             "% من الصرف اليومي و" + Math.round(100.0 * smallCount / Math.max(1, s.countOf(MoneyFlow.Bucket.LIVING))) + "% من عدد العمليات.",
                     Tone.INFO, Action.LIVING, null, 0));
 
-        // 8) Cash: spent, but on what is unknown.
-        long cash = s.livingByCategory.getOrDefault("سحب نقدي", 0L);
-        if (cash > 0 && living > 0) {
-            long share = Math.round(100.0 * cash / living);
-            if (share >= 10)
-                out.add(new Insight("cash", "سحب كاش", share + "% من صرفك",
-                        money.format(cash) + " اتسحبوا كاش، فمش باين اتصرفوا في إيه. لو بتسجل المهم منهم يدوي التحليل هيبقى أدق.",
-                        share >= 30 ? Tone.WARN : Tone.INFO, Action.CATEGORY, "سحب نقدي", 0));
-        }
-
-        // 9) Which day of the week costs the most.
+        // 8) Which day of the week costs the most.
         long[] byWeekday = new long[7]; Set<LocalDate> activeDays = new HashSet<>(); int[] daysPerWeekday = new int[7];
         for (MoneyFlow.Item item : s.outflows) {
             if (item.bucket != MoneyFlow.Bucket.LIVING) continue;
@@ -239,7 +229,7 @@ final class Insights {
                                 Math.round(100.0 * (topAverage - dayAverage) / dayAverage) + "% أكتر).", Tone.INFO, Action.LIVING, null, 0));
         }
 
-        // 10) The category that grew the most versus the previous period of the same length.
+        // 9) The category that grew the most versus the previous period of the same length.
         if (range == MoneyFlow.Range.MONTH) {
             LocalDate[] previous = {period[0].minusMonths(1), period[0]};
             MoneyFlow.Summary p = MoneyFlow.summarize(history, previous, zone).get("EGP");
@@ -258,7 +248,7 @@ final class Insights {
             }
         }
 
-        // 11) How reliable these numbers are.
+        // 10) How reliable these numbers are.
         int open = s.countOf(MoneyFlow.Bucket.OPEN_TRANSFER);
         if (s.uncategorized + open > 0) {
             long unknown = s.uncategorizedAmount + s.of(MoneyFlow.Bucket.OPEN_TRANSFER);

@@ -18,6 +18,7 @@ public final class MoneyFlowTest {
         AccountMovement bank = new AccountMovement();
         bank.add("expense", "بقالة", 10000, true, false);
         bank.add("expense", "رسوم تحويل", 150, true, false);
+        bank.add("expense", "سحب نقدي", 70000, true, false);
         bank.add("expense", "تحويلات", 50000, true, false);
         bank.add("income", "دخل", 120000, true, false);
         bank.add("transfer", "تحويلات", 20000, false, true);
@@ -25,15 +26,19 @@ public final class MoneyFlowTest {
         bank.add("transfer", "تحويلات", 99999, true, true);
         bank.add("income", "دخل", 99999, false, false);
         check(bank.spent == 10150, "bank purchases and fees remain gross movements");
-        check(bank.sent == 50000 && bank.outgoing() == 60150, "external transfers count once in outflow");
+        check(bank.withdrawn == 70000, "cash withdrawal is recorded as a cash move, not as spending");
+        check(bank.sent == 50000 && bank.outgoing() == 130150, "external transfers and withdrawals leave the account once");
         check(bank.incoming == 120000, "recorded inflow, not a guessed salary");
         check(bank.ownIncoming == 20000 && bank.ownOutgoing == 30000, "own transfers retain direction and exclude same-root endpoints");
         AccountMovement purposeful = new AccountMovement();
         purposeful.add("expense", "أقساط", 70000, true, false);
         check(purposeful.spent == 70000 && purposeful.sent == 0, "known-purpose transfers follow existing expense categories");
         check(MoneyFlow.bucket("expense", "أكل وشرب") == MoneyFlow.Bucket.LIVING, "food is living");
-        check(MoneyFlow.bucket("expense", "سحب نقدي") == MoneyFlow.Bucket.LIVING, "cash withdrawal counts as spending");
+        check(MoneyFlow.bucket("expense", "سحب نقدي") == MoneyFlow.Bucket.CASH_WITHDRAWAL, "cash withdrawal is its own non-spending bucket");
+        check(!MoneyFlow.isOutflow(MoneyFlow.Bucket.CASH_WITHDRAWAL), "cash withdrawal is not an outflow");
+        check("سحب نقدي".equals(MoneyFlow.label(MoneyFlow.Bucket.CASH_WITHDRAWAL)), "cash withdrawal keeps its Arabic label");
         check(MoneyFlow.bucket("expense", "رسوم تحويل") == MoneyFlow.Bucket.LIVING, "bank fees are spending");
+        check(MoneyFlow.bucket("expense", "رسوم بنكية") == MoneyFlow.Bucket.LIVING, "standalone bank fees are spending");
         check(MoneyFlow.bucket("expense", "أقساط") == MoneyFlow.Bucket.COMMITMENT, "installment");
         check(MoneyFlow.bucket("expense", "تحويلات") == MoneyFlow.Bucket.OPEN_TRANSFER, "open transfer");
         check(MoneyFlow.bucket("transfer", "تحويلات") == MoneyFlow.Bucket.INTERNAL, "own transfer");
@@ -64,27 +69,42 @@ public final class MoneyFlowTest {
         Map<String, MoneyFlow.Summary> all = MoneyFlow.summarize(items, year, ZONE);
         MoneyFlow.Summary egp = all.get("EGP");
         check(egp.of(MoneyFlow.Bucket.COMMITMENT) == 10120000, "commitments");
-        check(egp.of(MoneyFlow.Bucket.LIVING) == 21830 + 10000 + 300000 + 2000, "living incl. cash and fees, excl. last year");
+        check(egp.of(MoneyFlow.Bucket.CASH_WITHDRAWAL) == 300000, "withdrawal principal stays visible but separate");
+        check(egp.of(MoneyFlow.Bucket.LIVING) == 21830 + 10000 + 2000, "living excludes cash withdrawals and last year, keeps fees");
         check(egp.of(MoneyFlow.Bucket.OPEN_TRANSFER) == 1300000, "open transfers");
         check(egp.of(MoneyFlow.Bucket.INTERNAL) == 2000000, "internal moved once");
         check(egp.of(MoneyFlow.Bucket.INFLOW) == 9000000, "inflow");
-        check(egp.totalOut() == 10120000 + 333830 + 1300000, "total out excludes internal");
+        check(egp.totalOut() == 10120000 + 33830 + 1300000, "total out excludes internal and cash withdrawals");
         check(all.get("USD").of(MoneyFlow.Bucket.COMMITMENT) == 2280 && egp.of(MoneyFlow.Bucket.COMMITMENT) != 10122280, "currencies stay separate");
-        check(egp.livingMedian() == (10000 + 21830) / 2, "median of 4 living payments: " + egp.livingMedian());
+        check(egp.livingMedian() == 10000, "median ignores the withdrawal: " + egp.livingMedian());
         check(egp.uncategorized == 1 && egp.uncategorizedAmount == 10000, "uncategorized");
         check(egp.byMonth.size() == 10, "every month of the year appears");
-        check(egp.largestOutflows(1).get(0).amountMinor == 5060000, "largest payment");
+        check(egp.byDay.get(LocalDate.of(2026, 3, 4))[MoneyFlow.Bucket.CASH_WITHDRAWAL.ordinal()] == 300000, "history keeps the withdrawal amount on its day");
+        check(egp.largestOutflows(1).get(0).amountMinor == 5060000, "largest payment ignores withdrawals");
         MoneyFlow.MonthPeak peak = egp.peak();
         check(peak != null && peak.month.equals(YearMonth.of(2026, 3)) && peak.driver == MoneyFlow.Bucket.COMMITMENT,
                 "March peaks because of the installment, not living");
+
+        // R1: a cash principal and an explicit standalone fee stay separate in the same historical projection.
+        List<MoneyFlow.Item> mixed = new ArrayList<>();
+        mixed.add(new MoneyFlow.Item(21, at("2026-10-05"), 200000, "EGP", "expense", "سحب نقدي", "ATM"));
+        mixed.add(new MoneyFlow.Item(22, at("2026-10-05"), 500, "EGP", "expense", "رسوم بنكية", "ATM fee"));
+        mixed.add(new MoneyFlow.Item(23, at("2026-10-06"), 50000, "EGP", "income", "دخل", "Refund"));
+        MoneyFlow.Summary cashAndFee = MoneyFlow.summarize(mixed,
+                MoneyFlow.period(MoneyFlow.Range.MONTH, LocalDate.of(2026, 10, 1), today), ZONE).get("EGP");
+        check(cashAndFee.of(MoneyFlow.Bucket.CASH_WITHDRAWAL) == 200000, "withdrawal principal stays out of spending");
+        check(cashAndFee.of(MoneyFlow.Bucket.LIVING) == 500 && cashAndFee.totalOut() == 500,
+                "the standalone fee remains the only spending");
+        check(cashAndFee.of(MoneyFlow.Bucket.INFLOW) == 50000, "an incoming row keeps its own amount");
 
         MoneyTotals daily = new MoneyTotals();
         daily.add("EGP", "expense", "أقساط", 5060000);
         daily.add("EGP", "expense", "أكل وشرب", 25000);
         daily.add("EGP", "expense", "تحويلات", 100000);
+        daily.add("EGP", "expense", "سحب نقدي", 70000);
         daily.add("EGP", "transfer", "تحويلات", 2000000);
         MoneyTotals.Totals t = daily.currencies.get("EGP");
-        check(t.living == 25000 && t.expense == 5185000 && t.transfers == 2000000, "daily budget only sees living spending");
+        check(t.living == 25000 && t.expense == 5185000 && t.transfers == 2000000, "daily budget and day headers ignore cash withdrawals");
         System.out.println("Money flow checks passed: " + checked);
     }
 }

@@ -27,13 +27,14 @@ final class ReimbursementRepository {
         java.util.Map<Long,Long> offsets=new java.util.HashMap<>();
         java.util.Map<Long,Long> remaining=new java.util.HashMap<>();
         try (Cursor c=db.getReadableDatabase().rawQuery("SELECT r.income_id,r.expense_id,r.amount_minor,i.amount_minor,e.amount_minor," +
-                "i.kind,e.kind,i.currency,e.currency FROM reimbursements r " +
+                "i.kind,e.kind,i.currency,e.currency,e.category FROM reimbursements r " +
                 "LEFT JOIN transactions i ON i.id=r.income_id LEFT JOIN transactions e ON e.id=r.expense_id " +
                 "ORDER BY i.occurred_at,r.income_id",null)) {
             while (c.moveToNext()) {
                 long incomeId=c.getLong(0),expenseId=c.getLong(1);
                 boolean valid="income".equals(c.getString(5)) && "expense".equals(c.getString(6)) &&
-                        c.getString(7)!=null && c.getString(7).equals(c.getString(8));
+                        c.getString(7)!=null && c.getString(7).equals(c.getString(8)) &&
+                        !MoneyFlow.isCashWithdrawal(c.getString(6),c.getString(9));
                 long left=remaining.getOrDefault(expenseId,c.getLong(4));
                 long applied=valid?Math.max(0,Math.min(c.getLong(2),Math.min(c.getLong(3),left))):0;
                 if (applied>0) {
@@ -56,6 +57,12 @@ final class ReimbursementRepository {
         }
     }
 
+    /** The linked row when it can no longer be repaid: kept as audit history, never applied to totals. */
+    Transaction ignoredLinkedExpense(long incomeId) {
+        Transaction expense=reimbursedExpense(incomeId);
+        return expense!=null && MoneyFlow.isCashWithdrawal(expense.kind,expense.category)?expense:null;
+    }
+
     List<Transaction> reimbursingIncomes(long expenseId) {
         List<Transaction> result=new ArrayList<>();
         try (Cursor c=db.getReadableDatabase().rawQuery("SELECT income_id FROM reimbursements WHERE expense_id=?",new String[]{Long.toString(expenseId)})) {
@@ -72,7 +79,8 @@ final class ReimbursementRepository {
     long linkReimbursement(long incomeId,long expenseId) {
         Transaction income=db.transactionById(incomeId),expense=db.transactionById(expenseId);
         if (income==null || expense==null || !"income".equals(income.kind) || !"expense".equals(expense.kind) ||
-                !income.currency.equals(expense.currency)) throw new IllegalArgumentException("Not a purchase and its repayment");
+                !income.currency.equals(expense.currency) || MoneyFlow.isCashWithdrawal(expense.kind,expense.category))
+            throw new IllegalArgumentException("Not a purchase and its repayment");
         SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
         try {
             sql.delete("reimbursements","income_id=?",new String[]{Long.toString(incomeId)});

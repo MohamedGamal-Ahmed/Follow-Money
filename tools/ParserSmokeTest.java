@@ -108,6 +108,108 @@ public final class ParserSmokeTest {
                 !"سحب نقدي".equals(withdrawal.category))
             throw new AssertionError("ATM SMS was missed");
         checked++;
+        // R1: the completed event decides cash principal vs fee; an ATM merchant alone is not enough.
+        String[] withdrawals = {
+                "تم سحب 2000 جنيه من حسابك",
+                "تم سحب مبلغ 2,000 جنيه من حسابك",
+                "Cash withdrawal of EGP 2,000.00 from account ****1234",
+                "You have withdrawn EGP 500.00 from your account",
+                "Cash withdrawal at ATM for EGP 2,000.00 from account ****1234"
+        };
+        for (String body : withdrawals) {
+            ExpenseParser.Parsed cash = ExpenseParser.parse("BANK", body);
+            if (cash == null || !"سحب نقدي".equals(cash.category))
+                throw new AssertionError("Cash withdrawal not classified: " + body + " -> " +
+                        (cash == null ? "null" : cash.category));
+            checked++;
+        }
+        // The fee word belongs to its own amount, so the stated principal stays cash.
+        String[][] principalWithFee = {
+                {"تم سحب 2000 جنيه من حسابك برسوم 5 جنيه", "200000"},
+                {"Cash withdrawal of EGP 2,000.00 from account ****1234 with a fee of EGP 5.00", "200000"},
+                {"تم سحب 2000 جنيه من حسابك برسوم", "200000"},
+                {"Cash withdrawal of EGP 2000 from account ****1234 with a fee", "200000"},
+                {"Cash withdrawal at ATM for EGP 2000 from account ****1234 with a fee", "200000"},
+                {"تم سحب من حسابك مبلغ 2000 جنيه مع رسوم", "200000"},
+                {"Your account was debited EGP 2000 at ATM with a fee", "200000"},
+                {"Cash withdrawal at ATM for EGP 5 from account ****1234 with a fee of EGP 5", "500"},
+                {"Fee for cash withdrawal of EGP 2000 from account ****1234", "200000"}
+        };
+        for (String[] probe : principalWithFee) {
+            ExpenseParser.Parsed cash = ExpenseParser.parse("BANK", probe[0]);
+            if (cash == null || cash.amountMinor != Long.parseLong(probe[1]) || !"سحب نقدي".equals(cash.category))
+                throw new AssertionError("Principal swallowed by its own fee: " + probe[0] + " -> " +
+                        (cash == null ? "null" : cash.category + "/" + cash.amountMinor));
+            checked++;
+        }
+        // A negated fee describes the withdrawal; it must not turn the principal into spending.
+        String[][] withoutFee = {
+                {"تم سحب 2000 جنيه من حسابك بدون رسوم", "200000"},
+                {"تم سحب 2000 جنيه من حسابك دون رسوم", "200000"},
+                {"Cash withdrawal of EGP 2000 from account ****1234 without commission", "200000"},
+                {"Cash withdrawal of EGP 1,000.00 from account ****1234 with no fees", "100000"},
+                {"Cash withdrawal of EGP 2,000.00 from account ****1234 free of charge", "200000"},
+                {"Cash withdrawal of EGP 2,000.00 from account ****1234 commission-free", "200000"}
+        };
+        for (String[] probe : withoutFee) {
+            ExpenseParser.Parsed cash = ExpenseParser.parse("BANK", probe[0]);
+            if (cash == null || cash.amountMinor != Long.parseLong(probe[1]) || !"سحب نقدي".equals(cash.category))
+                throw new AssertionError("Negated fee turned cash into spending: " + probe[0] + " -> " +
+                        (cash == null ? "null" : cash.category + "/" + cash.amountMinor));
+            checked++;
+        }
+        // Preserve event ownership across account/location word order and optional fee descriptions.
+        for(String lead:new String[]{
+                "Cash withdrawal at ATM for EGP 2000 from account ****1234",
+                "Cash withdrawal of EGP 2000 from account ****1234",
+                "You have withdrawn EGP 2000 from your account"})
+            for(String tail:new String[]{" with a fee"," with a fee of EGP 5"," without commission"," commission-free"}) {
+                ExpenseParser.Parsed cash=ExpenseParser.parse("BANK",lead+tail);
+                if(cash==null || cash.amountMinor!=200000 || !"سحب نقدي".equals(cash.category))
+                    throw new AssertionError("Withdrawal role changed with word order: "+lead+tail);
+                checked++;
+            }
+        for(String lead:new String[]{
+                "تم سحب مبلغ 2000 جنيه من حسابك",
+                "تم سحب من حسابك مبلغ 2000 جنيه",
+                "سحب نقدي بمبلغ 2000 جنيه من الصراف"})
+            for(String tail:new String[]{" مع رسوم"," برسوم 5 جنيه"," بدون عمولة"," بلا رسوم"}) {
+                ExpenseParser.Parsed cash=ExpenseParser.parse("BANK",lead+tail);
+                if(cash==null || cash.amountMinor!=200000 || !"سحب نقدي".equals(cash.category))
+                    throw new AssertionError("Withdrawal role changed with word order: "+lead+tail);
+                checked++;
+            }
+        ExpenseParser.Parsed unrelatedCashClause=ExpenseParser.parse("BANK",
+                "Your account was charged EGP 5.00. Cash withdrawal fees apply to another transaction");
+        if(unrelatedCashClause==null || unrelatedCashClause.amountMinor!=500 ||
+                "سحب نقدي".equals(unrelatedCashClause.category) || "رسوم بنكية".equals(unrelatedCashClause.category))
+            throw new AssertionError("Another clause changed the selected charge's role");
+        checked++;
+        String[] fees = {
+                "Your account has been charged EGP 5.00 as a cash withdrawal fee at ATM",
+                "Your account was charged EGP 5.00 as a cash withdrawal fee",
+                "تم خصم 5 جنيه رسوم سحب نقدي من حسابك",
+                "تم خصم 5 جنيه عمولة سحب من ماكينة الصراف الآلي",
+                "رسوم سحب نقدي 5 جنيه من حسابك",
+                "تم خصم 5 جنيه مصاريف سحب من حسابك",
+                "ATM cash withdrawal fee of EGP 5 from account ****1234",
+                "Your account was charged EGP 5 from account ****1234 as a cash withdrawal fee",
+                "Your account was charged EGP 5 as an ATM fee. Cash withdrawals have no fees next month"
+        };
+        for (String body : fees) {
+            ExpenseParser.Parsed fee = ExpenseParser.parse("BANK", body);
+            if (fee == null || fee.amountMinor != 500 || "سحب نقدي".equals(fee.category))
+                throw new AssertionError("Standalone fee hidden as cash withdrawal: " + body + " -> " +
+                        (fee == null ? "null" : fee.category + "/" + fee.amountMinor));
+            checked++;
+        }
+        // A purchase that merely mentions a fee stays a purchase, not a bank fee.
+        ExpenseParser.Parsed purchaseWithFee = ExpenseParser.parse("BANK",
+                "Card purchase at AMAZON EGP 120.00 including delivery fee");
+        if (purchaseWithFee == null || "سحب نقدي".equals(purchaseWithFee.category) ||
+                "رسوم بنكية".equals(purchaseWithFee.category))
+            throw new AssertionError("A purchase was reclassified from a fee word");
+        checked++;
         expect("BANK", "تم استخدام بطاقتك ****1234 بمبلغ 75.5 جنيه عند مطعم", 7550, "EGP");
         expect("BANK", "خصم مبلغ 120 جنيه من حسابك لصالح محل", 12000, "EGP");
         expect("BANK", "Card ****1234 was charged EGP 45.00 at STORE", 4500, "EGP");
@@ -223,6 +325,25 @@ public final class ParserSmokeTest {
         ExpenseParser.Parsed mixedCredit=ExpenseParser.parseIncome("BANK","تم إضافة 500 جنيه لحسابك، وسيتم خصم 5 جنيه رسوم");
         if(mixedCredit==null || mixedCredit.amountMinor!=50000) throw new AssertionError("Completed credit lost to future fee");
         checked++;
+        // A generic debit verb must not hide a positively identified commitment/payee/transfer.
+        expectCategory("تم سحب مبلغ 1500 جنيه من حسابك قسط القرض", "أقساط");
+        expectCategory("EGP 1,500.00 withdrawn from your account for loan installment", "أقساط");
+        expectCategory("EGP 500 withdrawn from your account as transfer to Mohamed", "تحويلات");
+        expectCategory("تم سحب 250 جنيه من حسابك لصالح Vodafone", "فواتير");
+        expectCategory("EGP 220 withdrawn from your account at OPENAI *CHATGPT SUBSCR", "اشتراكات");
+        // Unmistakable cash context still wins even when a descriptor names a familiar merchant.
+        expectCategory("Cash withdrawal of EGP 2000 at Vodafone ATM", "سحب نقدي");
+        expectCategory("تم سحب نقدي 2000 جنيه من ماكينة Vodafone", "سحب نقدي");
+        expectCategory("no-fee ATM withdrawal of EGP 2000 from account ****1234", "سحب نقدي");
+        expectCategory("zero-fee ATM withdrawal of EGP 2000 from account ****1234", "سحب نقدي");
+        expectCategory("low fee ATM withdrawal of EGP 2000 from account ****1234", "سحب نقدي");
+        for(String body:new String[]{"EGP 100 withdrawn from your account for purchase at CARREFOUR",
+                "تم سحب 100 جنيه من حسابك للشراء لدى كارفور"}) {
+            ExpenseParser.Parsed purchase=ExpenseParser.parse("BANK",body);
+            if(purchase==null || "سحب نقدي".equals(purchase.category))
+                throw new AssertionError("Purchase hidden by generic withdrawal verb: "+body);
+            checked++;
+        }
         System.out.println("Parser smoke tests passed: " + checked);
     }
 }
