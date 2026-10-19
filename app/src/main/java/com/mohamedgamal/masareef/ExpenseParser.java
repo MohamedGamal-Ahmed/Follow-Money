@@ -78,6 +78,23 @@ public final class ExpenseParser {
             "\\bpurchase\\s+(?:at|from|of)\\b|transaction\\s+of|\\bwas\\s+charged\\b|successfully\\s+purchased|" +
             "\\bwithdrawn\\b|\\b(?:was|been)\\s+used\\b|you(?:\\s+have)?\\s+(?:paid|sent|received|transferred))");
 
+    /**
+     * The completed event itself is the cash principal. The merchant text alone is not enough:
+     * "تم سحب 2000 جنيه من حسابك" names no ATM but is still a withdrawal.
+     */
+    private static final Pattern CASH_WITHDRAWAL_EVENT = Pattern.compile(
+            "(?i)((?<![\\p{L}])تم\\s+سحب|سحب\\s+نقدي|\\bcash\\s+withdrawal\\b|\\bwithdrawn\\b|" +
+            "\\bwithdraw(?:al)?\\b|\\batm\\s+withdrawal\\b)");
+    /** Explicit fee wording, which a bank uses for its own charge rather than for withdrawn cash. */
+    private static final Pattern CASH_FEE_WORD = Pattern.compile(
+            "(?i)(\\bfees?\\b|\\bcommission\\b|\\bservice\\s+charge\\b|رسوم|عمولة|مصاريف|أتعاب|اتعاب)");
+    /** A fee can only be recognized next to cash/ATM/withdrawal wording; other fees keep their own category. */
+    private static final Pattern CASH_WITHDRAWAL_CONTEXT = Pattern.compile(
+            "(?i)(\\batm\\b|cash\\s+withdraw(?:al)?|\\bwithdraw(?:al|n)?\\b|سحب|صراف|ماكينة|كاش)");
+    /** "بدون رسوم" describes the withdrawal, not a charge; it must never turn the principal into a fee. */
+    private static final Pattern CASH_FEE_NEGATED = Pattern.compile(
+            "(?i)(بدون\\s+(?:أي\\s+)?رسوم|من\\s+غير\\s+رسوم|لا\\s+(?:توجد\\s+)?رسوم|no\\s+fees?|without\\s+(?:any\\s+)?fees?|free\\s+of\\s+charge)");
+
     /** A promotional SMS that only mentions an amount (e.g. "cash back up to 50,000 EGP") is not a transaction. */
     static boolean isPromotion(String body) {
         if (body == null) return false;
@@ -206,7 +223,17 @@ public final class ExpenseParser {
         else if (normalized.matches("(?is).*(transfer|تحويل|حولت).*") &&
                 !java.util.Arrays.asList("أقساط","فواتير","اشتراكات").contains(category))
             category = "تحويلات";
+        // Event wording wins over the merchant descriptor: a stated fee stays spending, and an
+        // explicit withdrawal is recognized even when the message never names an ATM.
+        if (cashWithdrawalFee(normalized)) category = MoneyFlow.BANK_FEE_CATEGORY;
+        else if (CASH_WITHDRAWAL_EVENT.matcher(normalized).find()) category = MoneyFlow.CASH_WITHDRAWAL_CATEGORY;
         return new Parsed(amount, currency, merchant, category, last4(normalized));
+    }
+
+    /** A separately stated fee for a cash move; it is never the withdrawn principal. */
+    private static boolean cashWithdrawalFee(String text) {
+        return !CASH_FEE_NEGATED.matcher(text).find() &&
+                CASH_FEE_WORD.matcher(text).find() && CASH_WITHDRAWAL_CONTEXT.matcher(text).find();
     }
 
     /** A credit is kept separate from expenses so it never inflates spending totals. */

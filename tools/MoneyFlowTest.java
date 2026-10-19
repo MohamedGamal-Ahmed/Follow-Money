@@ -38,6 +38,7 @@ public final class MoneyFlowTest {
         check(!MoneyFlow.isOutflow(MoneyFlow.Bucket.CASH_WITHDRAWAL), "cash withdrawal is not an outflow");
         check("سحب نقدي".equals(MoneyFlow.label(MoneyFlow.Bucket.CASH_WITHDRAWAL)), "cash withdrawal keeps its Arabic label");
         check(MoneyFlow.bucket("expense", "رسوم تحويل") == MoneyFlow.Bucket.LIVING, "bank fees are spending");
+        check(MoneyFlow.bucket("expense", "رسوم بنكية") == MoneyFlow.Bucket.LIVING, "standalone bank fees are spending");
         check(MoneyFlow.bucket("expense", "أقساط") == MoneyFlow.Bucket.COMMITMENT, "installment");
         check(MoneyFlow.bucket("expense", "تحويلات") == MoneyFlow.Bucket.OPEN_TRANSFER, "open transfer");
         check(MoneyFlow.bucket("transfer", "تحويلات") == MoneyFlow.Bucket.INTERNAL, "own transfer");
@@ -83,6 +84,18 @@ public final class MoneyFlowTest {
         MoneyFlow.MonthPeak peak = egp.peak();
         check(peak != null && peak.month.equals(YearMonth.of(2026, 3)) && peak.driver == MoneyFlow.Bucket.COMMITMENT,
                 "March peaks because of the installment, not living");
+
+        // R1: a cash principal and an explicit standalone fee stay separate in the same historical projection.
+        List<MoneyFlow.Item> mixed = new ArrayList<>();
+        mixed.add(new MoneyFlow.Item(21, at("2026-10-05"), 200000, "EGP", "expense", "سحب نقدي", "ATM"));
+        mixed.add(new MoneyFlow.Item(22, at("2026-10-05"), 500, "EGP", "expense", "رسوم بنكية", "ATM fee"));
+        mixed.add(new MoneyFlow.Item(23, at("2026-10-06"), 50000, "EGP", "income", "دخل", "Refund"));
+        MoneyFlow.Summary cashAndFee = MoneyFlow.summarize(mixed,
+                MoneyFlow.period(MoneyFlow.Range.MONTH, LocalDate.of(2026, 10, 1), today), ZONE).get("EGP");
+        check(cashAndFee.of(MoneyFlow.Bucket.CASH_WITHDRAWAL) == 200000, "withdrawal principal stays out of spending");
+        check(cashAndFee.of(MoneyFlow.Bucket.LIVING) == 500 && cashAndFee.totalOut() == 500,
+                "the standalone fee remains the only spending");
+        check(cashAndFee.of(MoneyFlow.Bucket.INFLOW) == 50000, "an incoming row keeps its own amount");
 
         MoneyTotals daily = new MoneyTotals();
         daily.add("EGP", "expense", "أقساط", 5060000);

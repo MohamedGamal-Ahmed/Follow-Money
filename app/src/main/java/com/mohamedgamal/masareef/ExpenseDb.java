@@ -1024,7 +1024,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         MerchantRule rule = matchingRule(merchant);
         if (rule != null && !"يدوي".equals(source) && !"CSV".equals(source)) {
             if (rule.ignored) return false;
-            if ("expense".equals(kind) && !java.util.Arrays.asList("تحويلات","رسوم تحويل","سحب نقدي").contains(category)
+            if ("expense".equals(kind) && !java.util.Arrays.asList("تحويلات","رسوم تحويل","سحب نقدي",MoneyFlow.BANK_FEE_CATEGORY).contains(category)
                     && !rule.category.isBlank()) values.put("category", rule.category);
         }
         return getWritableDatabase().insertWithOnConflict("transactions", null, values,
@@ -1880,6 +1880,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     /** The purchase an incoming payment repaid, or null. */
     public Transaction reimbursedExpense(long incomeId) { return reimbursements.reimbursedExpense(incomeId); }
+
+    /** A stored link that can no longer apply (the purchase became a cash withdrawal); kept for audit and undo. */
+    public Transaction ignoredReimbursement(long incomeId) { return reimbursements.ignoredLinkedExpense(incomeId); }
 
     public List<Transaction> reimbursingIncomes(long expenseId) { return reimbursements.reimbursingIncomes(expenseId); }
 

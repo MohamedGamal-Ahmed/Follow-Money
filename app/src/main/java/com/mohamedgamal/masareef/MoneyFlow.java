@@ -30,6 +30,8 @@ final class MoneyFlow {
 
     static final String OPEN_TRANSFER_CATEGORY = "تحويلات";
     static final String CASH_WITHDRAWAL_CATEGORY = "سحب نقدي";
+    /** A separately stated bank fee; it stays a real expense even when it mentions an ATM. */
+    static final String BANK_FEE_CATEGORY = "رسوم بنكية";
     static final Set<String> COMMITMENT_CATEGORIES = Collections.unmodifiableSet(new java.util.HashSet<>(java.util.Arrays.asList("أقساط", "فواتير", "اشتراكات")));
     static final String UNCATEGORIZED = "غير مصنف";
 
@@ -47,6 +49,11 @@ final class MoneyFlow {
     /** Only real spending buckets; a cash withdrawal moves money to cash and is not an outflow. */
     static boolean isOutflow(Bucket bucket) {
         return bucket == Bucket.LIVING || bucket == Bucket.COMMITMENT || bucket == Bucket.OPEN_TRANSFER;
+    }
+
+    /** Cash moved out of a tracked account. A fee is not a withdrawal, even when it mentions one. */
+    static boolean isCashWithdrawal(String kind, String category) {
+        return bucket(kind, category) == Bucket.CASH_WITHDRAWAL;
     }
 
     static String label(Bucket bucket) {

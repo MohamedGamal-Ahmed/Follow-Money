@@ -108,6 +108,42 @@ public final class ParserSmokeTest {
                 !"سحب نقدي".equals(withdrawal.category))
             throw new AssertionError("ATM SMS was missed");
         checked++;
+        // R1: the completed event decides cash principal vs fee; an ATM merchant alone is not enough.
+        String[] withdrawals = {
+                "تم سحب 2000 جنيه من حسابك",
+                "تم سحب مبلغ 2,000 جنيه من حسابك",
+                "تم سحب 2000 جنيه من حسابك بدون رسوم",
+                "Cash withdrawal of EGP 2,000.00 from account ****1234",
+                "You have withdrawn EGP 500.00 from your account",
+                "Cash withdrawal at ATM for EGP 2,000.00 from account ****1234"
+        };
+        for (String body : withdrawals) {
+            ExpenseParser.Parsed cash = ExpenseParser.parse("BANK", body);
+            if (cash == null || !"سحب نقدي".equals(cash.category))
+                throw new AssertionError("Cash withdrawal not classified: " + body + " -> " +
+                        (cash == null ? "null" : cash.category));
+            checked++;
+        }
+        String[] fees = {
+                "Your account has been charged EGP 5.00 as a cash withdrawal fee at ATM",
+                "Your account was charged EGP 5.00 as a cash withdrawal fee",
+                "تم خصم 5 جنيه رسوم سحب نقدي من حسابك",
+                "تم خصم 5 جنيه عمولة سحب من ماكينة الصراف الآلي"
+        };
+        for (String body : fees) {
+            ExpenseParser.Parsed fee = ExpenseParser.parse("BANK", body);
+            if (fee == null || fee.amountMinor != 500 || "سحب نقدي".equals(fee.category))
+                throw new AssertionError("Standalone fee hidden as cash withdrawal: " + body + " -> " +
+                        (fee == null ? "null" : fee.category + "/" + fee.amountMinor));
+            checked++;
+        }
+        // A purchase that merely mentions a fee stays a purchase, not a bank fee.
+        ExpenseParser.Parsed purchaseWithFee = ExpenseParser.parse("BANK",
+                "Card purchase at AMAZON EGP 120.00 including delivery fee");
+        if (purchaseWithFee == null || "سحب نقدي".equals(purchaseWithFee.category) ||
+                "رسوم بنكية".equals(purchaseWithFee.category))
+            throw new AssertionError("A purchase was reclassified from a fee word");
+        checked++;
         expect("BANK", "تم استخدام بطاقتك ****1234 بمبلغ 75.5 جنيه عند مطعم", 7550, "EGP");
         expect("BANK", "خصم مبلغ 120 جنيه من حسابك لصالح محل", 12000, "EGP");
         expect("BANK", "Card ****1234 was charged EGP 45.00 at STORE", 4500, "EGP");

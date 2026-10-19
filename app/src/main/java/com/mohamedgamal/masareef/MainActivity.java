@@ -123,7 +123,7 @@ public final class MainActivity extends Activity {
     private static final int CSV_IMPORT_REQUEST = 11;
     private static final String[] CATEGORIES = {
             "غير مصنف", "أكل وشرب", "مقاهي", "بقالة", "مواصلات", "فواتير", "اشتراكات", "أقساط", "تسوق", "رعاية صحية", "صحة", "عائلة ومساعدات", "سكن وإيجار",
-            "تحويلات", "رسوم تحويل", "سحب نقدي", "أخرى"
+            "تحويلات", "رسوم تحويل", "رسوم بنكية", "سحب نقدي", "أخرى"
     };
     /** What a transfer to another person was for; picking one moves it out of «تحويلات غرضها مش محدد». */
     private static final String[] PURPOSES = {
@@ -1406,7 +1406,7 @@ public final class MainActivity extends Activity {
             for (int i = 0; i < group.size(); i++) {
                 ExpenseDb.Transaction recent = group.get(i);
                 if (ExpenseParser.genericMerchant(recent.merchant) || confirmedKeys.contains(recent.merchant.toLowerCase(Locale.ROOT) + "\n" + recent.currency) ||
-                        "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
+                        "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "رسوم بنكية".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
                 LocalDate current = Instant.ofEpochMilli(recent.when).atZone(ZoneId.systemDefault()).toLocalDate();
                 for (int j = i + 1; j < group.size(); j++) {
                     ExpenseDb.Transaction older = group.get(j);
@@ -2872,6 +2872,11 @@ public final class MainActivity extends Activity {
                     TextView incoming=label(UiKit.displayName(back.merchant)+" · "+money(back.amountMinor,back.currency),13,ACCENT,true);
                     incoming.setOnClickListener(v->openRelatedTransaction(back));detailRow(details,"عرض الفلوس الراجعة",incoming);
                 }
+            } else if (MoneyFlow.isCashWithdrawal(item.kind, item.category) && !db.reimbursingIncomes(item.id).isEmpty()) {
+                // A link created before withdrawals were excluded is kept for review, not applied.
+                TextView link = label("استرداد قديم مش بيتحسب — راجعه", 14, ACCENT, true);
+                link.setOnClickListener(v -> unlinkReimbursementDialog(item));
+                detailRow(details, "استرداد", link);
             }
         }
         if ("income".equals(item.kind)) {
@@ -2879,6 +2884,10 @@ public final class MainActivity extends Activity {
             if (repaidFor == null) {
                 TextView link = label("دي فلوس رجعتلي عن مشتريات؟", 14, ACCENT, true);
                 link.setOnClickListener(v -> reimbursementDialog(item));
+                detailRow(details, "استرداد", link);
+            } else if (db.ignoredReimbursement(item.id) != null) {
+                TextView link = label("مرتبط بسحب نقدي · مش بيتحسب — راجعه", 14, ACCENT, true);
+                link.setOnClickListener(v -> unlinkReimbursementDialog(item));
                 detailRow(details, "استرداد", link);
             } else {
                 TextView link = label(UiKit.displayName(repaidFor.merchant) + " · " + money(repaidFor.amountMinor, repaidFor.currency), 14, ACCENT, true);
@@ -3169,7 +3178,10 @@ public final class MainActivity extends Activity {
         }
         if ("income".equals(item.kind)) {
             if (db.reimbursedExpense(item.id) == null) { labels.add("دي فلوس رجعتلي عن مشتريات"); actions.add(() -> reimbursementDialog(item)); }
-            else { labels.add("فك ربط الاسترداد"); actions.add(() -> unlinkReimbursementDialog(item)); }
+            else {
+                labels.add(db.ignoredReimbursement(item.id) != null ? "فك ربط استرداد غير محتسب" : "فك ربط الاسترداد");
+                actions.add(() -> unlinkReimbursementDialog(item));
+            }
         }
         if ("expense".equals(item.kind) && db.reimbursedOf(item.id) > 0) {
             labels.add("فك ربط الاسترداد"); actions.add(() -> unlinkReimbursementDialog(item));
@@ -3180,8 +3192,14 @@ public final class MainActivity extends Activity {
     }
 
     private void unlinkReimbursementDialog(ExpenseDb.Transaction item) {
-        new ChoiceDialogBuilder().setTitle("فك ربط الفلوس الراجعة؟")
-                .setMessage("الشراء هيتحسب على حسابك من جديد، والفلوس الراجعة هتظهر كفلوس دخلت. حركات البنك الأصلية محفوظة."+
+        boolean ignored = "expense".equals(item.kind)
+                ? MoneyFlow.isCashWithdrawal(item.kind, item.category) && !db.reimbursingIncomes(item.id).isEmpty()
+                : db.ignoredReimbursement(item.id) != null;
+        new ChoiceDialogBuilder()
+                .setTitle(ignored ? "فك ربط استرداد غير محتسب؟" : "فك ربط الفلوس الراجعة؟")
+                .setMessage(ignored
+                        ? "الرابط القديم محفوظ للمراجعة فقط: السحب ظاهر بمبلغه الكامل والوارد بحسابه الكامل. فكه هيمسح الربط فقط؛ حركات البنك الأصلية محفوظة."
+                        : "الشراء هيتحسب على حسابك من جديد، والفلوس الراجعة هتظهر كفلوس دخلت. حركات البنك الأصلية محفوظة."+
                         ("expense".equals(item.kind)?"\nده هيفك كل الاستردادات المرتبطة بالشراء ده.":""))
                 .setPositiveButton("فك الربط",(d,w)->{db.unlinkReimbursement(item.id);selectedTransaction=db.transactionById(item.id);render();toast("اتفك الربط واتحدث حساب يوم الشراء");})
                 .setNegativeButton("إلغاء",null).show();
@@ -4757,6 +4775,7 @@ public final class MainActivity extends Activity {
             case "صحة": background = 0xfffde8e8; ink = 0xffa82c2c; icon = R.drawable.ic_cat_health; break;
             case "رسوم تحويل":
             case "تحويلات": background = 0xffeef0ed; ink = 0xff4a5551; icon = R.drawable.ic_cat_transfer; break;
+            case "رسوم بنكية": background = 0xfffff7d6; ink = 0xff7a5c00; icon = R.drawable.ic_cat_bills; break;
             case "سحب نقدي": background = 0xffedeff9; ink = 0xff3b4ba8; icon = R.drawable.ic_cat_atm; break;
             case "سكن وإيجار": background = 0xffe8eef1; ink = 0xff3d5a66; icon = R.drawable.ic_cat_home; break;
             case "عائلة ومساعدات": background = 0xfff4ecf4; ink = 0xff7a3d6b; icon = R.drawable.ic_cat_family; break;
@@ -4923,7 +4942,7 @@ public final class MainActivity extends Activity {
         String id=BrandCatalog.merchant(name);
         int logo=brandLogo(id);
         if (logo != 0) return UiKit.logoBadge(this, logo, id, name, size, dark ? 0 : BORDER);
-        if ("سحب نقدي".equals(category) || "تحويلات".equals(category) ||
+        if ("سحب نقدي".equals(category) || "رسوم بنكية".equals(category) || "تحويلات".equals(category) ||
                 ("دخل".equals(category) && UiKit.provider(name) == null)) {
             int[] style = categoryStyle(category);
             ImageView icon = tintedIcon(style[2], style[1]);

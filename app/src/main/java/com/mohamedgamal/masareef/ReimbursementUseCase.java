@@ -33,7 +33,7 @@ final class ReimbursementUseCase {
     /** A repayment offsets a purchase; open transfers and cash withdrawals are not purchases. */
     private static boolean isReimbursable(Transaction expense) {
         MoneyFlow.Bucket bucket=MoneyFlow.bucket(expense.kind,expense.category);
-        return bucket!=MoneyFlow.Bucket.OPEN_TRANSFER && bucket!=MoneyFlow.Bucket.CASH_WITHDRAWAL;
+        return bucket!=MoneyFlow.Bucket.OPEN_TRANSFER && !MoneyFlow.isCashWithdrawal(expense.kind,expense.category);
     }
 
     private static boolean reimbursementPrecedes(Transaction expense,Transaction income) {
