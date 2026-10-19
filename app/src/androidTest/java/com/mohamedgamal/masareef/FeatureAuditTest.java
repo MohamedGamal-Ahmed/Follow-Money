@@ -266,6 +266,27 @@ final class FeatureAuditTest {
         eq(1000,summary.currencies.get("EGP").expense);
         eq(99000,summary.currencies.get("EGP").remaining);
     }
+    public void testWithdrawnVerbDoesNotHideNamedPayments() {
+        LocalDate day=LocalDate.now();long t=at(day);
+        String[][] cases={
+                {"تم سحب مبلغ 1500 جنيه من حسابك قسط القرض","أقساط"},
+                {"EGP 1,500.00 withdrawn from your account for loan installment","أقساط"},
+                {"EGP 500 withdrawn from your account as transfer to Mohamed","تحويلات"},
+                {"تم سحب 250 جنيه من حسابك لصالح Vodafone","فواتير"},
+                {"EGP 220 withdrawn from your account at OPENAI *CHATGPT SUBSCR","اشتراكات"},
+                {"Cash withdrawal of EGP 2000 at Vodafone ATM","سحب نقدي"}
+        };
+        for(int i=0;i<cases.length;i++) {
+            ok(db.addSms("BANK",cases[i][0],t+i*3600000L));
+            ExpenseDb.Transaction row=db.lastCaptured();ok(row!=null);eq(cases[i][1],row.category);
+        }
+        eq(6,countRows("transactions"));
+        eq(397000,db.monthlyTotals(day).get("EGP"));
+        eq(397000,db.monthlyTotalForKind(day,"EGP","expense"));
+        ok(db.addSms("BANK","EGP 100 withdrawn from your account for purchase at CARREFOUR",t+7*3600000L));
+        ok(!MoneyFlow.isCashWithdrawal(db.lastCaptured().kind,db.lastCaptured().category));
+        eq(407000,db.monthlyTotalForKind(day,"EGP","expense"));
+    }
     public void testLegacyReimbursementLinkToCashWithdrawalIsKeptButNotApplied() {
         LocalDate day=LocalDate.now();long t=at(day);
         ok(db.addManual(t,200000,"EGP","QA ATM","سحب نقدي"));long withdrawal=db.latestInserted().id;

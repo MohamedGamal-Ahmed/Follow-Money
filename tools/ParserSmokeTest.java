@@ -325,6 +325,25 @@ public final class ParserSmokeTest {
         ExpenseParser.Parsed mixedCredit=ExpenseParser.parseIncome("BANK","تم إضافة 500 جنيه لحسابك، وسيتم خصم 5 جنيه رسوم");
         if(mixedCredit==null || mixedCredit.amountMinor!=50000) throw new AssertionError("Completed credit lost to future fee");
         checked++;
+        // A generic debit verb must not hide a positively identified commitment/payee/transfer.
+        expectCategory("تم سحب مبلغ 1500 جنيه من حسابك قسط القرض", "أقساط");
+        expectCategory("EGP 1,500.00 withdrawn from your account for loan installment", "أقساط");
+        expectCategory("EGP 500 withdrawn from your account as transfer to Mohamed", "تحويلات");
+        expectCategory("تم سحب 250 جنيه من حسابك لصالح Vodafone", "فواتير");
+        expectCategory("EGP 220 withdrawn from your account at OPENAI *CHATGPT SUBSCR", "اشتراكات");
+        // Unmistakable cash context still wins even when a descriptor names a familiar merchant.
+        expectCategory("Cash withdrawal of EGP 2000 at Vodafone ATM", "سحب نقدي");
+        expectCategory("تم سحب نقدي 2000 جنيه من ماكينة Vodafone", "سحب نقدي");
+        expectCategory("no-fee ATM withdrawal of EGP 2000 from account ****1234", "سحب نقدي");
+        expectCategory("zero-fee ATM withdrawal of EGP 2000 from account ****1234", "سحب نقدي");
+        expectCategory("low fee ATM withdrawal of EGP 2000 from account ****1234", "سحب نقدي");
+        for(String body:new String[]{"EGP 100 withdrawn from your account for purchase at CARREFOUR",
+                "تم سحب 100 جنيه من حسابك للشراء لدى كارفور"}) {
+            ExpenseParser.Parsed purchase=ExpenseParser.parse("BANK",body);
+            if(purchase==null || "سحب نقدي".equals(purchase.category))
+                throw new AssertionError("Purchase hidden by generic withdrawal verb: "+body);
+            checked++;
+        }
         System.out.println("Parser smoke tests passed: " + checked);
     }
 }
