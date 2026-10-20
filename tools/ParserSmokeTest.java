@@ -362,6 +362,42 @@ public final class ParserSmokeTest {
         expectMerchant("Purchase of 75 EGP at UBER 19/10/2026 21:44 Card ****5555", "Uber", 7500, "5555");
         expectMerchant("Card purchase at QA_B3_SHOP 200 EGP ref 987654321 Card ****1111", "QA_B3_SHOP", 20000, "1111");
         expectMerchant("Card purchase at GO BUS 2 *9999 EGP 120.00 on 19/10/2026", "GO BUS 2", 12000, null);
+        // HSBC puts the sign after the amount: "+" reached the account, "-" left it. The merchant is the dated descriptor.
+        // Tester samples (numbers replaced): only the Phone Banking credit arrived; the other three follow the same format.
+        // In this format the masked account is the alerting account itself, after "from" (debit) or "to" (credit).
+        hsbcCredit("From HSBC: 24SEP26 TT Payment from 012-345***-679 USD 2,083.85+ Your available balance is USD 2,150.10", 208385, "USD", "TT Payment", "679");
+        hsbcCredit("From HSBC: 25SEP26 Phone Banking Transfer to 012-345***-678 EGP 87,650.00+ Your available balance is EGP 87,767.74", 8765000, "EGP", "Phone Banking Transfer", "678");
+        hsbcDebit("From HSBC: 25SEP26 Phone Banking Transfer from 012-345***-679 USD 1,700.00- Your available balance is USD 450.10", 170000, "USD", "Phone Banking Transfer", "تحويلات", "679");
+        hsbcDebit("From HSBC: 17OCT26 ATM Cash Withdrawal from 012-345***-678 EGP 2,000.00- Your available balance is EGP 85,650.00", 200000, "EGP", "ATM Cash Withdrawal", "سحب نقدي", "678");
+        hsbcDebit("09OCT26 Charges from 036-137***-001 EGP 22.49- Your available balance is EGP 800", 2249, "EGP", "Charges", "غير مصنف", "001");
+        // An explicit debit verb keeps its meaning next to a trailing plus, so no other bank's wording changes.
+        String explicitDebit = "Your account was debited with EGP 100.00+ at STORE";
+        ExpenseParser.Parsed debited = ExpenseParser.parse("BANK", explicitDebit);
+        if (debited == null || debited.amountMinor != 10000 || ExpenseParser.parseIncome("BANK", explicitDebit) != null)
+            throw new AssertionError("Explicit debit wording was flipped by a trailing plus");
+        checked++;
         System.out.println("Parser smoke tests passed: " + checked);
+    }
+
+    private static String describe(ExpenseParser.Parsed parsed) {
+        return parsed == null ? "null" : parsed.amountMinor + " " + parsed.currency + " / " + parsed.merchant + " / " + parsed.category + " / " + parsed.cardLast4;
+    }
+
+    private static void hsbcCredit(String message, long amount, String currency, String merchant, String last4) {
+        if (ExpenseParser.parse("HSBC", message) != null) throw new AssertionError("Trailing plus booked as spending: " + message);
+        ExpenseParser.Parsed parsed = ExpenseParser.parseIncome("HSBC", message);
+        if (parsed == null || parsed.amountMinor != amount || !currency.equals(parsed.currency) || !merchant.equals(parsed.merchant) ||
+                !"دخل".equals(parsed.category) || (last4 == null ? parsed.cardLast4 != null : !last4.equals(parsed.cardLast4)))
+            throw new AssertionError("HSBC credit mismatch: " + message + " -> " + describe(parsed));
+        checked++;
+    }
+
+    private static void hsbcDebit(String message, long amount, String currency, String merchant, String category, String last4) {
+        ExpenseParser.Parsed parsed = ExpenseParser.parse("HSBC", message);
+        if (parsed == null || parsed.amountMinor != amount || !currency.equals(parsed.currency) || !merchant.equals(parsed.merchant) ||
+                !category.equals(parsed.category) || (last4 == null ? parsed.cardLast4 != null : !last4.equals(parsed.cardLast4)))
+            throw new AssertionError("HSBC debit mismatch: " + message + " -> " + describe(parsed));
+        if (ExpenseParser.parseIncome("HSBC", message) != null) throw new AssertionError("Trailing minus parsed as income: " + message);
+        checked++;
     }
 }

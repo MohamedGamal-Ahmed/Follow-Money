@@ -25,9 +25,28 @@ public class InstaPaySmokeTest {
         ExpenseParser.Parsed hsbc = ExpenseParser.parse("HSBC",
                 "Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 1.50 on 10-10-2026 00:26 to 7392");
         check(hsbc != null && hsbc.amountMinor == 150 && hsbc.merchant.equals("تحويل لحظي"), "HSBC IPN debit");
-        ExpenseParser.Parsed phone = ExpenseParser.parse("HSBC",
-                "From HSBC: 05JUL26 Phone Banking Transfer to 012-345*-678 EGP 25,000.00+ Your available balance is EGP 140,250.75");
-        check(phone != null && phone.amountMinor == 2500000 && phone.category.equals("تحويلات"), "HSBC phone banking transfer");
+        // Incoming instant transfer in HSBC's wording names who sent it (constructed from the outward format above;
+        // the tester's real inward message has not arrived yet).
+        String ipnInward = "Your HSBC Account ********0001 was credited with IPN inward transfer for EGP 500.00 on 23-09-2026 14:10 from HEBATALLAH SAMI";
+        ExpenseParser.Parsed inward = ExpenseParser.parseIncome("HSBC", ipnInward);
+        check(ExpenseParser.parse("HSBC", ipnInward) == null && inward != null && inward.amountMinor == 50000 &&
+                inward.merchant.equals("HEBATALLAH SAMI") && "0001".equals(inward.cardLast4), "HSBC IPN inward sender name");
+        String ipnInwardReference = "Your HSBC Account ********0001 was credited with IPN inward transfer for EGP 500.00 on 23-09-2026 14:10 from HEBATALLAH SAMI with reference ABC123456";
+        ExpenseParser.Parsed inwardReference = ExpenseParser.parseIncome("HSBC", ipnInwardReference);
+        check(inwardReference != null && inwardReference.merchant.equals("HEBATALLAH SAMI"), "HSBC IPN inward sender name before the reference");
+        // A receiving-account phrase before the sender must not be taken as the counterpart (review of 2د).
+        for (String body : new String[]{
+                "Your HSBC Account was credited with IPN inward transfer for EGP 500.00 to ********0001 on 23-09-2026 14:10 from HEBATALLAH SAMI",
+                "Your HSBC Account ********0001 was credited with IPN inward transfer for EGP 500.00 to your account on 23-09-2026 from HEBATALLAH SAMI"}) {
+            ExpenseParser.Parsed named = ExpenseParser.parseIncome("HSBC", body);
+            check(named != null && named.amountMinor == 50000 && named.merchant.equals("HEBATALLAH SAMI"), "HSBC IPN inward sender name after a receiving-account phrase");
+        }
+        // HSBC writes the sign after the amount: "+" is money that reached this account, even after "to".
+        String phoneBanking = "From HSBC: 05JUL26 Phone Banking Transfer to 012-345*-678 EGP 25,000.00+ Your available balance is EGP 140,250.75";
+        check(ExpenseParser.parse("HSBC", phoneBanking) == null, "HSBC trailing plus is not spending");
+        ExpenseParser.Parsed phone = ExpenseParser.parseIncome("HSBC", phoneBanking);
+        check(phone != null && phone.amountMinor == 2500000 && phone.category.equals("دخل") &&
+                phone.merchant.equals("Phone Banking Transfer") && "678".equals(phone.cardLast4), "HSBC phone banking credit");
         String accountTransfer = "تم تنفيذ تحويل لحظي من حسابكم رقم xxx7392 بمبلغ 150 جم إلى شخص ا******* م*** رقم مرجعي 123456789012 يوم 2026-10-11 الساعه 15:27 للمزيد اتصل ب 19888";
         bankTransfer("Any Bank", accountTransfer, "شخص ا******* م***");
         bankTransfer("Different Bank", "تم إجراء تحويل لحظي بمبلغ EGP 150 إلى شخص ا******* م*** من حساب رقم xxx7392", "شخص ا******* م***");

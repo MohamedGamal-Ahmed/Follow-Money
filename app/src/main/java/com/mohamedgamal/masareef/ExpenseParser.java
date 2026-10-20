@@ -62,6 +62,41 @@ public final class ExpenseParser {
     }
     private static final Pattern MASKED_ACCOUNT_TAIL = Pattern.compile(
             "(?i)(?:from|من)\\s+\\d{2,4}-\\d{2,4}(?:\\*{2,}|x{2,})-(\\d{3,4})(?!\\d)");
+    /**
+     * HSBC's statement-style alert writes the sign after the amount: "EGP 87,650.00+" reached the account,
+     * "EGP 22.49-" left it. The sign decides the direction only when no explicit debit or credit verb does.
+     */
+    private static final Pattern TRAILING_SIGN_AMOUNT = Pattern.compile(
+            "(?i)(?<![A-Za-z])(?:EGP|LE|USD|EUR|GBP)\\s*[0-9][0-9,]*(?:\\.[0-9]{1,2})?\\s?([+-])(?=\\s|$)");
+    private static final Pattern EXPLICIT_DIRECTION = Pattern.compile(
+            "(?i)(\\bdebit(?:ed)?\\b|\\bcredit(?:ed)?\\b|\\bdeposit(?:ed)?\\b|\\breceived\\b|\\brefund(?:ed)?\\b|\\bpurchase[ds]?\\b|\\bpaid\\b|" +
+            "\\bwithdraw(?:al|n)?\\b|\\bspent\\b|\\bcharged\\b|\\bsent\\b|خصم|شراء|دفع|سحب|ايداع|إيداع|استلام|اضافة|إضافة|وارد|استرداد)");
+    /** The description between the date code and the account/amount: "25SEP26 Phone Banking Transfer to …". */
+    private static final Pattern TRAILING_SIGN_DESCRIPTOR = Pattern.compile(
+            "(?i)\\b[0-3]?\\d(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\\d{2,4}\\s+([A-Za-z][A-Za-z&'. -]{1,40}?)\\s+(?:(?:to|from)\\b|(?:EGP|LE|USD|EUR|GBP)\\s*[0-9])");
+    /** In a trailing-plus alert the masked account after "to" is the one that received the money. */
+    private static final Pattern MASKED_RECEIVING_TAIL = Pattern.compile(
+            "(?i)(?:to|إلى|الى)\\s+\\d{2,4}-\\d{2,4}(?:\\*+|x{2,})-(\\d{3,4})(?!\\d)");
+
+    /** Whether the transaction amount (not a stated balance) carries a trailing sign. */
+    static boolean trailingSignFormat(String body) {
+        if (body == null) return false;
+        return TRAILING_SIGN_AMOUNT.matcher(SENSITIVE_TAIL.matcher(normalizeDigits(body)).replaceFirst("")).find();
+    }
+
+    /** '+' or '-' when a trailing sign alone states the direction of the transaction amount; 0 otherwise. */
+    static char trailingSign(String body) {
+        if (body == null) return 0;
+        String text = SENSITIVE_TAIL.matcher(normalizeDigits(body)).replaceFirst("");
+        Matcher signed = TRAILING_SIGN_AMOUNT.matcher(text);
+        if (!signed.find() || EXPLICIT_DIRECTION.matcher(text).find()) return 0;
+        return signed.group(1).charAt(0);
+    }
+
+    /** Whether the stored merchant is a bank's own operation descriptor rather than a shop, so the row shows the bank. */
+    static boolean bankOperation(String merchant) {
+        return merchant != null && merchant.trim().matches("(?i)TT Payment|Phone Banking Transfer|ATM Cash Withdrawal|Charges");
+    }
     private static final Pattern IPN_RECEIVING_ACCOUNT = Pattern.compile(
             "(?i)\\bIPN\\s+transfer\\s+received\\b[^\\n]{0,100}?\\bon\\s+(\\d{4})\\s+on\\s+\\d{1,2}[/.-]\\d{1,2}");
     private static final Pattern CARD_INSTANT_TRANSFER = Pattern.compile(
@@ -184,6 +219,8 @@ public final class ExpenseParser {
         if (OTP.matcher(normalized).find() || isUnsuccessful(normalized) || isPromotion(normalized)) return null;
         normalized = paymentText(normalized);
         if (normalized == null) return null;
+        // A trailing "+" with no debit verb is money that reached the account: parseIncome owns it.
+        if (trailingSign(normalized) == '+') return null;
         Matcher cardTransfer = CARD_INSTANT_TRANSFER.matcher(normalized);
         if (cardTransfer.find()) {
             long amount = parseMinor(cardTransfer.group(1));
@@ -331,7 +368,8 @@ public final class ExpenseParser {
         normalized = paymentText(normalized);
         if (normalized == null) return null;
         // "عن طريق التحويل اللحظي" names a channel; it does not make an incoming credit a debit.
-        if (OTP.matcher(normalized).find() || !CREDIT_ONLY.matcher(normalized).find() ||
+        boolean trailingCredit = trailingSign(normalized) == '+';
+        if (OTP.matcher(normalized).find() || !CREDIT_ONLY.matcher(normalized).find() && !trailingCredit ||
                 isUnsuccessful(normalized) || isPromotion(normalized) ||
                 Pattern.compile("(?i)(\\bdebit(?:ed)?\\b|خصم|\\bpurchase\\b|شراء|\\bpaid\\b|دفع)").matcher(normalized).find()) return null;
         String transaction = SENSITIVE_TAIL.matcher(normalized).replaceFirst("");
@@ -346,8 +384,12 @@ public final class ExpenseParser {
         } else return null;
         long amount = parseMinor(rawAmount);
         if (amount <= 0) return null;
-        return new Parsed(amount, foundCurrency, merchant(transaction, sender), "دخل",
-                last4(normalized));
+        String account = last4(normalized);
+        if (account == null && trailingCredit) {
+            Matcher receiving = MASKED_RECEIVING_TAIL.matcher(transaction);
+            if (receiving.find()) account = receiving.group(1);
+        }
+        return new Parsed(amount, foundCurrency, merchant(transaction, sender), "دخل", account);
     }
 
     /** Reads the stated balance only; an expense cannot be used to infer an account balance. */
@@ -536,6 +578,16 @@ public final class ExpenseParser {
         // Read the recipient role independently of the bank, account wording and amount position.
         // Some instant-transfer alerts name only the account; keep their channel as the fallback.
         if (INSTANT_TRANSFER_CONTEXT.matcher(body).find()) {
+            // An incoming instant transfer in HSBC's wording names who sent it: "IPN inward transfer … from HEBATALLAH SAMI".
+            // The sender is read before any "to …" phrase, which in a credit names the receiving account, not a counterpart.
+            if (CREDIT_ONLY.matcher(body).find() || Pattern.compile("(?i)\\binward\\b").matcher(body).find()) {
+                Matcher from = Pattern.compile("(?i)\\bfrom\\s+([^\\n,;]{2,100})").matcher(body);
+                if (from.find()) {
+                    String name = from.group(1).split("(?i)\\s+(?:on|with|to|ref(?:erence)?|يوم|بتاريخ)(?=\\s|$)", 2)[0].trim();
+                    if (Pattern.compile("[\\p{L}]").matcher(name).find() &&
+                            !name.matches("(?i)^(?:حساب|بطاقة|كارت|account|card|hsbc|your)(?:\\s.*|$)")) return merchantName(name);
+                }
+            }
             Matcher recipient = Pattern.compile("(?i)(?:إلى|الى|الي|\\bto\\b)\\s+([^\\n,;]{2,100})").matcher(body);
             if (recipient.find()) {
                 String name = recipient.group(1).split(
@@ -544,6 +596,12 @@ public final class ExpenseParser {
                         !name.matches("(?i)^(?:حساب|بطاقة|كارت|account|card)(?:\\s.*|$)")) return merchantName(name);
             }
             return INSTANT_TRANSFER;
+        }
+        // HSBC's statement-style alert: the description sits between the date code and the account or amount,
+        // never the bank name after "From".
+        if (trailingSignFormat(body)) {
+            Matcher described = TRAILING_SIGN_DESCRIPTOR.matcher(body);
+            if (described.find()) return merchantName(described.group(1).trim());
         }
         Matcher arabic = Pattern.compile("(?:تم\\s*خصم\\s*مبلغ).*?(?:EGP|USD|EUR|GBP|جنيه|ج\\.?م\\.?)\\s*[0-9., ]+\\s*(?:في|فى)\\s*(.+?)\\s*(?:بتاريخ|يوم)", Pattern.CASE_INSENSITIVE).matcher(body);
         if (arabic.find()) return merchantName(arabic.group(1));

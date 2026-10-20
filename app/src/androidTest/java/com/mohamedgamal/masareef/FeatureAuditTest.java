@@ -1084,6 +1084,67 @@ final class FeatureAuditTest {
         java.util.Map<String,?> before=context.getSharedPreferences(DailyPointsStore.SETTINGS,0).getAll();
         DailyPointsStore.observe(context,"EGP",first.plusDays(2));ok(before.equals(context.getSharedPreferences(DailyPointsStore.SETTINGS,0).getAll()));
     }
+    /** A row saved by the parser before 2د, with its original HSBC message kept as evidence. */
+    private long oldHsbcRow(long t,long amount,String merchant,String category,long source,boolean edited,String body) {
+        ok(db.addManual(t,amount,"EGP",merchant,category,source));long id=db.latestInserted().id;
+        ContentValues values=new ContentValues();values.put("source","SMS");values.put("user_edited",edited?1:0);
+        db.getWritableDatabase().update("transactions",values,"id=?",new String[]{Long.toString(id)});
+        db.getWritableDatabase().execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,sender,received_at,direction,encrypted_body) VALUES(?,?,?,?,?,?,?)",
+                new Object[]{"qa-hsbc-"+id,id,"SMS","HSBC",t,"expense",EvidenceVault.encrypt(body)});
+        return id;
+    }
+    private String evidenceDirection(long id) {
+        try(android.database.Cursor c=db.getReadableDatabase().rawQuery("SELECT direction FROM capture_evidence WHERE transaction_id=?",new String[]{Long.toString(id)})){
+            return c.moveToFirst()?c.getString(0):null;
+        }
+    }
+
+    public void testTrailingSignRepairFlipsOldHsbcCreditsOnceAndSkipsEditedOrLinkedRows() {
+        long t=at(LocalDate.now().minusDays(3));
+        long hsbc=db.addPaymentSource("HSBC","حساب بنكي","678");
+        String credit="From HSBC: 25SEP26 Phone Banking Transfer to 012-345***-678 EGP 87,650.00+ Your available balance is EGP 87,767.74";
+        String cash="From HSBC: 17OCT26 ATM Cash Withdrawal from 012-345***-678 EGP 2,000.00- Your available balance is EGP 85,650.00";
+        long flipped=oldHsbcRow(t,8765000,"HSBC: 25SEP26 Phone Banking Transfer","تحويلات",hsbc,false,credit);
+        long edited=oldHsbcRow(t+1000,8765000,"HSBC: 25SEP26 Phone Banking Transfer","تحويلات",hsbc,true,credit);
+        long renamed=oldHsbcRow(t+2000,200000,"HSBC: 17OCT26 ATM Cash Withdrawal fr","غير مصنف",hsbc,false,cash);
+        long refunded=oldHsbcRow(t+3000,8765000,"HSBC: 25SEP26 Phone Banking Transfer","تحويلات",hsbc,false,credit);
+        ok(db.addManualEntry(t+4000,8765000,"EGP","QA refund","دخل",null,"income",null,null));long refund=db.latestInserted().id;
+        db.getWritableDatabase().execSQL("INSERT INTO reimbursements(income_id,expense_id,amount_minor) VALUES(?,?,?)",new Object[]{refund,refunded,8765000});
+        long count=db.transactionCount();
+        ExpenseDb.RepairReport report=db.repairAll();
+        eq(2,report.trailingSigns);ok(report.changed());eq(count,db.transactionCount());
+        ExpenseDb.Transaction income=db.transactionById(flipped);
+        eq("income",income.kind);eq("Phone Banking Transfer",income.merchant);eq("دخل",income.category);
+        eq(8765000L,income.amountMinor);eq("EGP",income.currency);eq(t,income.when);eq(hsbc,income.paymentSourceId);
+        eq("income",evidenceDirection(flipped));
+        ExpenseDb.Transaction untouched=db.transactionById(edited);
+        eq("expense",untouched.kind);eq("HSBC: 25SEP26 Phone Banking Transfer",untouched.merchant);eq("expense",evidenceDirection(edited));
+        ExpenseDb.Transaction atm=db.transactionById(renamed);
+        eq("expense",atm.kind);eq("ATM Cash Withdrawal",atm.merchant);eq("سحب نقدي",atm.category);eq(200000L,atm.amountMinor);
+        eq("expense",db.transactionById(refunded).kind);eq("HSBC: 25SEP26 Phone Banking Transfer",db.transactionById(refunded).merchant);
+        eq(0,db.repairAll().trailingSigns);
+        eq("income",db.transactionById(flipped).kind);eq("ATM Cash Withdrawal",db.transactionById(renamed).merchant);
+    }
+
+    public void testHsbcTrailingSignCaptureBooksCreditAsIncomeWithBankSource() {
+        long t=at(LocalDate.now().minusDays(2));
+        ok(db.addSms("HSBC","From HSBC: 25SEP26 Phone Banking Transfer to 012-345***-678 EGP 87,650.00+ Your available balance is EGP 87,767.74",t));
+        ExpenseDb.Transaction credit=db.lastCaptured();
+        eq("income",credit.kind);eq("Phone Banking Transfer",credit.merchant);eq("دخل",credit.category);eq(8765000L,credit.amountMinor);
+        ok(credit.paymentSourceId!=null);ExpenseDb.PaymentSource source=db.paymentSource(credit.paymentSourceId);
+        eq("HSBC",source.name);eq("678",source.last4);eq("hsbc",BrandCatalog.bank(source.name));
+        ok(db.addSms("HSBC","From HSBC: 17OCT26 ATM Cash Withdrawal from 012-345***-678 EGP 2,000.00- Your available balance is EGP 85,650.00",t+1000));
+        ExpenseDb.Transaction cash=db.lastCaptured();
+        eq("expense",cash.kind);eq("ATM Cash Withdrawal",cash.merchant);eq("سحب نقدي",cash.category);eq(200000L,cash.amountMinor);eq(credit.paymentSourceId,cash.paymentSourceId);
+        ok(db.addSms("HSBC","From HSBC: 24SEP26 TT Payment from 012-345***-679 USD 2,083.85+ Your available balance is USD 2,150.10",t+2000));
+        ExpenseDb.Transaction salary=db.lastCaptured();
+        eq("income",salary.kind);eq("TT Payment",salary.merchant);eq(208385L,salary.amountMinor);eq("USD",salary.currency);
+        ok(db.addSms("HSBC","From HSBC: 25SEP26 Phone Banking Transfer from 012-345***-679 USD 1,700.00- Your available balance is USD 450.10",t+3000));
+        ExpenseDb.Transaction out=db.lastCaptured();
+        eq("expense",out.kind);eq("Phone Banking Transfer",out.merchant);eq("تحويلات",out.category);eq(170000L,out.amountMinor);eq("USD",out.currency);
+        eq(4,db.transactionCount());eq(0,db.repairAll().trailingSigns);
+    }
+
     private long oldPurchase(String merchant,String category,long t,boolean edited) {
         db.addManual(t,8250,"EGP",merchant,category);long id=db.latestInserted().id;
         ContentValues values=new ContentValues();values.put("source","SMS");values.put("user_edited",edited?1:0);

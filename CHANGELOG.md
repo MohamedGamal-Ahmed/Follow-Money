@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add a from/to date picker to the existing transactions period filter, keeping the last day inclusive in the list.
+- Read HSBC's trailing-sign alerts by their sign: `EGP 100.00+` is income, `EGP 100.00-` spending, the dated descriptor (TT Payment, Phone Banking Transfer, ATM Cash Withdrawal, Charges) is the merchant and the row shows the bank; a one-time repair flips credits older versions booked as spending and fixes their names, leaving user-edited and linked rows alone.
 
 - Limit the home page's recent transactions query to the five displayed rows while preserving ledger ordering.
 - Recognize explicit ChatGPT/OpenAI subscription payments as recurring suggestions and cover the first-to-next-cycle SMS journey.

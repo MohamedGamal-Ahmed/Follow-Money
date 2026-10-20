@@ -104,6 +104,31 @@ public final class RepairRulesTest {
         List<RepairRules.RepeatingMerchant> subs = RepairRules.repeatingMerchants(rows, LocalDate.of(2026, 10, 11), ZONE);
         check(subs.size() == 1 && subs.get(0).merchant.equals("ChatGPT") && subs.get(0).amountMinor == 22000 && subs.get(0).typicalDay == 13,
                 "ChatGPT found; a daily café and a stopped OneDrive are not subscriptions");
+
+        // 6) Rows an older parser booked from HSBC's trailing-sign format: "+" was saved as spending, merchant as "HSBC: …".
+        String credit = "From HSBC: 25SEP26 Phone Banking Transfer to 012-345***-678 EGP 87,650.00+ Your available balance is EGP 87,767.74";
+        String debit = "From HSBC: 17OCT26 ATM Cash Withdrawal from 012-345***-678 EGP 2,000.00- Your available balance is EGP 85,650.00";
+        long sep = at("2026-09-25T10:00:00"), oct = at("2026-10-17T10:00:00");
+        RepairRules.Row booked = new RepairRules.Row(901, sep, sep, 8765000, "EGP", "expense", "تحويلات", "SMS", "expense", 6L, null, false, "HSBC: 25SEP26 Phone Banking Transfer");
+        RepairRules.TrailingSignFix fix = RepairRules.trailingSignFix(booked, "HSBC", credit);
+        check(fix != null && fix.toIncome && fix.merchant.equals("Phone Banking Transfer") && fix.category.equals("دخل"), "trailing plus booked as spending becomes income");
+        RepairRules.Row edited = new RepairRules.Row(902, sep, sep, 8765000, "EGP", "expense", "تحويلات", "SMS", "expense", 6L, null, true, "HSBC: 25SEP26 Phone Banking Transfer");
+        check(RepairRules.trailingSignFix(edited, "HSBC", credit) == null, "user-edited row is left alone");
+        RepairRules.Row reconciled = new RepairRules.Row(903, sep, sep, 8765000, "EGP", "transfer", "تحويلات", "SMS", "expense", 6L, 7L, false, "HSBC: 25SEP26 Phone Banking Transfer");
+        check(RepairRules.trailingSignFix(reconciled, "HSBC", credit) == null, "reconciled own transfer is left alone");
+        RepairRules.Row different = new RepairRules.Row(904, sep, sep, 100000, "EGP", "expense", "تحويلات", "SMS", "expense", 6L, null, false, "HSBC: 25SEP26 Phone Banking Transfer");
+        check(RepairRules.trailingSignFix(different, "HSBC", credit) == null, "amount that differs from the evidence is left alone");
+        RepairRules.Row cash = new RepairRules.Row(905, oct, oct, 200000, "EGP", "expense", "غير مصنف", "SMS", "expense", 6L, null, false, "HSBC: 17OCT26 ATM Cash Withdrawal fr");
+        fix = RepairRules.trailingSignFix(cash, "HSBC", debit);
+        check(fix != null && !fix.toIncome && fix.merchant.equals("ATM Cash Withdrawal") && fix.category.equals("سحب نقدي"), "trailing minus stays spending; merchant and cash category are corrected");
+        // A category learned onto the bank name (not user-edited) is not trusted when the parser has a definite one.
+        RepairRules.Row learned = new RepairRules.Row(908, oct, oct, 200000, "EGP", "expense", "أكل وشرب", "SMS", "expense", 6L, null, false, "HSBC: 17OCT26 ATM Cash Withdrawal fr");
+        fix = RepairRules.trailingSignFix(learned, "HSBC", debit);
+        check(fix != null && !fix.toIncome && fix.merchant.equals("ATM Cash Withdrawal") && fix.category.equals("سحب نقدي"), "definite parser category replaces a category hung on the bank name");
+        RepairRules.Row named = new RepairRules.Row(906, oct, oct, 200000, "EGP", "expense", "سحب نقدي", "SMS", "expense", 6L, null, false, "ATM Cash Withdrawal");
+        check(RepairRules.trailingSignFix(named, "HSBC", debit) == null, "already correct row is left alone");
+        RepairRules.Row explicit = new RepairRules.Row(907, oct, oct, 10000, "EGP", "expense", "تسوق", "SMS", "expense", 6L, null, false, "STORE");
+        check(RepairRules.trailingSignFix(explicit, "BANK", "Your account was debited with EGP 100.00+ at STORE") == null, "explicit debit wording is never flipped");
         System.out.println("Repair rule checks passed: " + checked);
     }
 }
