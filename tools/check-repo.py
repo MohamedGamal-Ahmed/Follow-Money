@@ -93,6 +93,12 @@ require("retention-days: 7" in workflow, "CI artifact retention must remain boun
 require(".tmp/ci/checks.txt" in workflow and not re.search(r"^\s+\.tmp/\*|^\s+\.tmp/$", workflow, re.M), "CI must not upload private temp folders")
 require("-Online" in workflow, "Hosted build must allow dependency downloads")
 
+gradle = (ROOT / "app/build.gradle").read_text(encoding="utf-8")
+version_name = re.search(r"versionName\s+'([^']+)'", gradle)
+latest_notes = re.search(r"(?m)^## (\S+)", (ROOT / "app/src/main/assets/whats-new.txt").read_text(encoding="utf-8"))
+require(bool(version_name and latest_notes) and version_name.group(1) == latest_notes.group(1),
+        "Newest section of assets/whats-new.txt must match versionName in app/build.gradle (write the user notes before each release)")
+
 if errors:
     print("Repository preflight FAILED:")
     for error in errors:
