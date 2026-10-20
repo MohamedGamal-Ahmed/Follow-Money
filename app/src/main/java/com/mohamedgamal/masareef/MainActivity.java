@@ -6789,14 +6789,8 @@ public final class MainActivity extends Activity {
         });
     }
 
-    /** Digits → #, InstaPay handles → xxx@instapay, English month names → MMM, so one bank template is one shape. */
-    static String maskMessage(String text) {
-        String clean = ExpenseParser.normalizeDigits(text);
-        clean = clean.replaceAll("(?i)[a-z0-9._-]+@instapay", "xxx@instapay");
-        clean = clean.replaceAll("[0-9]", "#");
-        clean = clean.replaceAll("(?i)(?<![a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(?![a-z])", "MMM");
-        return clean.replaceAll("\\s+", " ").trim();
-    }
+    /** The masked shape of a message (SmsPreview.shape): one bank template → one shape. */
+    static String maskMessage(String text) { return SmsPreview.shape(text); }
 
     /** Up to three shapes per sender, senders ordered by message count, so every bank is represented. */
     private static void appendSamples(StringBuilder text, String title, Map<String, Map<String, int[]>> groups) {

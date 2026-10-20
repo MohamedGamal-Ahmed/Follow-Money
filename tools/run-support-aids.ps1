@@ -47,7 +47,7 @@ allprojects { p ->
     $crash
     if (($crash -join "`n") -notmatch 'Process crashed') { throw 'Expected debug crash was not observed' }
     foreach ($fixture in @(
-        @('HSBC','Payment format SUPPORT_QA ref 12345678 from SECRET PERSON'),
+        @('HSBC','Payment format SUPPORT_QA ref 12345678 from SECRET PERSON amount EGP 120.00'),
         @('HSBC','OTP verification code 987654 for payment'),
         @('HSBC','Offer cashback up to EGP 5000 on your card purchase'),
         @('+201234567890','Payment format PERSONAL_QA ref 12345678 from SECRET PERSON')
