@@ -57,7 +57,7 @@ public class SummaryWidget extends AppWidgetProvider {
             // Same function as the home card: the statement from the pay day to today (MoneyFlow.statement).
             boolean needsStats=false;for(int id:ids)if(isLarge(manager,id)||isWideSmall(context,manager,id)){needsStats=true;break;}
             int salaryDay=context.getSharedPreferences(DailySummary.SETTINGS,Context.MODE_PRIVATE).getInt("salary_"+currency,0);
-            LocalDate[] period=MoneyFlow.statementPeriod(salaryDay,today);
+            LocalDate[] period=MoneyFlow.statementPeriod(salaryDay,DailySummary.monthlySalary(context,currency),currency,snapshot.zone,today,(from,to)->db.flowItems(from,to,snapshot.zone));
             MoneyFlow.Statement statement=needsStats?MoneyFlow.statement(db.flowItems(period[0],period[1],snapshot.zone),period,snapshot.zone,currency):null;
             String time=snapshot.updated.atZone(snapshot.zone).format(DateTimeFormatter.ofPattern("h:mm a",new Locale("ar")));
             for (int id : ids) {

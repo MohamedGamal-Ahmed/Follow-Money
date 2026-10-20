@@ -57,7 +57,7 @@ final class WhatsNewUiTest {
                     .putString("opening_mode","off").putBoolean("initial_import_prompted",true).putBoolean("sms_permission_prompted",true).commit();
             target.getSharedPreferences("notification_settings",0).edit().putBoolean("access_prompted",true).commit();
             String code=String.valueOf(BuildConfig.VERSION_CODE);
-            String notes="## "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)+"\n- QA POINT ONE\n- QA POINT TWO\n";
+            String notes="## "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)+"\n- QA POINT ONE\n- QA POINT TWO\n- QA POINT THREE\n";
 
             target.getSharedPreferences(MainActivity.class.getName(),0).edit().putBoolean("intro_completed",false).commit();
             target.getSharedPreferences(STATE,0).edit().clear().commit();
@@ -76,7 +76,9 @@ final class WhatsNewUiTest {
             ok(has("جديد في النسخة "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)),"Shipped notes did not produce a card after an update");
             ok(lastSeen()==BuildConfig.VERSION_CODE-1,"Number recorded before the user dismissed the card");
             launch(notes);
-            ok(has("QA POINT ONE")&&has("QA POINT TWO"),"Notes points missing");shot("05-whats-new-card");
+            ok(has("QA POINT ONE")&&has("QA POINT TWO"),"Headline points missing");
+            ok(!has("QA POINT THREE"),"Card shows more than two points");ok(has("كل التفاصيل"),"Details link missing");shot("05-whats-new-card");
+            click("كل التفاصيل");ok(has("النسخة "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)),"Details dialog does not show the notes");click("إغلاق");
             click("تمام");
             ok(!has("جديد في النسخة"),"Card stayed after «تمام»");
             ok(lastSeen()==BuildConfig.VERSION_CODE,"«تمام» did not record the version code");

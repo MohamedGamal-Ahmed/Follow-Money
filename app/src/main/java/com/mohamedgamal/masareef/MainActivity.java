@@ -1229,6 +1229,8 @@ public final class MainActivity extends Activity {
     }
 
     /** Thirty days without a backup: one dismissible card, no numbers, pointing to the settings entry. */
+    private static final int WHATS_NEW_CARD_POINTS = 2;
+    private android.widget.DatePicker periodPicker;
     private static final String APP_STATE = "app_state", LAST_SEEN_VERSION = "last_seen_version_code";
 
     private String readAsset(String name) {
@@ -1253,13 +1255,21 @@ public final class MainActivity extends Activity {
         if (whatsNew == null) return;
         LinearLayout box = card();
         box.addView(label("جديد في النسخة " + whatsNew.version, 15, INK, true));
-        for (String point : whatsNew.points) box.addView(label("• " + point, 12, MUTED, false));
+        // The card is a headline: two points at most. The rest is one tap away in the same dialog as the settings row.
+        for (int i = 0; i < Math.min(WHATS_NEW_CARD_POINTS, whatsNew.points.size()); i++) box.addView(label("• " + whatsNew.points.get(i), 12, MUTED, false));
+        LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
         TextView done = label("تمام", 13, ACCENT, true); done.setPadding(0, dp(8), 0, 0);
         done.setOnClickListener(v -> {
             getSharedPreferences(APP_STATE, MODE_PRIVATE).edit().putInt(LAST_SEEN_VERSION, BuildConfig.VERSION_CODE).apply();
             whatsNew = null; render();
         });
-        box.addView(done);
+        actions.addView(done);
+        if (whatsNew.points.size() > WHATS_NEW_CARD_POINTS) {
+            TextView more = label("كل التفاصيل", 13, ACCENT, true); more.setPadding(0, dp(8), dp(24), 0);
+            more.setOnClickListener(v -> whatsNewDialog());
+            actions.addView(more);
+        }
+        box.addView(actions);
     }
 
     private void whatsNewDialog() {
@@ -2649,8 +2659,14 @@ public final class MainActivity extends Activity {
         return getSharedPreferences(DailySummary.SETTINGS, MODE_PRIVATE).getInt("salary_" + currency, 0);
     }
 
-    /** The statement period for EGP on the home screen: from the saved pay day to today (MoneyFlow.statementPeriod). */
-    private LocalDate[] statementPeriod() { return MoneyFlow.statementPeriod(salaryDay("EGP"), LocalDate.now()); }
+    /**
+     * The statement period for EGP on the home screen: from the pay day to today, snapped to the day the salary really
+     * landed (MoneyFlow.statementPeriod with items). The widget uses the same call, so both show one period.
+     */
+    private LocalDate[] statementPeriod() {
+        ZoneId zone = ZoneId.systemDefault();
+        return MoneyFlow.statementPeriod(salaryDay("EGP"), DailySummary.monthlySalary(this, "EGP"), "EGP", zone, LocalDate.now(), (from, to) -> db.flowItems(from, to, zone));
+    }
 
     /**
      * The month statement (owner's decision, 20 October): «يوم القبض دخلك X · خرج منك حتى الآن Y · باقي Z».
@@ -2662,34 +2678,66 @@ public final class MainActivity extends Activity {
         LocalDate[] period = statementPeriod();
         MoneyFlow.Statement s = MoneyFlow.statement(db.flowItems(period[0], period[1], ZoneId.systemDefault()), period, ZoneId.systemDefault(), "EGP");
         DateTimeFormatter dayMonth = DateTimeFormatter.ofPattern("d MMMM", new Locale("ar"));
+        final int softInk = 0xffb9d3c8, softCoral = 0xffffb4a8, softSky = 0xffa9d6ff, track = 0x2effffff;
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(dp(20), dp(18), dp(20), dp(18));
+        hero.setPadding(dp(18), dp(14), dp(18), dp(14));
         hero.setBackground(rounded(BRAND, 26));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
         hp.topMargin = dp(16); page.addView(hero, hp);
         LinearLayout heading = new LinearLayout(this); heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.addView(label(salaryDay("EGP") > 0 ? "كشف الفترة من يوم القبض" : "كشف الشهر", 13, 0xffb9d3c8, false), new LinearLayout.LayoutParams(0, -2, 1));
-        heading.addView(label(period[0].format(dayMonth) + " – اليوم", 12, 0xffb9d3c8, false));
+        heading.addView(label(salaryDay("EGP") > 0 ? "كشف الفترة من يوم القبض" : "كشف الشهر", 13, softInk, false), new LinearLayout.LayoutParams(0, -2, 1));
+        heading.addView(label(period[0].format(dayMonth) + " – اليوم", 12, softInk, false));
         hero.addView(heading);
-        String incomeDate = s.salaryWhen > 0 ? " · يوم " + Instant.ofEpochMilli(s.salaryWhen).atZone(ZoneId.systemDefault()).toLocalDate().format(dayMonth) : "";
-        hero.addView(statementLine("دخل" + incomeDate, "+" + money(s.income, "EGP"), LIME, 14));
+
+        // Compact body: the ring on one side, the three numbers stacked beside it, so the card stays about a third of
+        // the screen. The ring shows how much of the income has gone out; full (and coral) when more went out than came in.
+        boolean over = s.remaining < 0;
+        float share = s.income > 0 ? (float) ((double) s.out / s.income) : (s.out > 0 ? 1f : 0f);
+        LinearLayout body = new LinearLayout(this); body.setGravity(Gravity.CENTER_VERTICAL); body.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        FrameLayout dial = new FrameLayout(this);
+        UiKit.Donut ring = new UiKit.Donut(this);
+        ring.set(share, track, over ? softCoral : LIME, 10);
+        ring.setContentDescription("خرج " + Math.round(Math.min(1f, share) * 100) + "% من الدخل");
+        FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(dp(132), dp(132)); ringParams.gravity = Gravity.CENTER;
+        dial.addView(ring, ringParams);
+        LinearLayout centre = new LinearLayout(this); centre.setOrientation(LinearLayout.VERTICAL); centre.setGravity(Gravity.CENTER);
+        centre.setPadding(dp(14), 0, dp(14), 0);
+        centre.addView(centered(label("باقي من دخل الفترة", 9, softInk, false)));
+        TextView remaining = label((over ? "−" : "") + money(Math.abs(s.remaining), "EGP"), 16, over ? softCoral : Color.WHITE, true);
+        remaining.setTextDirection(View.TEXT_DIRECTION_LTR); remaining.setSingleLine(true);
+        remaining.setAutoSizeTextTypeUniformWithConfiguration(9, 16, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        centre.addView(centered(remaining), new LinearLayout.LayoutParams(-1, -2));
+        String hint = s.income <= 0 ? (s.out > 0 ? "مفيش دخل مسجل" : "لسه مفيش حركة") : over ? "خرج أكتر من الدخل" : "اتصرف " + Math.round(share * 100) + "%";
+        centre.addView(centered(label(hint, 9, over ? softCoral : softInk, false)));
+        FrameLayout.LayoutParams centreParams = new FrameLayout.LayoutParams(dp(132), -2); centreParams.gravity = Gravity.CENTER;
+        dial.addView(centre, centreParams);
+        LinearLayout.LayoutParams dialParams = new LinearLayout.LayoutParams(dp(132), dp(132)); dialParams.setMarginEnd(dp(14));
+        body.addView(dial, dialParams);
+
+        // Three rows beside the ring: دخل, خرج, صرف يومي. Each opens exactly the rows that add up to its number.
+        LinearLayout stats = new LinearLayout(this); stats.setOrientation(LinearLayout.VERTICAL);
+        String incomeDate = s.salaryWhen > 0 ? "يوم " + Instant.ofEpochMilli(s.salaryWhen).atZone(ZoneId.systemDefault()).toLocalDate().format(dayMonth) : "الفترة";
+        stats.addView(statementOrb(R.drawable.ic_cat_income, 0, LIME, "دخل", "+" + money(s.income, "EGP"), incomeDate,
+                () -> openStatement(MoneyFlow.Bucket.INFLOW.name(), false)));
+        stats.addView(statementOrb(R.drawable.ic_cat_income, 180, softCoral, "خرج", "−" + money(s.out, "EGP"), s.outCount + " عملية",
+                () -> openStatement(MoneyFlow.OUT_FILTER, false)));
+        stats.addView(statementOrb(R.drawable.ic_cat_other, 0, softSky, "صرف يومي", money(s.living, "EGP"), "من خرج",
+                () -> openStatement(MoneyFlow.Bucket.LIVING.name(), false)));
+        body.addView(stats, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, -2); bodyParams.topMargin = dp(10);
+        hero.addView(body, bodyParams);
+
         if (s.transfersIn > 0) {
-            TextView split = label("راتب " + money(s.salary, "EGP") + " · تحويلات وصلتك " + money(s.transfersIn, "EGP"), 11, 0xffb9d3c8, false);
-            split.setTextDirection(View.TEXT_DIRECTION_RTL); hero.addView(split);
+            TextView split = label("راتب " + money(s.salary, "EGP") + " · تحويلات وصلتك " + money(s.transfersIn, "EGP"), 11, softInk, false);
+            split.setTextDirection(View.TEXT_DIRECTION_RTL); split.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams splitParams = new LinearLayout.LayoutParams(-1, -2); splitParams.topMargin = dp(8);
+            hero.addView(split, splitParams);
         }
-        LinearLayout outLine = new LinearLayout(this); outLine.setGravity(Gravity.CENTER_VERTICAL);
-        outLine.addView(label("خرج", 13, 0xffb9d3c8, false), new LinearLayout.LayoutParams(0, -2, 1));
-        TextView out = label("−" + money(s.out, "EGP"), 30, Color.WHITE, true); out.setTextDirection(View.TEXT_DIRECTION_LTR);
-        outLine.addView(out);
-        LinearLayout.LayoutParams outParams = new LinearLayout.LayoutParams(-1, -2); outParams.topMargin = dp(8);
-        hero.addView(outLine, outParams);
-        LinearLayout pills = new LinearLayout(this);
-        pills.addView(pill(s.outCount + " عملية", BRAND_SOFT, 0xffe6efea));
-        LinearLayout.LayoutParams pillsParams = new LinearLayout.LayoutParams(-2, -2); pillsParams.topMargin = dp(4);
-        hero.addView(pills, pillsParams);
-        hero.addView(statementLine("باقي من دخل الفترة", (s.remaining < 0 ? "−" : "") + money(Math.abs(s.remaining), "EGP"), s.remaining < 0 ? 0xffffb4a8 : LIME, 18));
-        hero.addView(label("التحويل بين حساباتك وسداد كروتك مش داخلين؛ الكاش محسوب لما اتسحب", 11, 0xffb9d3c8, false));
+        TextView foot = label("التحويل بين حساباتك وسداد كروتك مش داخلين؛ الكاش محسوب لما اتسحب", 10, 0xff8fb0a3, false);
+        foot.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams footParams = new LinearLayout.LayoutParams(-1, -2); footParams.topMargin = dp(s.transfersIn > 0 ? 2 : 8);
+        hero.addView(foot, footParams);
         hero.setOnClickListener(v -> openStatement(MoneyFlow.OUT_FILTER, false));
 
         boolean any = s.cashSpending > 0 || s.internal > 0 || s.unlinkedTransfer > 0;
@@ -2722,14 +2770,28 @@ public final class MainActivity extends Activity {
         if (s.internal > 0) box.addView(label("بين حساباتك وسداد كروتك " + money(s.internal, "EGP") + " · مش دخل ولا خرج", 11, MUTED, false));
     }
 
-    private LinearLayout statementLine(String name, String value, int color, int size) {
-        LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL);
-        line.addView(label(name, 13, 0xffb9d3c8, false), new LinearLayout.LayoutParams(0, -2, 1));
-        TextView amount = label(value, size, color, true); amount.setTextDirection(View.TEXT_DIRECTION_LTR);
-        line.addView(amount);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(6);
-        line.setLayoutParams(params);
-        return line;
+    /** One stat row beside the ring: a small tinted circle with an icon, then «name · detail» over the amount, nothing wrapping. */
+    private LinearLayout statementOrb(int icon, int rotation, int tint, String name, String amount, String detail, Runnable action) {
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(2), dp(3), dp(2), dp(3));
+        ImageView glyph = tintedIcon(icon, tint);
+        glyph.setRotation(rotation);
+        glyph.setPadding(dp(7), dp(7), dp(7), dp(7));
+        glyph.setBackground(rounded((tint & 0x00ffffff) | 0x2e000000, 99));
+        row.addView(glyph, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
+        TextView title = label(name + " · " + detail, 11, 0xffb9d3c8, false); title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        copy.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        TextView value = label(amount, 14, tint == LIME ? LIME : Color.WHITE, true);
+        value.setTextDirection(View.TEXT_DIRECTION_LTR); value.setSingleLine(true);
+        value.setAutoSizeTextTypeUniformWithConfiguration(10, 14, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        copy.addView(value, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(10));
+        row.addView(copy, copyParams);
+        row.setContentDescription(name + " " + amount);
+        row.setOnClickListener(v -> action.run());
+        return row;
     }
 
     private void openInsights(String section,LocalDate month) {
@@ -2868,8 +2930,6 @@ public final class MainActivity extends Activity {
         }),new LinearLayout.LayoutParams(dp(44),dp(44)));
         page.addView(bar);
         bulkChecks.clear();bulkCount=null;bulkApply=null;
-        if(transactionPeriod!=null)page.addView(label("عمليات من "+transactionPeriod[0]+" إلى "+transactionPeriod[1].minusDays(1)+
-                (transactionCurrencyFilter.isEmpty()?"":" · "+transactionCurrencyFilter)+" · رجوع يرجعك لمكان البداية",12,MUTED,false));
         if(bulkMode) {
             LinearLayout tools=card();bulkCount=label("المحدد: "+bulkSelected.size(),14,INK,true);tools.addView(bulkCount);
             LinearLayout actions=new LinearLayout(this);
@@ -2889,33 +2949,31 @@ public final class MainActivity extends Activity {
             search.requestFocus();
         }
 
+        // One row: the period chip (month, or the custom from–to range) and the filters chip with the count of active
+        // filters; one muted line under them names what is active. Nothing else sits between the title and the list.
         android.widget.HorizontalScrollView chipScroll = new android.widget.HorizontalScrollView(this);
         chipScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout chips = new LinearLayout(this); chips.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        LinearLayout chips = new LinearLayout(this); chips.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); chips.setGravity(Gravity.CENTER_VERTICAL);
         chipScroll.addView(chips);
-        TextView monthChip = addChip(chips, selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", new Locale("ar"))) + "  ⌄", false, this::chooseMonth);
-        monthChip.setBackground(rounded(ACCENT_PALE, 99)); monthChip.setTextColor(ACCENT);
-        addChip(chips, "فترة  ⌄", false, this::chooseTransactionPeriod);
-        if(transactionPeriod!=null) { TextView periodChip = addChip(chips, transactionPeriod[0]+" → "+transactionPeriod[1].minusDays(1)+(transactionCurrencyFilter.isEmpty()?"":" · "+transactionCurrencyFilter),true,() -> {
-            transactionPeriod=null;transactionCurrencyFilter="";transactionExcludeTransfers=false;render();
-        });
-            periodChip.setTextDirection(View.TEXT_DIRECTION_LTR); }
-        String[][] kinds = {{"الكل", ""}, {"مصروف", "expense"}, {"دخل", "income"}, {"تحويل", "transfer"}};
-        if (!transactionBucketFilter.isEmpty()) {
-            addChip(chips, MoneyFlow.filterLabel(transactionBucketFilter) + "  ✕", true, () -> { transactionBucketFilter = ""; render(); });
+        String periodText = transactionPeriod == null ? selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", new Locale("ar"))) : periodLabel(transactionPeriod);
+        TextView periodChip = addChip(chips, periodText + "  ⌄", transactionPeriod != null, this::choosePeriodMenu);
+        if (transactionPeriod == null) { periodChip.setBackground(rounded(ACCENT_PALE, 99)); periodChip.setTextColor(ACCENT); }
+        periodChip.setContentDescription("الفترة · " + periodText);
+        int active = activeFilterCount();
+        TextView filterChip = addChip(chips, (active > 0 ? "فلاتر · " + active : "فلاتر") + "  ⌄", active > 0, this::transactionFilterDialog);
+        filterChip.setContentDescription("فلترة");
+        if (active > 0) {
+            TextView clear = addChip(chips, "✕", false, () -> { clearTransactionFilters(); render(); });
+            clear.setPadding(dp(12), 0, dp(12), 0); clear.setContentDescription("مسح الفلاتر");
         }
-        for (String[] kind : kinds)
-            addChip(chips, kind[0], transactionBucketFilter.isEmpty() && transactionKindFilter.equals(kind[1]), () -> {
-                transactionKindFilter = kind[1]; transactionBucketFilter = ""; render();
-            });
-        if (!transactionCategoryFilter.isEmpty())
-            addChip(chips, transactionCategoryFilter + "  ✕", true, () -> { transactionCategoryFilter = ""; render(); });
-        if (transactionSourceFilter != null)
-            for (ExpenseDb.PaymentSource source : db.paymentSources())
-                if (source.id == transactionSourceFilter)
-                    addChip(chips, source.name + "  ✕", true, () -> { transactionSourceFilter = null; render(); });
         LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-1, -2); chipParams.topMargin = dp(14);
         page.addView(chipScroll, chipParams);
+        String summary = filterSummary();
+        if (summary != null) {
+            TextView line = label(summary, 12, MUTED, false);
+            LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(-1, -2); lineParams.topMargin = dp(6);
+            page.addView(line, lineParams);
+        }
 
         List<ExpenseDb.Transaction> month = transactionPeriod==null ? db.transactionsForMonth(selectedMonth) : db.transactionsBetween(transactionPeriod[0],transactionPeriod[1]);
         int uncategorized = 0;
@@ -3070,8 +3128,15 @@ public final class MainActivity extends Activity {
     }
 
     private void showTransactionDatePicker(String heading,LocalDate shown,java.util.function.Consumer<LocalDate> selected) {
-        android.widget.DatePicker picker=new android.widget.DatePicker(this);
+        android.content.res.Configuration arabic=new android.content.res.Configuration(getResources().getConfiguration());
+        arabic.setLocale(new Locale("ar"));
+        // The spinner reads the default locale when it is built, so month names would follow the phone's language.
+        Locale previous=Locale.getDefault();
+        android.widget.DatePicker picker;
+        try {Locale.setDefault(new Locale("ar"));picker=new android.widget.DatePicker(new android.view.ContextThemeWrapper(createConfigurationContext(arabic),getTheme()));}
+        finally {Locale.setDefault(previous);}
         picker.updateDate(shown.getYear(),shown.getMonthValue()-1,shown.getDayOfMonth());
+        periodPicker=picker;
         new ChoiceDialogBuilder().setCustomTitle(periodPickerTitle(heading)).setView(picker)
                 .setPositiveButton("موافق",(dialog,which)->selected.accept(LocalDate.of(picker.getYear(),picker.getMonth()+1,picker.getDayOfMonth())))
                 .setNegativeButton("إلغاء",null).show();
@@ -3083,8 +3148,74 @@ public final class MainActivity extends Activity {
         return title;
     }
 
+    /** «7 أكتوبر → 13 أكتوبر» for an exclusive-end period; the year is added when the two ends differ in year. */
+    static String periodLabel(LocalDate[] period) {
+        LocalDate from = period[0], to = period[1].minusDays(1);
+        DateTimeFormatter day = DateTimeFormatter.ofPattern(from.getYear() == to.getYear() ? "d MMMM" : "d MMMM yyyy", new Locale("ar"));
+        return from.equals(to) ? from.format(day) : from.format(day) + " → " + to.format(day);
+    }
+
+    /** How many list filters are active, not counting the period: the number on the «فلاتر» chip. */
+    private int activeFilterCount() {
+        int n = 0;
+        if (!transactionKindFilter.isEmpty()) n++;
+        if (!transactionCategoryFilter.isEmpty()) n++;
+        if (transactionSourceFilter != null) n++;
+        if (!transactionBucketFilter.isEmpty()) n++;
+        if (!transactionCurrencyFilter.isEmpty()) n++;
+        if (transactionExcludeTransfers) n++;
+        return n;
+    }
+
+    /** One line naming the active filters («خرج · EGP · كشف الفترة»), or null when the list is unfiltered. */
+    private String filterSummary() {
+        List<String> parts = new ArrayList<>();
+        if (!transactionBucketFilter.isEmpty()) parts.add(MoneyFlow.filterLabel(transactionBucketFilter));
+        if (!transactionKindFilter.isEmpty()) parts.add("expense".equals(transactionKindFilter) ? "مصروف" : "income".equals(transactionKindFilter) ? "دخل" : "تحويل");
+        if (!transactionCategoryFilter.isEmpty()) parts.add(transactionCategoryFilter);
+        if (transactionSourceFilter != null)
+            for (ExpenseDb.PaymentSource source : db.paymentSources())
+                if (source.id == transactionSourceFilter) parts.add(source.name + (source.last4 == null ? "" : " •••• " + source.last4));
+        if (!transactionCurrencyFilter.isEmpty()) parts.add(transactionCurrencyFilter);
+        if (transactionExcludeTransfers) parts.add("بدون تحويلات");
+        if (transactionStatementList) parts.add("كشف الفترة");
+        if (parts.isEmpty()) return null;
+        return String.join(" · ", parts);
+    }
+
+    /** Clears the list filters but keeps the chosen period and the search text. */
+    private void clearTransactionFilters() {
+        transactionCategoryFilter = ""; transactionSourceFilter = null; transactionKindFilter = ""; transactionBucketFilter = "";
+        transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionStatementList = false;
+    }
+
+    /** The period chip: pick a month, pick a day-to-day range, or go back to the month view. */
+    private void choosePeriodMenu() {
+        List<String> labels = new ArrayList<>(); List<Runnable> actions = new ArrayList<>();
+        labels.add("اختيار شهر"); actions.add(this::chooseMonth);
+        labels.add("فترة من يوم لـ يوم"); actions.add(this::chooseTransactionPeriod);
+        if (transactionPeriod != null) {
+            labels.add("رجوع لعرض " + selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", new Locale("ar"))));
+            actions.add(() -> { transactionPeriod = null; transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionStatementList = false; render(); });
+        }
+        new ChoiceDialogBuilder().setTitle("الفترة").setItems(labels.toArray(new String[0]), (dialog, which) -> actions.get(which).run())
+                .setNegativeButton("إلغاء", null).show();
+    }
+
     private void transactionFilterDialog() {
         LinearLayout form = form();
+        form.addView(label("النوع", 12, MUTED, true));
+        LinearLayout kindsRow = new LinearLayout(this); kindsRow.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        LinearLayout.LayoutParams kindsParams = new LinearLayout.LayoutParams(-1, -2); kindsParams.topMargin = dp(6); kindsParams.bottomMargin = dp(10);
+        form.addView(kindsRow, kindsParams);
+        String[][] kinds = {{"الكل", ""}, {"مصروف", "expense"}, {"دخل", "income"}, {"تحويل", "transfer"}};
+        String[] chosenKind = {transactionKindFilter};
+        Runnable[] drawKinds = new Runnable[1];
+        drawKinds[0] = () -> {
+            kindsRow.removeAllViews();
+            for (String[] kind : kinds) addChip(kindsRow, kind[0], chosenKind[0].equals(kind[1]), () -> { chosenKind[0] = kind[1]; drawKinds[0].run(); });
+        };
+        drawKinds[0].run();
         String[] categories = new String[CATEGORIES.length + 1];
         categories[0] = "كل التصنيفات";
         System.arraycopy(CATEGORIES, 0, categories, 1, CATEGORIES.length);
@@ -3100,17 +3231,26 @@ public final class MainActivity extends Activity {
         Spinner source = spinner("الحساب", sourceLabels, form);
         for (int i = 0; i < sources.size(); i++)
             if (transactionSourceFilter != null && transactionSourceFilter == sources.get(i).id) source.setSelection(i + 1);
+        if (!transactionBucketFilter.isEmpty() || !transactionCurrencyFilter.isEmpty() || transactionExcludeTransfers) {
+            List<String> fixed = new ArrayList<>();
+            if (!transactionBucketFilter.isEmpty()) fixed.add(MoneyFlow.filterLabel(transactionBucketFilter));
+            if (!transactionCurrencyFilter.isEmpty()) fixed.add(transactionCurrencyFilter);
+            if (transactionExcludeTransfers) fixed.add("بدون تحويلات");
+            TextView note = label("مفتوح من الرئيسية: " + String.join(" · ", fixed) + " — «مسح الفلاتر» يشيله", 12, MUTED, false);
+            LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2); noteParams.topMargin = dp(8);
+            form.addView(note, noteParams);
+        }
         new ChoiceDialogBuilder().setTitle("فلترة العمليات").setView(form)
                 .setPositiveButton("تطبيق", (dialog, which) -> {
                     int c = category.getSelectedItemPosition();
                     int s = source.getSelectedItemPosition();
+                    transactionKindFilter = chosenKind[0];
+                    if (!transactionKindFilter.isEmpty()) transactionBucketFilter = "";
                     transactionCategoryFilter = c <= 0 ? "" : categories[c];
                     transactionSourceFilter = s <= 0 ? null : sources.get(s - 1).id;
                     render();
                 })
-                .setNeutralButton("مسح الفلاتر", (dialog, which) -> {
-                    transactionCategoryFilter = ""; transactionSourceFilter = null; transactionKindFilter = ""; transactionPeriod=null;transactionCurrencyFilter="";transactionExcludeTransfers=false;render();
-                })
+                .setNeutralButton("مسح الفلاتر", (dialog, which) -> { clearTransactionFilters(); render(); })
                 .setNegativeButton("إلغاء", null).show();
     }
 
@@ -3513,6 +3653,44 @@ public final class MainActivity extends Activity {
         }catch(IllegalArgumentException error){toast("راجع مبلغ الرسوم");}},"إلغاء",android.app.Dialog::dismiss);
     }
 
+    /**
+     * «الرسالة اتقرت غلط؟»: a support draft for a row the parser read wrongly (sign, amount, merchant or category).
+     * The original message is redacted (Redaction.text) and shown editable beside what the app recorded; the user
+     * reviews the text and sends the e-mail themselves. Nothing leaves the device otherwise (same policy as the
+     * unrecognised-format draft in the import preview).
+     */
+    private void reportTransactionReading(ExpenseDb.Transaction item) {
+        List<ExpenseDb.SourceEvidence> messages = db.sourceEvidence(item.id);
+        String recorded = ("income".equals(item.kind) ? "دخل" : "transfer".equals(item.kind) ? "تحويل بين حساباتي" : "مصروف") + " · " + money(item.amountMinor, item.currency)
+                + " · " + UiKit.displayName(item.merchant) + " · " + item.category + " · " + transactionTimeLabel(item, true);
+        LinearLayout form = form();
+        form.addView(label("التطبيق سجّلها كده:", 12, MUTED, true));
+        TextView summary = label(recorded, 13, INK, false); summary.setPadding(0, dp(2), 0, dp(10)); form.addView(summary);
+        form.addView(label("حجبنا الأرقام والمبالغ وبعض الأسماء من الرسالة تلقائيًا. راجع النص واكتب تحتها الصح، وهيفتح مسودة إيميل وإنت اللي ترسلها.", 12, MUTED, false));
+        EditText body = new EditText(this); body.setTypeface(REGULAR); body.setMinLines(3); body.setGravity(Gravity.TOP | Gravity.START);
+        body.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        StringBuilder redacted = new StringBuilder();
+        for (ExpenseDb.SourceEvidence evidence : messages) {
+            if (evidence.body == null || evidence.failed) continue;
+            if (redacted.length() > 0) redacted.append("\n\n");
+            redacted.append("المرسل: ").append(evidence.sender).append("\n").append(Redaction.text(evidence.body));
+        }
+        body.setText(redacted.length() == 0 ? "(الرسالة الأصلية غير متاحة؛ اكتب صيغتها هنا لو فاكرها)" : redacted.toString());
+        form.addView(body);
+        EditText correct = new EditText(this); correct.setTypeface(REGULAR); correct.setHint("الصح كان إيه؟ (مثلًا: دي إيداع مش خصم)");
+        correct.setMinLines(2); correct.setGravity(Gravity.TOP | Gravity.START);
+        correct.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        form.addView(correct);
+        ScrollView preview = new ScrollView(this); preview.addView(form);
+        new ChoiceDialogBuilder().setTitle("الرسالة اتقرت غلط؟").setView(preview)
+                .setPositiveButton("فتح مسودة إيميل", (dialog, which) -> {
+                    String reviewed = "قراءة غلط لرسالة بنك\nالتطبيق سجّلها: " + recorded + "\nالصح: " + correct.getText().toString().trim() + "\n\n" + body.getText().toString();
+                    try { startActivity(EmailSupport.draft(this, false, reviewed)); }
+                    catch (android.content.ActivityNotFoundException unavailable) { copySupportRequest(false, reviewed, "مفيش تطبيق إيميل؛ اتنسخت المسودة وعنوان الدعم"); }
+                })
+                .setNegativeButton("إلغاء", null).show();
+    }
+
     private void showOriginalMessages(List<ExpenseDb.SourceEvidence> messages) {
         LinearLayout content=form();
         if(messages.isEmpty()) content.addView(label("مصدر نصي غير متاح لهذه العملية. الإشعارات القديمة تحتاج إعادة وصول؛ والإدخال اليدوي وCSV ليس لهما رسالة أصلية.",14,MUTED,false));
@@ -3541,6 +3719,7 @@ public final class MainActivity extends Activity {
         }
         if(isCreditPurchase(item)){labels.add("إضافة رسوم مؤكدة من كشف البطاقة");actions.add(()->statementFeeDialog(item));}
         labels.add("تعديل العملية"); actions.add(() -> editTransactionDialog(item));
+        if("SMS".equals(item.source)||item.source.startsWith("إشعار")){labels.add("الرسالة اتقرت غلط؟ بلّغ عنها");actions.add(()->reportTransactionReading(item));}
         if("expense".equals(item.kind)){labels.add("حوّلها لالتزام شهري");actions.add(()->commitmentFromTransaction(item));}
         if("expense".equals(item.kind)){labels.add("راجع نسخة SMS مختصرة مكررة");actions.add(()->reviewAbbreviatedSms(item));}
         if(!"income".equals(item.kind) && ("تحويلات".equals(item.category) || "transfer".equals(item.kind))) {
@@ -6553,8 +6732,11 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Collects the shapes of income and outgoing-transfer bank messages with every digit and handle masked,
-     * so the user can review them and share them to improve the parser. Nothing is sent automatically.
+     * Collects the shapes of bank messages with every digit, month and handle masked, grouped by sender, so the user
+     * can review them and share them to improve the parser. Three sections: income read, outgoing transfers read, and
+     * — the useful one — messages from a known bank that the parser did not read (SmsPreview.canReport). Shapes are
+     * listed per sender (top three each), so a bank with one fixed template cannot crowd the others out of the list.
+     * Nothing is sent automatically.
      */
     private void messageSamples() {
         if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
@@ -6562,31 +6744,35 @@ public final class MainActivity extends Activity {
         }
         toast("بجهّز العينات...");
         AppResources.read(() -> {
-            Map<String, int[]> income = new LinkedHashMap<>();
-            Map<String, int[]> sent = new LinkedHashMap<>();
+            Map<String, Map<String, int[]>> income = new LinkedHashMap<>();
+            Map<String, Map<String, int[]>> sent = new LinkedHashMap<>();
+            Map<String, Map<String, int[]>> unread = new LinkedHashMap<>();
             try (Cursor cursor = getContentResolver().query(Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY}, null, null, Telephony.Sms.DATE + " DESC")) {
                 if (cursor != null) while (cursor.moveToNext()) {
                     String sender = cursor.getString(0) == null ? "" : cursor.getString(0);
                     String body = cursor.getString(1);
                     if (body == null) continue;
-                    Map<String, int[]> bucket = null;
+                    Map<String, Map<String, int[]>> bucket = null;
                     if (ExpenseParser.parseIncome(sender, body) != null) bucket = income;
                     else {
                         ExpenseParser.Parsed parsed = ExpenseParser.parse(sender, body);
                         if (parsed != null && "تحويلات".equals(parsed.category)) bucket = sent;
+                        else if (parsed == null && SmsPreview.canReport(sender, body)) bucket = unread;
                     }
                     if (bucket == null) continue;
-                    String masked = maskMessage(sender) + ": " + maskMessage(body);
-                    bucket.computeIfAbsent(masked, k -> new int[1])[0]++;
+                    String bank = BrandCatalog.bank(sender);
+                    String group = (bank == null ? maskMessage(sender) : bank) + " · " + maskMessage(sender);
+                    bucket.computeIfAbsent(group, k -> new LinkedHashMap<>()).computeIfAbsent(maskMessage(body), k -> new int[1])[0]++;
                 }
             } catch (Exception error) {
                 postUi(() -> toast("تعذر قراءة الرسائل"));
                 return;
             }
-            StringBuilder text = new StringBuilder("عينات Follow Money (الأرقام مخفية)\n");
-            appendSamples(text, "رسائل دخل", income);
-            appendSamples(text, "تحويلات خارجة", sent);
+            StringBuilder text = new StringBuilder("عينات Follow Money (الأرقام والشهور مخفية)\n");
+            appendSamples(text, "رسائل من بنك معروف ما اتقرتش", unread);
+            appendSamples(text, "رسائل دخل اتقرت", income);
+            appendSamples(text, "تحويلات خارجة اتقرت", sent);
             String result = text.toString();
             postUi(() -> new ChoiceDialogBuilder().setTitle("راجعها قبل ما تبعتها")
                     .setMessage(result)
@@ -6603,19 +6789,45 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private static String maskMessage(String text) {
+    /** Digits → #, InstaPay handles → xxx@instapay, English month names → MMM, so one bank template is one shape. */
+    static String maskMessage(String text) {
         String clean = ExpenseParser.normalizeDigits(text);
         clean = clean.replaceAll("(?i)[a-z0-9._-]+@instapay", "xxx@instapay");
         clean = clean.replaceAll("[0-9]", "#");
+        clean = clean.replaceAll("(?i)(?<![a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(?![a-z])", "MMM");
         return clean.replaceAll("\\s+", " ").trim();
     }
 
-    private static void appendSamples(StringBuilder text, String title, Map<String, int[]> bucket) {
+    /** Up to three shapes per sender, senders ordered by message count, so every bank is represented. */
+    private static void appendSamples(StringBuilder text, String title, Map<String, Map<String, int[]>> groups) {
+        int shapes = 0;
+        for (Map<String, int[]> bucket : groups.values()) shapes += bucket.size();
+        text.append("\n== ").append(title).append(" (").append(groups.size()).append(" مرسل · ").append(shapes).append(" شكل) ==\n");
+        if (groups.isEmpty()) { text.append("لا شيء\n"); return; }
+        List<Map.Entry<String, Map<String, int[]>>> senders = new ArrayList<>(groups.entrySet());
+        senders.sort((a, b) -> Integer.compare(total(b.getValue()), total(a.getValue())));
+        for (Map.Entry<String, Map<String, int[]>> sender : senders) {
+            List<Map.Entry<String, int[]>> rows = new ArrayList<>(sender.getValue().entrySet());
+            rows.sort((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]));
+            text.append("\n-- ").append(sender.getKey()).append(" · ").append(total(sender.getValue())).append(" رسالة · ").append(rows.size()).append(" شكل --\n");
+            for (int i = 0; i < Math.min(3, rows.size()); i++)
+                text.append("[").append(rows.get(i).getValue()[0]).append("×] ").append(rows.get(i).getKey()).append("\n");
+        }
+    }
+
+    /** Flat shapes (the SMS coverage report): the ten most frequent. */
+    private static void appendFlatSamples(StringBuilder text, String title, Map<String, int[]> bucket) {
         List<Map.Entry<String, int[]>> rows = new ArrayList<>(bucket.entrySet());
         rows.sort((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]));
         text.append("\n== ").append(title).append(" (").append(rows.size()).append(" شكل) ==\n");
         for (int i = 0; i < Math.min(10, rows.size()); i++)
             text.append("\n[").append(rows.get(i).getValue()[0]).append("×] ").append(rows.get(i).getKey()).append("\n");
+    }
+
+    private static int total(Map<String, int[]> bucket) {
+        int n = 0;
+        for (int[] count : bucket.values()) n += count[0];
+        return n;
     }
 
     private void repairTransfersDialog() {
@@ -6840,8 +7052,8 @@ public final class MainActivity extends Activity {
                 report.append("تبدو عملية مكتملة وتحتاج مراجعة: ").append(completedReview).append("\n");
                 report.append("إشارات مالية أخرى (عروض/تذكيرات/أرصدة): ").append(otherReview).append("\n");
                 report.append("المراجعة لا تثبت مصروفًا؛ شحن الرصيد قد يكون له خصم بنكي مسجل.\n");
-                appendSamples(report, "قابلة للتحليل وغير مسجلة", missingSamples);
-                appendSamples(report, "عمليات محتملة للمراجعة", reviewSamples);
+                appendFlatSamples(report, "قابلة للتحليل وغير مسجلة", missingSamples);
+                appendFlatSamples(report, "عمليات محتملة للمراجعة", reviewSamples);
                 result = report.toString();
             }
             postUi(() -> new ChoiceDialogBuilder().setTitle("تغطية رسائل SMS")
