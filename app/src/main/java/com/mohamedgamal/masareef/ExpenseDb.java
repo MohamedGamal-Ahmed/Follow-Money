@@ -1915,15 +1915,15 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     // ---- Data repair: promotions, double captures, own transfers (see RepairRules) ----
 
     /** Bump when a new rule must re-run once over all existing data. */
-    public static final int REPAIR_VERSION = 2;
+    public static final int REPAIR_VERSION = 3;
 
     public static final class RepairReport {
         boolean failed;
         private final java.util.Map<Long,Long> mergedRows=new java.util.HashMap<>();
         long follow(long id){while(mergedRows.containsKey(id))id=mergedRows.get(id);return id;}
-        public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures;
+        public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures, trailingSigns;
         public long movedMinor, feesMinor;
-        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized > 0; }
+        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns > 0; }
         /** Rows this repair moved into an archive, counted for the import contract that reports them. */
         int mergedRowCount() { return mergedRows.size(); }
     }
@@ -1954,6 +1954,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
             report.promotions=archivePromotions(report);
+            report.trailingSigns=repairTrailingSigns();
             report.recategorized=recategorizeWithCurrentRules();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
@@ -2109,6 +2110,56 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if (entry.getValue()) {archiveEntry(entry.getKey(),"promotional message, not a payment",true);archived++;}
         }
         return archived;
+    }
+
+    /**
+     * Rows an older parser booked from HSBC's trailing-sign alerts: a "+" credit saved as spending, or the bank name
+     * saved as the merchant. Reads the stored source message; user edits, linked rows (refund, card settlement,
+     * commitment payment, reconciled transfer) and unreadable evidence are left alone.
+     */
+    private int repairTrailingSigns() {
+        java.util.Map<Long,String[]> evidence=new java.util.LinkedHashMap<>();
+        java.util.Set<Long> skip=new java.util.HashSet<>();
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT e.transaction_id,e.sender,e.encrypted_body FROM capture_evidence e " +
+                "JOIN transactions t ON t.id=e.transaction_id WHERE t.kind='expense' AND t.user_edited=0 AND t.fee_parent_id IS NULL " +
+                "AND t.destination_source_id IS NULL AND NOT EXISTS (SELECT 1 FROM reimbursements r WHERE r.income_id=t.id OR r.expense_id=t.id) " +
+                "ORDER BY e.received_at",null)) {
+            while (c.moveToNext()) {
+                long id=c.getLong(0);
+                EvidenceVault.Read body=EvidenceVault.read(c.isNull(2)?null:c.getString(2));
+                if (body.failed || body.body==null || !ExpenseParser.trailingSignFormat(body.body)) { skip.add(id); continue; }
+                evidence.putIfAbsent(id,new String[]{c.getString(1),body.body});
+            }
+        }
+        int fixed=0;
+        CardSettlements settlements=new CardSettlements(this);
+        for (java.util.Map.Entry<Long,String[]> entry:evidence.entrySet()) {
+            long id=entry.getKey();
+            if (skip.contains(id) || settlements.related(id) || commitmentLinked(id)) continue;
+            Transaction tx=transactionById(id);
+            if (tx==null) continue;
+            RepairRules.Row row=new RepairRules.Row(tx.id,tx.when,tx.when,tx.amountMinor,tx.currency,tx.kind,tx.category,tx.source,
+                    "expense",tx.paymentSourceId,tx.destinationSourceId,false,tx.merchant);
+            RepairRules.TrailingSignFix fix=RepairRules.trailingSignFix(row,entry.getValue()[0],entry.getValue()[1]);
+            if (fix==null) continue;
+            ContentValues values=new ContentValues();values.put("merchant",fix.merchant);values.put("category",fix.category);
+            if (fix.toIncome) values.put("kind","income");
+            if (getWritableDatabase().update("transactions",values,"id=? AND user_edited=0",new String[]{Long.toString(id)})==0) continue;
+            if (fix.toIncome) {
+                ContentValues direction=new ContentValues();direction.put("direction","income");
+                getWritableDatabase().update("capture_evidence",direction,"transaction_id=?",new String[]{Long.toString(id)});
+            }
+            fixed++;
+        }
+        return fixed;
+    }
+
+    private boolean commitmentLinked(long id) {
+        String identity=rowIdentityKey(id);
+        if (identity==null) return false;
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM commitment_payments WHERE transaction_key=? AND active=1 LIMIT 1",new String[]{identity})) {
+            return c.moveToFirst();
+        }
     }
 
     // ---- Repeating transfers → installments ----

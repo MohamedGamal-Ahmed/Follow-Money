@@ -2850,7 +2850,7 @@ public final class MainActivity extends Activity {
             check.setOnCheckedChangeListener((b,checked)->{if(checked)bulkSelected.add(item.id);else bulkSelected.remove(item.id);updateBulkCount();});
             bulkChecks.put(item.id,check);line.addView(check,new LinearLayout.LayoutParams(dp(40),dp(48)));
         }
-        line.addView(merchantBadge(item.merchant, item.category, 42), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        line.addView(rowBadge(item, 42), new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
         TextView merchantName = label(UiKit.displayName(item.merchant), 14, INK, true);
         merchantName.setSingleLine(true); merchantName.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -5141,6 +5141,16 @@ public final class MainActivity extends Activity {
         };
     }
 
+    /** A bank's own operation (TT Payment, ATM Cash Withdrawal…) shows the bank behind the row, not a monogram of the words. */
+    private View rowBadge(ExpenseDb.Transaction item, int size) {
+        if (ExpenseParser.bankOperation(item.merchant)) {
+            Long account = item.paymentSourceId != null ? item.paymentSourceId : item.destinationSourceId;
+            ExpenseDb.PaymentSource source = account == null ? null : db.paymentSource(account);
+            if (source != null && BrandCatalog.bank(source.name) != null) return sourceBadge(source, size);
+        }
+        return merchantBadge(item.merchant, item.category, size);
+    }
+
     private View merchantBadge(String name, String category, int size) {
         String id=BrandCatalog.merchant(name);
         int logo=brandLogo(id);
@@ -6465,6 +6475,8 @@ public final class MainActivity extends Activity {
                         .append(" عملية كانت غير مصنفة واتعرف تصنيفها (زي اشتراك ChatGPT).\n");
                 if (report.promotions > 0) text.append("• ").append(report.promotions)
                         .append(" رسالة إعلان كانت متسجلة مصروف: اتشالت، ومتأرشفة بدليلها.\n");
+                if (report.trailingSigns > 0) text.append("• ").append(report.trailingSigns)
+                        .append(" عملية من رسائل HSBC (الإشارة بعد المبلغ) كانت مقلوبة أو باسم البنك: الإيداع بقى دخل، والوصف بقى اسم العملية.\n");
                 if (report.duplicates > 0) text.append("• ").append(report.duplicates)
                         .append(" عملية كانت متسجلة مرتين (رسالة البنك + إشعار التطبيق): اتدمجت.\n");
                 if (report.ownTransfers > 0) text.append("• ").append(report.ownTransfers).append(" تحويل بين حساباتك (")

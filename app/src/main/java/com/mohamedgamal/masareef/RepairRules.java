@@ -245,6 +245,42 @@ final class RepairRules {
         return result;
     }
 
+    // ---- Rows an older parser booked from HSBC's trailing-sign alerts ----
+
+    /** What a stored row should become once its source message is read with the trailing sign (see ExpenseParser.trailingSign). */
+    static final class TrailingSignFix {
+        final boolean toIncome;
+        final String merchant, category;
+        TrailingSignFix(boolean toIncome, String merchant, String category) {
+            this.toIncome = toIncome; this.merchant = merchant; this.category = category;
+        }
+    }
+
+    /**
+     * A spending row whose message ends its amount with "+" (and names no debit) is money that reached the account:
+     * it becomes income with the descriptor as merchant. A "-" row only gets its merchant corrected when the old
+     * parser stored the bank name ("HSBC: …"). User-edited rows, reconciled transfers and amounts that no longer
+     * match the evidence are never touched.
+     */
+    static TrailingSignFix trailingSignFix(Row row, String sender, String body) {
+        if (row == null || body == null || row.userEdited || !"expense".equals(row.kind) || row.to != null) return null;
+        if (!ExpenseParser.trailingSignFormat(body)) return null;
+        if (ExpenseParser.trailingSign(body) == '+') {
+            ExpenseParser.Parsed income = ExpenseParser.parseIncome(sender, body);
+            if (income == null || income.amountMinor != row.amountMinor || !income.currency.equals(row.currency)) return null;
+            return new TrailingSignFix(true, income.merchant, income.category);
+        }
+        if (row.merchant == null || !row.merchant.matches("(?is)HSBC\\s*:.*")) return null;
+        ExpenseParser.Parsed expense = ExpenseParser.parse(sender, body);
+        if (expense == null || expense.amountMinor != row.amountMinor || !expense.currency.equals(row.currency) ||
+                expense.merchant.equals(row.merchant)) return null;
+        // A category hung on the bank name (learned from another "HSBC:" row) is not trusted: the parser's definite
+        // category (cash withdrawal, bank fee…) wins; only an uncategorized parse keeps a category the row already has.
+        boolean parserCategory = MoneyFlow.UNCATEGORIZED.equals(row.category) || MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(row.category) ||
+                !MoneyFlow.UNCATEGORIZED.equals(expense.category);
+        return new TrailingSignFix(false, expense.merchant, parserCategory ? expense.category : row.category);
+    }
+
     /** Installments remaining from the next due date through the last one (inclusive), monthly. */
     static int monthlyPaymentsThrough(java.time.LocalDate nextDue, java.time.LocalDate lastDue) {
         if (lastDue.isBefore(nextDue)) return 0;
