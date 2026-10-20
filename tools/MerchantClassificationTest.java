@@ -44,7 +44,7 @@ public final class MerchantClassificationTest {
         for(String[] pair:new String[][]{{"butlers","Butlers & Co"},{"seoudi","سعودي"},{"chatgpt","OpenAI ChatGPT"},{"costa","COSTA COFFEE"},{"etoile","Etoile"},
                 {"zaher","زاهر"},{"teds","Ted's"},{"ezaby","صيدلية العزبي"},{"illy","ILLY"},{"tru","TRU"},{"googleone","Google One"},{"onedrive","OneDrive"},{"truecaller","Truecaller"}})
             eq(pair[0],BrandCatalog.merchant(pair[1]));
-        eq("nbe",BrandCatalog.bank("NBE"));eq("cib",BrandCatalog.bank("CIB"));
+        eq("nbe",BrandCatalog.bank("NBE"));eq("bdc",BrandCatalog.bank("Banque du Caire"));eq("bdc",BrandCatalog.bank("بنك القاهرة"));eq("cib",BrandCatalog.bank("CIB"));
         eq("أكل وشرب",MerchantClassifier.category("Etoile"));eq("رعاية صحية",MerchantClassifier.category("العزبي"));
         eq("تحويلات",ExpenseParser.parse("BANK","تم تحويل 88.25 EGP من حسابك الى Butlers يوم 12/10/2026").category);
         for(int screen:new int[]{0,1,5,7}) eq(0,NavigationState.destination(screen,6));

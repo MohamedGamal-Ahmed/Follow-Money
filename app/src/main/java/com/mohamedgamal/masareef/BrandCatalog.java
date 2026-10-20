@@ -23,6 +23,7 @@ final class BrandCatalog {
         new Entry("kfh",true,new String[]{"KFH Egypt","Ahli United Bank Egypt","الأهلي المتحد مصر","بيت التمويل الكويتي مصر"}),
         new Entry("ca",true,new String[]{"Credit Agricole","CA Egypt","كريدي أجريكول","كريدي أجريكول مصر","Crédit Agricole Egypt","كريدي اجريكول"}),
         new Entry("nbe",true,new String[]{"NBE","NBE Egypt","National Bank of Egypt","البنك الأهلي المصري","الأهلي المصري"}),
+        new Entry("bdc",true,new String[]{"BDC","Banque du Caire","Banque Du Caire","بنك القاهرة"}),
         new Entry("cib",true,new String[]{"CIB","CIB Egypt","Commercial International Bank","البنك التجاري الدولي","التجاري الدولي"}),
         new Entry("starbucks",false,new String[]{"Starbucks","ستاربكس"}),
         new Entry("carrefour",false,new String[]{"Carrefour","كارفور"}),
