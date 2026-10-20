@@ -99,6 +99,12 @@ latest_notes = re.search(r"(?m)^## (\S+)", (ROOT / "app/src/main/assets/whats-ne
 require(bool(version_name and latest_notes) and version_name.group(1) == latest_notes.group(1),
         "Newest section of assets/whats-new.txt must match versionName in app/build.gradle (write the user notes before each release)")
 
+catalog_src = (ROOT / "app/src/main/java/com/mohamedgamal/masareef/BrandCatalog.java").read_text(encoding="utf-8")
+main_src = (ROOT / "app/src/main/java/com/mohamedgamal/masareef/MainActivity.java").read_text(encoding="utf-8")
+for brand in sorted(set(re.findall(r'Entry\("([a-z0-9_]+)"', catalog_src))):
+    require(f'case "{brand}" -> R.drawable.brand_{brand};' in main_src, f"BrandCatalog entry {brand} has no case in MainActivity.brandLogo, so its logo would never show")
+    require((ROOT / f"app/src/main/res/drawable-nodpi/brand_{brand}.png").is_file(), f"BrandCatalog entry {brand} has no brand_{brand}.png")
+
 if errors:
     print("Repository preflight FAILED:")
     for error in errors:

@@ -2,13 +2,15 @@
 
 ## Unreleased
 
+- Fix the new brand logos not showing: every catalog id now maps to its drawable (`tools/check-repo.py` fails when one does not), and the merchant-category refresh runs once more so older untouched automatic purchases pick up the new merchants' categories. Logos themselves are resolved when a row is drawn, so older transactions show them too.
+
 - Add logos and names for Sharaf DG, Centrepoint, Max, LC Waikiki, Raya, Aman, NBE, Banque du Caire, CIB, Butlers, Seoudi, ChatGPT, OneDrive, Truecaller, Google One, Costa, Etoile, Zaher, Ted's, El Ezaby, illy and TRU (supplied by the owner); Etoile, Zaher, Ted's, El Ezaby and illy also get categories.
 
 - Keep the figure inside the home ring on large-font phones (more padding, smaller auto-size range) and show the InstaPay logo on «تحويل لحظي» transactions.
 
 - Message samples: collapse digit runs, references and masked accounts into one shape (`SmsPreview.shape`), so 279 HSBC messages no longer give 249 shapes; the «ما اتقرتش» section requires an amount in the text (`SmsPreview.hasAmount`), so card-delivery notices, maintenance notes and «تم إضافة الراتب» teasers without a figure stay out.
 
-## 0.3.0 — 2026-10-xx
+## 0.3.1 — 2026-10-21
 
 - Redraw the home statement card: one ring for the share of the income that went out (full and coral when more went out than came in) with «باقي من دخل الفترة» in its centre, and three orbs — «دخل», «خرج», «صرف يومي» — each opening exactly its rows; the salary/transfers-in split and the definitions line stay.
 - Start the statement on the day the salary really landed: a credit of at least half the declared monthly salary within seven days before or three days after the nominal pay day (instant transfers included) moves the period start to that day, and a salary that already arrived early for the coming pay day starts the new period at once; a transfer that landed on the pay day counts as the salary when no wage credit did. Without a declared salary nothing is guessed.
