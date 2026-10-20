@@ -51,3 +51,11 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 Thumbs.db
+
+# Local agent notes and owner review documents at the repository root
+/.agents/
+/.claude/
+/Claude outputs/
+/skills-lock.json
+/*.docx
+/Follow Money — خطة تنفيذ الأجزاء البرمجية قبل النشر.md
