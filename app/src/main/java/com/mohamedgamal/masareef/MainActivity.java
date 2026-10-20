@@ -2702,11 +2702,12 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(dp(132), dp(132)); ringParams.gravity = Gravity.CENTER;
         dial.addView(ring, ringParams);
         LinearLayout centre = new LinearLayout(this); centre.setOrientation(LinearLayout.VERTICAL); centre.setGravity(Gravity.CENTER);
-        centre.setPadding(dp(14), 0, dp(14), 0);
+        // Inside the ring stroke with room to spare: a long figure on a large-font phone must shrink, never touch the ring.
+        centre.setPadding(dp(24), 0, dp(24), 0);
         centre.addView(centered(label("باقي من دخل الفترة", 9, softInk, false)));
         TextView remaining = label((over ? "−" : "") + money(Math.abs(s.remaining), "EGP"), 16, over ? softCoral : Color.WHITE, true);
         remaining.setTextDirection(View.TEXT_DIRECTION_LTR); remaining.setSingleLine(true);
-        remaining.setAutoSizeTextTypeUniformWithConfiguration(9, 16, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        remaining.setAutoSizeTextTypeUniformWithConfiguration(8, 15, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
         centre.addView(centered(remaining), new LinearLayout.LayoutParams(-1, -2));
         String hint = s.income <= 0 ? (s.out > 0 ? "مفيش دخل مسجل" : "لسه مفيش حركة") : over ? "خرج أكتر من الدخل" : "اتصرف " + Math.round(share * 100) + "%";
         centre.addView(centered(label(hint, 9, over ? softCoral : softInk, false)));
