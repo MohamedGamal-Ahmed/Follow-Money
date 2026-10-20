@@ -598,6 +598,16 @@ public final class MainActivity extends Activity {
                 break;
             case "capture":
                 note("الرسائل والإشعارات الجديدة تُقرأ بعد منح الإذن. اختيار فترة الرسائل القديمة يبدأ الاستيراد مباشرة، والمراجعة قبل الحفظ اختيارية.");
+                android.os.PowerManager power=(android.os.PowerManager)getSystemService(POWER_SERVICE);
+                if(power!=null&&!power.isIgnoringBatteryOptimizations(getPackageName())) {
+                    settingsGroup=null;
+                    tipCard("⚡","التقاط العمليات في الخلفية",
+                            "بعض الأجهزة، زي Samsung وXiaomi، ممكن توقف الالتقاط في الخلفية لتوفير البطارية. لو رسائل جديدة مش بتتسجل، راجع استثناء Follow Money من تحسين البطارية.",
+                            "إعدادات البطارية",()->{
+                                try{startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+                                catch(android.content.ActivityNotFoundException unavailable){toast("إعدادات تحسين البطارية غير متاحة على الجهاز");}
+                            });
+                }
                 setting("استيراد رسائل SMS القديمة",this::requestSmsImport);
                 setting("تطبيقات الدفع والإشعارات",this::chooseNotificationApps);
                 setting(hasNotificationAccess()?"الوصول للإشعارات: مفعل":"تفعيل الوصول للإشعارات",this::openNotificationSettings);
