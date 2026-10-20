@@ -428,10 +428,14 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if (existing >= 0) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision);
             else {
                 String kind = transfer != null && isOwnHandle(transfer.counterpart) ? "transfer" : direction;
+                // A debit to one of the user's own credit cards keeps that card as destination (the statement treats it as
+                // internal); the settlement dialog stays optional for allocating it to purchases.
+                Long destination = "transfer".equals(kind) && "income".equals(direction) ? account :
+                        "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
                 added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
                         "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
                         "transfer".equals(kind) && "income".equals(direction) ? null : account, kind,
-                        "transfer".equals(kind) && "income".equals(direction) ? account : null, null, receivedAt);
+                        destination, null, receivedAt);
                 if (added) {
                     existing = latestInserted().id;
                     ContentValues precision=new ContentValues();precision.put("time_precision",event.precision);
@@ -1046,6 +1050,53 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (sourceId != null) putBalance(sourceId, balance.currency, balance.amountMinor,
                 ExpenseParser.eventTime(body, receivedAt), receivedAt, "SMS",
                 sha256("balance:" + sender + "\n" + receivedAt + "\n" + body));
+    }
+
+    /** Source id → kind («حساب», «بطاقة ائتمان», «كاش»…) for the statement's internal/cash rules; one query per call. */
+    java.util.Map<Long,String> sourceKinds() {
+        java.util.Map<Long,String> kinds=new java.util.HashMap<>();
+        for (PaymentSource source : paymentSources()) kinds.put(source.id, source.kind);
+        return kinds;
+    }
+
+    /** A debit whose destination is one of the user's own credit cards: it pays purchases already counted. */
+    static boolean paidToOwnCard(Transaction tx, java.util.Map<Long,String> kinds) {
+        return "expense".equals(tx.kind) && tx.destinationSourceId != null && "بطاقة ائتمان".equals(kinds.get(tx.destinationSourceId));
+    }
+    boolean paidToOwnCard(Transaction tx) { return paidToOwnCard(tx, sourceKinds()); }
+
+    /** A purchase paid from the cash wallet: its money was counted when it was withdrawn. */
+    static boolean paidFromCash(Transaction tx, java.util.Map<Long,String> kinds) {
+        return "expense".equals(tx.kind) && tx.paymentSourceId != null && "كاش".equals(kinds.get(tx.paymentSourceId));
+    }
+    boolean paidFromCash(Transaction tx) { return paidFromCash(tx, sourceKinds()); }
+
+    /**
+     * The rows MoneyFlow works on for [from, to): linked refunds offset on both sides, a repayment to the user's own
+     * credit card flagged internal, and a purchase from the cash wallet flagged as already counted. Read-only.
+     */
+    public List<MoneyFlow.Item> flowItems(LocalDate from, LocalDate to, ZoneId zone) {
+        List<MoneyFlow.Item> items=new ArrayList<>();
+        java.util.Map<Long,Long> offsets=reimbursementOffsets();
+        java.util.Map<Long,String> kinds=sourceKinds();
+        for (Transaction tx : transactionsBetween(from, to, zone)) {
+            long amount=effectiveAmount(tx, offsets);
+            if (amount > 0) items.add(new MoneyFlow.Item(tx.id, tx.when, amount, tx.currency, tx.kind, tx.category, tx.merchant,
+                    paidToOwnCard(tx, kinds), paidFromCash(tx, kinds)));
+        }
+        return items;
+    }
+
+    /** The user's live credit card with these last four digits, or null when none (or more than one) matches. */
+    Long ownCreditCard(String last4) {
+        if (last4 == null) return null;
+        Long found = null;
+        for (PaymentSource source : paymentSources()) {
+            if (source.archived || !"بطاقة ائتمان".equals(source.kind) || source.last4 == null || !source.last4.equals(last4)) continue;
+            if (found != null) return null;
+            found = source.id;
+        }
+        return found;
     }
 
     private Long autoSource(String sender, String last4, String body) {

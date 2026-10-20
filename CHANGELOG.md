@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add a from/to date picker to the existing transactions period filter, keeping the last day inclusive in the list.
+- Replace the home «آخر 7 أيام» card with the month statement from the pay day to today: «دخل» (salary vs transfers that arrived), «خرج» = day-to-day spending + commitments + transfers to people + cash withdrawals, «باقي من دخل الفترة», one line per component opening exactly its rows; own-account moves and repayments to the user's own credit cards are internal, a purchase paid from cash is detail only, and an unlinked transfer worth a quarter of the income or more shows a link warning. The widget follows the same function.
 - Read HSBC's trailing-sign alerts by their sign: `EGP 100.00+` is income, `EGP 100.00-` spending, the dated descriptor (TT Payment, Phone Banking Transfer, ATM Cash Withdrawal, Charges) is the merchant and the row shows the bank; a one-time repair flips credits older versions booked as spending and fixes their names, leaving user-edited and linked rows alone.
 
 - Limit the home page's recent transactions query to the five displayed rows while preserving ledger ordering.

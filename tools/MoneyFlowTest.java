@@ -119,6 +119,7 @@ public final class MoneyFlowTest {
         check(f.of("INTERNAL") == 30000, "own-account list header = 300");
         check(f.of("OPEN_TRANSFER") == 55000 && f.of("COMMITMENT") == 50000 && f.of("LIVING") == 7000 && f.of("INFLOW") == 109000, "one header figure per bucket");
         check(f.of(MoneyFlow.SPENDING_FILTER) == 57000 && f.of("") == f.expense, "spending list header = living + commitments; plain list keeps «خرج»");
+        check(f.of(MoneyFlow.OUT_FILTER) == 112000 + 25000, "statement «خرج» list header = spending + open transfers + cash withdrawals");
         // Home «مصروفاتك آخر 7 أيام»: grocery 100 (30 refunded -> 70 effective) + fee 20 + paid bill 500 = 590.
         LocalDate weekToday = LocalDate.of(2026, 10, 19);
         List<MoneyFlow.Item> wk = new ArrayList<>();
@@ -170,6 +171,106 @@ public final class MoneyFlowTest {
                 && !MoneyFlow.matchesFilter("COMMITMENT", MoneyFlow.Bucket.LIVING), "existing single-bucket filters unchanged");
         check("مصروفات".equals(MoneyFlow.filterLabel(MoneyFlow.SPENDING_FILTER)) && "سحب نقدي".equals(MoneyFlow.filterLabel("CASH_WITHDRAWAL")), "filter labels");
         check(MoneyFlow.week(new ArrayList<>(), weekToday, ZONE, "EGP").spending() == 0, "empty week is zero");
+
+        // 2ج — the month statement: «دخل / خرج / باقي» from the pay day to today, one definition in MoneyFlow.
+        LocalDate statementToday = LocalDate.of(2026, 10, 20);
+        LocalDate[] fromPayDay = MoneyFlow.statementPeriod(25, statementToday);
+        check(fromPayDay[0].equals(LocalDate.of(2026, 9, 25)) && fromPayDay[1].equals(LocalDate.of(2026, 10, 21)), "pay day 25 → from 25 September to today inclusive");
+        LocalDate[] afterPayDay = MoneyFlow.statementPeriod(25, LocalDate.of(2026, 10, 26));
+        check(afterPayDay[0].equals(LocalDate.of(2026, 10, 25)) && afterPayDay[1].equals(LocalDate.of(2026, 10, 27)), "after the pay day the period restarts");
+        LocalDate[] calendar = MoneyFlow.statementPeriod(0, statementToday);
+        check(calendar[0].equals(LocalDate.of(2026, 10, 1)) && calendar[1].equals(LocalDate.of(2026, 10, 21)), "no pay day → calendar month to today");
+        LocalDate[] monthEnd = MoneyFlow.statementPeriod(DailyAllowance.MONTH_END, statementToday);
+        check(monthEnd[0].equals(LocalDate.of(2026, 9, 30)), "«آخر يوم في الشهر» → from 30 September");
+        check(monthEnd[0].equals(DailyAllowance.calculate(null, statementToday, 0, 0, DailyAllowance.MONTH_END).cycleStart), "statement period equals the daily allowance cycle");
+
+        // The eight rows: salary, daily spend, subscription, transfer to a person, cash withdrawal, own transfer,
+        // a purchase after its linked refund (the refund itself is already offset upstream), and a purchase paid from cash.
+        List<MoneyFlow.Item> eight = new ArrayList<>();
+        eight.add(new MoneyFlow.Item(1, at("2026-09-25"), 3000000, "EGP", "income", "دخل", "مرتب"));
+        eight.add(new MoneyFlow.Item(2, at("2026-10-02"), 150000, "EGP", "expense", "أكل وشرب", "مطعم"));
+        eight.add(new MoneyFlow.Item(3, at("2026-10-03"), 30000, "EGP", "expense", "اشتراكات", "Netflix"));
+        eight.add(new MoneyFlow.Item(4, at("2026-10-04"), 200000, "EGP", "expense", "تحويلات", "صديق"));
+        eight.add(new MoneyFlow.Item(5, at("2026-10-05"), 50000, "EGP", "expense", "سحب نقدي", "ATM"));
+        eight.add(new MoneyFlow.Item(6, at("2026-10-06"), 1000000, "EGP", "transfer", "تحويلات", "بين حساباتي"));
+        eight.add(new MoneyFlow.Item(7, at("2026-10-07"), 75000, "EGP", "expense", "بقالة", "سوبر ماركت بعد الاسترداد"));
+        eight.add(new MoneyFlow.Item(8, at("2026-10-08"), 20000, "EGP", "expense", "أكل وشرب", "قهوة بالكاش", false, true));
+        eight.add(new MoneyFlow.Item(9, at("2026-09-20"), 999999, "EGP", "expense", "أكل وشرب", "قبل يوم القبض"));
+        MoneyFlow.Statement statement = MoneyFlow.statement(eight, fromPayDay, ZONE, "EGP");
+        check(statement.income == 3000000, "income = inflow");
+        check(statement.living == 225000 && statement.commitment == 30000 && statement.openTransfer == 200000 && statement.cash == 50000, "components of «خرج»");
+        check(statement.out == 505000, "خرج = living + commitments + open transfers + cash withdrawal");
+        check(statement.remaining == 3000000 - 505000, "باقي = دخل − خرج");
+        check(statement.internal == 1000000 && statement.out + statement.income != 505000 + 3000000 + 1000000, "own transfer is in none of the three");
+        check(statement.cashSpending == 20000 && statement.living == 225000, "a purchase paid from cash is detail only: counted when withdrawn");
+        // Review of 2ج: the cash rule covers every «خرج» bucket, not only day-to-day spending.
+        List<MoneyFlow.Item> cashCommitment = new ArrayList<>(eight);
+        cashCommitment.add(new MoneyFlow.Item(10, at("2026-10-09"), 100000, "EGP", "expense", "أقساط", "قسط بالكاش", false, true));
+        cashCommitment.add(new MoneyFlow.Item(11, at("2026-10-10"), 40000, "EGP", "expense", "تحويلات", "لشخص بالكاش", false, true));
+        MoneyFlow.Statement fromCash = MoneyFlow.statement(cashCommitment, fromPayDay, ZONE, "EGP");
+        check(fromCash.commitment == 30000 && fromCash.openTransfer == 200000 && fromCash.out == 505000 && fromCash.outCount == 5,
+                "an installment or a transfer paid from cash stays out of «خرج»: " + fromCash.out);
+        check(fromCash.cashSpending == 20000 + 100000 + 40000, "all cash-paid rows are detail: " + fromCash.cashSpending);
+        check(statement.outCount == 5, "five rows make up «خرج»");
+        check(statement.salary == 3000000 && statement.transfersIn == 0 && statement.salaryWhen == at("2026-09-25"), "single inflow on the pay day is the salary");
+        check(statement.unlinkedTransfer == 0, "a transfer below a quarter of income raises no warning");
+        check(statement.component(MoneyFlow.Bucket.LIVING) == 225000 && statement.component(MoneyFlow.Bucket.CASH_WITHDRAWAL) == 50000
+                && statement.component(MoneyFlow.Bucket.INTERNAL) == 0, "component() reads the four «خرج» buckets only");
+        check(MoneyFlow.isStatementOut(MoneyFlow.Bucket.CASH_WITHDRAWAL) && MoneyFlow.isStatementOut(MoneyFlow.Bucket.OPEN_TRANSFER)
+                && !MoneyFlow.isStatementOut(MoneyFlow.Bucket.INTERNAL) && !MoneyFlow.isStatementOut(MoneyFlow.Bucket.INFLOW), "statement out buckets");
+        check(MoneyFlow.matchesFilter(MoneyFlow.OUT_FILTER, MoneyFlow.Bucket.CASH_WITHDRAWAL) && MoneyFlow.matchesFilter(MoneyFlow.OUT_FILTER, MoneyFlow.Bucket.LIVING)
+                && !MoneyFlow.matchesFilter(MoneyFlow.OUT_FILTER, MoneyFlow.Bucket.INTERNAL) && !MoneyFlow.matchesFilter(MoneyFlow.OUT_FILTER, MoneyFlow.Bucket.INFLOW), "the «خرج» list filter");
+        check("خرج".equals(MoneyFlow.filterLabel(MoneyFlow.OUT_FILTER)) && !MoneyFlow.listsCaptureHistory(MoneyFlow.OUT_FILTER), "«خرج» list label and transactions-only");
+        check(MoneyFlow.statement(new ArrayList<>(), fromPayDay, ZONE, "EGP").remaining == 0, "empty statement is zero");
+
+        // A payment to one of the user's own credit cards is internal even before the settlement dialog.
+        check(MoneyFlow.bucket("expense", "تحويلات", true) == MoneyFlow.Bucket.INTERNAL && MoneyFlow.bucket("expense", "تحويلات", false) == MoneyFlow.Bucket.OPEN_TRANSFER
+                && MoneyFlow.bucket("income", "دخل", true) == MoneyFlow.Bucket.INFLOW, "known-card destination makes a debit internal");
+
+        // The owner's scenario (20 October): salary at month end in bank A, 90% moved to bank B, two credit cards paid from their banks.
+        LocalDate[] ownerPeriod = MoneyFlow.statementPeriod(DailyAllowance.MONTH_END, statementToday);
+        List<MoneyFlow.Item> owner = new ArrayList<>();
+        owner.add(new MoneyFlow.Item(1, at("2026-09-30"), 3000000, "EGP", "income", "دخل", "مرتب"));
+        owner.add(new MoneyFlow.Item(2, at("2026-09-30"), 2700000, "EGP", "transfer", "تحويلات", "A → B مربوط"));
+        owner.add(new MoneyFlow.Item(3, at("2026-10-02"), 100000, "EGP", "expense", "تسوق", "كارت A 1"));
+        owner.add(new MoneyFlow.Item(4, at("2026-10-03"), 200000, "EGP", "expense", "أكل وشرب", "كارت A 2"));
+        owner.add(new MoneyFlow.Item(5, at("2026-10-04"), 50000, "EGP", "expense", "بقالة", "كارت A 3"));
+        owner.add(new MoneyFlow.Item(6, at("2026-10-05"), 70000, "EGP", "expense", "تسوق", "كارت B 1"));
+        owner.add(new MoneyFlow.Item(7, at("2026-10-06"), 30000, "EGP", "expense", "مقاهي", "كارت B 2"));
+        owner.add(new MoneyFlow.Item(8, at("2026-10-10"), 400000, "EGP", "expense", "تحويلات", "سداد كارت A", true, false));
+        owner.add(new MoneyFlow.Item(9, at("2026-10-11"), 300000, "EGP", "expense", "تحويلات", "سداد كارت B", true, false));
+        owner.add(new MoneyFlow.Item(10, at("2026-10-12"), 150000, "EGP", "expense", "فواتير", "كهرباء"));
+        owner.add(new MoneyFlow.Item(11, at("2026-10-13"), 50000, "EGP", "expense", "سحب نقدي", "ATM"));
+        owner.add(new MoneyFlow.Item(12, at("2026-10-14"), 20000, "EGP", "expense", "أكل وشرب", "كاش", false, true));
+        MoneyFlow.Statement linked = MoneyFlow.statement(owner, ownerPeriod, ZONE, "EGP");
+        check(linked.income == 3000000 && linked.salary == 3000000 && linked.transfersIn == 0, "salary once; the own transfer is no income");
+        check(linked.out == 450000 + 150000 + 50000, "خرج = card purchases + direct spending + cash withdrawal only: " + linked.out);
+        check(linked.openTransfer == 0 && linked.internal == 2700000 + 400000 + 300000, "neither settlement nor own transfer is in «خرج»");
+        check(linked.remaining == 3000000 - 650000, "باقي = salary − what was really consumed, not the bank balance");
+        check(linked.unlinkedTransfer == 0, "a linked transfer raises no warning");
+        // Same month without the transfer linked: the debit is an open transfer and the deposit a second inflow.
+        List<MoneyFlow.Item> unlinked = new ArrayList<>(owner);
+        unlinked.set(1, new MoneyFlow.Item(2, at("2026-09-30"), 2700000, "EGP", "expense", "تحويلات", "تحويل لحظي"));
+        unlinked.add(new MoneyFlow.Item(13, at("2026-09-30") + 60000, 2700000, "EGP", "income", "دخل", "تحويل لحظي"));
+        MoneyFlow.Statement warned = MoneyFlow.statement(unlinked, ownerPeriod, ZONE, "EGP");
+        check(warned.unlinkedTransfer == 2700000 && warned.unlinkedTransferId == 2, "an unlinked transfer ≥ 25% of income is flagged with its amount and row");
+        check(warned.openTransfer == 2700000 && warned.out == 650000 + 2700000, "the unlinked amount does enter «خرج», never silently");
+        check(warned.income == 5700000 && warned.salary == 3000000 && warned.transfersIn == 2700000, "the deposit counts as a transfer that arrived, not as salary");
+        // Income split follows the descriptor: a wire payment is the salary; phone-banking and instant credits are transfers in, even when larger.
+        List<MoneyFlow.Item> hsbc = new ArrayList<>();
+        hsbc.add(new MoneyFlow.Item(1, at("2026-09-26"), 208385, "USD", "income", "دخل", "TT Payment"));
+        hsbc.add(new MoneyFlow.Item(2, at("2026-09-27"), 170000, "USD", "income", "دخل", "Phone Banking Transfer"));
+        hsbc.add(new MoneyFlow.Item(3, at("2026-10-01"), 50000, "USD", "income", "دخل", "someone@instapay"));
+        MoneyFlow.Statement usd = MoneyFlow.statement(hsbc, fromPayDay, ZONE, "USD");
+        check(usd.salary == 208385 && usd.transfersIn == 220000 && usd.income == 428385, "salary by descriptor, transfers in separately");
+        check(MoneyFlow.incomingTransfer("Phone Banking Transfer") && MoneyFlow.incomingTransfer("تحويل لحظي") && MoneyFlow.incomingTransfer("x@instapay")
+                && !MoneyFlow.incomingTransfer("TT Payment") && !MoneyFlow.incomingTransfer("مرتب"), "incoming-transfer descriptors");
+        // Without a pay-day match and without descriptors, the largest inflow is the salary.
+        List<MoneyFlow.Item> plain = new ArrayList<>();
+        plain.add(new MoneyFlow.Item(1, at("2026-10-03"), 500000, "EGP", "income", "دخل", "شركة"));
+        plain.add(new MoneyFlow.Item(2, at("2026-10-09"), 2500000, "EGP", "income", "دخل", "شركة"));
+        MoneyFlow.Statement largest = MoneyFlow.statement(plain, fromPayDay, ZONE, "EGP");
+        check(largest.salary == 2500000 && largest.salaryWhen == at("2026-10-09") && largest.transfersIn == 500000, "largest inflow is the salary when none sits on the pay day");
         System.out.println("Money flow checks passed: " + checked);
     }
 }

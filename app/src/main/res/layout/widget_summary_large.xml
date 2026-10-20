@@ -22,7 +22,7 @@
 
     <LinearLayout android:id="@+id/widget_stats" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="6dp">
         <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:padding="6dp" android:background="@drawable/widget_tile">
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_rolling_week_label" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" />
+            <TextView android:id="@+id/widget_week_label" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_rolling_week_label" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" />
             <TextView android:id="@+id/widget_week" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_preview_week_amount" android:textSize="13sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="10sp" android:autoSizeMaxTextSize="13sp" android:autoSizeStepGranularity="1sp" android:textColor="#FFFFFF" android:fontFamily="sans-serif-medium" android:singleLine="true" android:ellipsize="end" />
         </LinearLayout>
         <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:orientation="vertical" android:padding="6dp" android:background="@drawable/widget_tile">

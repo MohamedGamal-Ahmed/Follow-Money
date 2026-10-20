@@ -15,6 +15,8 @@ final class MoneyTotals {
         long of(String filter) {
             if (filter == null || filter.isEmpty()) return expense;
             if (MoneyFlow.SPENDING_FILTER.equals(filter)) return living + commitment;
+            // The statement's «خرج»: spending, open transfers and cash withdrawals (MoneyFlow.isStatementOut).
+            if (MoneyFlow.OUT_FILTER.equals(filter)) return expense + cash;
             switch (MoneyFlow.Bucket.valueOf(filter)) {
                 case LIVING: return living;
                 case COMMITMENT: return commitment;
