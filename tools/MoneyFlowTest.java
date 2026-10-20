@@ -271,6 +271,51 @@ public final class MoneyFlowTest {
         plain.add(new MoneyFlow.Item(2, at("2026-10-09"), 2500000, "EGP", "income", "دخل", "شركة"));
         MoneyFlow.Statement largest = MoneyFlow.statement(plain, fromPayDay, ZONE, "EGP");
         check(largest.salary == 2500000 && largest.salaryWhen == at("2026-10-09") && largest.transfersIn == 500000, "largest inflow is the salary when none sits on the pay day");
+
+        // 20 October (owner's ledger): pay day «آخر يوم في الشهر» but the salary landed on 26 September as an instant transfer.
+        check(MoneyFlow.payDayIn(YearMonth.of(2026, 9), DailyAllowance.MONTH_END).equals(LocalDate.of(2026, 9, 30))
+                && MoneyFlow.payDayIn(YearMonth.of(2026, 2), 31).equals(LocalDate.of(2026, 2, 28))
+                && MoneyFlow.payDayIn(YearMonth.of(2026, 10), 25).equals(LocalDate.of(2026, 10, 25)), "pay day inside a month");
+        List<MoneyFlow.Item> early = new ArrayList<>();
+        early.add(new MoneyFlow.Item(1, at("2026-09-20"), 150000, "EGP", "income", "دخل", "تحويل لحظي"));
+        early.add(new MoneyFlow.Item(2, at("2026-09-26"), 5600000, "EGP", "income", "دخل", "تحويل لحظي"));
+        early.add(new MoneyFlow.Item(3, at("2026-09-30"), 5060000, "EGP", "expense", "أقساط", "قسط شقة"));
+        early.add(new MoneyFlow.Item(4, at("2026-10-02"), 211300, "EGP", "income", "دخل", "تحويل لحظي"));
+        LocalDate nominal = MoneyFlow.statementPeriod(DailyAllowance.MONTH_END, LocalDate.of(2026, 10, 20))[0];
+        check(nominal.equals(LocalDate.of(2026, 9, 30)), "nominal month-end start");
+        check(LocalDate.of(2026, 9, 26).equals(MoneyFlow.salaryArrival(early, nominal, 2250000, "EGP", ZONE, LocalDate.of(2026, 10, 20))),
+                "the salary that landed four days early starts the period");
+        check(MoneyFlow.salaryArrival(early, nominal, 0, "EGP", ZONE, LocalDate.of(2026, 10, 20)) == null, "no declared salary: never guessed");
+        check(MoneyFlow.salaryArrival(early, nominal, 20000000, "EGP", ZONE, LocalDate.of(2026, 10, 20)) == null, "credits below half the declared salary do not count");
+        check(MoneyFlow.salaryArrival(early, nominal, 2250000, "USD", ZONE, LocalDate.of(2026, 10, 20)) == null, "other currency ignored");
+        check(MoneyFlow.salaryArrival(early, LocalDate.of(2026, 10, 31), 2250000, "EGP", ZONE, LocalDate.of(2026, 10, 20)) == null,
+                "the coming pay day's window is still in the future");
+        check(MoneyFlow.salaryArrival(early, nominal, 2250000, "EGP", ZONE, LocalDate.of(2026, 9, 25)) == null, "nothing landed yet by the 25th");
+        // With the snapped period the instant transfer on the (actual) pay day is the salary, not a transfer in.
+        MoneyFlow.Statement snapped = MoneyFlow.statement(early, new LocalDate[]{LocalDate.of(2026, 9, 26), LocalDate.of(2026, 10, 21)}, ZONE, "EGP");
+        check(snapped.salary == 5600000 && snapped.salaryWhen == at("2026-09-26") && snapped.transfersIn == 211300 && snapped.income == 5811300,
+                "a transfer that landed on the pay day is the salary: " + snapped.salary + " / " + snapped.transfersIn);
+        check(snapped.out == 5060000 && snapped.remaining == 5811300 - 5060000, "the installment on the 30th is inside the snapped period");
+        // The shared period call: snapped to the 26th now; a salary that lands early for the next pay day starts the next period.
+        MoneyFlow.ItemsBetween source = (from, to) -> {
+            List<MoneyFlow.Item> inside = new ArrayList<>();
+            long a = from.atStartOfDay(ZONE).toInstant().toEpochMilli(), b = to.atStartOfDay(ZONE).toInstant().toEpochMilli();
+            for (MoneyFlow.Item item : early) if (item.when >= a && item.when < b) inside.add(item);
+            return inside;
+        };
+        LocalDate[] shared = MoneyFlow.statementPeriod(DailyAllowance.MONTH_END, 2250000, "EGP", ZONE, LocalDate.of(2026, 10, 20), source);
+        check(shared[0].equals(LocalDate.of(2026, 9, 26)) && shared[1].equals(LocalDate.of(2026, 10, 21)), "shared period snaps to the 26th: " + shared[0]);
+        check(MoneyFlow.statementPeriod(DailyAllowance.MONTH_END, 0, "EGP", ZONE, LocalDate.of(2026, 10, 20), source)[0].equals(LocalDate.of(2026, 9, 30)), "no declared salary: nominal");
+        check(MoneyFlow.statementPeriod(0, 2250000, "EGP", ZONE, LocalDate.of(2026, 10, 20), source)[0].equals(LocalDate.of(2026, 10, 1)), "no pay day: calendar month");
+        early.add(new MoneyFlow.Item(5, at("2026-10-27"), 5600000, "EGP", "income", "دخل", "تحويل لحظي"));
+        LocalDate[] rolled = MoneyFlow.statementPeriod(DailyAllowance.MONTH_END, 2250000, "EGP", ZONE, LocalDate.of(2026, 10, 28), source);
+        check(rolled[0].equals(LocalDate.of(2026, 10, 27)) && rolled[1].equals(LocalDate.of(2026, 10, 29)), "an early salary for 31 October starts the new period on the 27th: " + rolled[0]);
+        // A wage credit on the pay day still beats a larger transfer that landed the same day.
+        List<MoneyFlow.Item> sameDay = new ArrayList<>();
+        sameDay.add(new MoneyFlow.Item(1, at("2026-09-26"), 3000000, "EGP", "income", "دخل", "مرتب"));
+        sameDay.add(new MoneyFlow.Item(2, at("2026-09-26"), 3500000, "EGP", "income", "دخل", "تحويل لحظي"));
+        MoneyFlow.Statement wage = MoneyFlow.statement(sameDay, new LocalDate[]{LocalDate.of(2026, 9, 26), LocalDate.of(2026, 10, 21)}, ZONE, "EGP");
+        check(wage.salary == 3000000 && wage.transfersIn == 3500000, "wage descriptor on the pay day outranks a same-day transfer");
         System.out.println("Money flow checks passed: " + checked);
     }
 }

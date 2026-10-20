@@ -109,7 +109,8 @@ final class StatementUiTest {
         ok(opened!=null&&opened[0].equals(period[0])&&opened[1].equals(period[1]),"Row «"+rowLabel+"» did not open the statement period");
         long listed=listedTotal(period);
         ok(listed==expected,"Rows behind «"+rowLabel+"» add up to "+listed+", the card shows "+expected);
-        ok(shows(pageText(),"عمليات من "+period[0]+" إلى "+period[1].minusDays(1)),"List header does not name the statement period");
+        ok(shows(pageText(),MainActivity.periodLabel(period)+"  ⌄"),"Period chip does not name the statement period");
+        ok(shows(pageText(),"كشف الفترة"),"Filter summary does not say the list is the statement");
     }
     void run(){
         Bundle result=new Bundle();int status=-1;
@@ -154,7 +155,7 @@ final class StatementUiTest {
             screen("01-statement-linked");
             openAndCompare(MoneyFlow.label(MoneyFlow.Bucket.LIVING),"LIVING",600000,period);
             openAndCompare(MoneyFlow.label(MoneyFlow.Bucket.CASH_WITHDRAWAL),"CASH_WITHDRAWAL",50000,period);
-            show(0);click("خرج");
+            show(0);click("خرج · 7 عملية");
             ok(MoneyFlow.OUT_FILTER.equals(get("transactionBucketFilter")),"Hero did not open the «خرج» list");
             ok(listedTotal(period)==650000,"Rows behind «خرج» do not add up to it");
             screen("02-out-list");

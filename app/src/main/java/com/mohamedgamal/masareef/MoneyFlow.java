@@ -307,6 +307,55 @@ final class MoneyFlow {
         return new LocalDate[]{start, today.plusDays(1)};
     }
 
+    /** The pay day inside a month: the last day for DailyAllowance.MONTH_END, otherwise the day clamped to the month's length. */
+    static LocalDate payDayIn(YearMonth month, int salaryDay) {
+        return salaryDay == DailyAllowance.MONTH_END ? month.atEndOfMonth() : month.atDay(Math.max(1, Math.min(salaryDay, month.lengthOfMonth())));
+    }
+
+    /** Days before and after the nominal pay day in which the salary may actually land (a weekend, a bank holiday, an early run). */
+    static final int SALARY_EARLY_DAYS = 7, SALARY_LATE_DAYS = 3;
+
+    /**
+     * The day the salary really landed around a nominal pay day, or null when no credit in [payDay−7, payDay+3] ∩ [.., today]
+     * reaches half the declared monthly salary. Salaries in Egypt often arrive a few days before the month end and as
+     * instant transfers, so every inflow qualifies and the amount, not the descriptor, decides. Nothing is guessed when
+     * the user never declared a salary (declaredMinor ≤ 0).
+     */
+    static LocalDate salaryArrival(List<Item> items, LocalDate payDay, long declaredMinor, String currency, ZoneId zone, LocalDate today) {
+        if (declaredMinor <= 0 || payDay == null) return null;
+        LocalDate from = payDay.minusDays(SALARY_EARLY_DAYS), to = payDay.plusDays(SALARY_LATE_DAYS);
+        if (to.isAfter(today)) to = today;
+        if (to.isBefore(from)) return null;
+        long floor = Math.max(1, declaredMinor / 2);
+        Item best = null; LocalDate bestDay = null;
+        for (Item item : items) {
+            if (item.bucket != Bucket.INFLOW || !currency.equals(item.currency) || item.amountMinor < floor) continue;
+            LocalDate day = Instant.ofEpochMilli(item.when).atZone(zone).toLocalDate();
+            if (day.isBefore(from) || day.isAfter(to)) continue;
+            if (best == null || item.amountMinor > best.amountMinor) { best = item; bestDay = day; }
+        }
+        return bestDay;
+    }
+
+    /** Reads the flow items in [from, to) for the snapped period: ExpenseDb.flowItems on the device, a list filter in tests. */
+    interface ItemsBetween { List<Item> read(LocalDate from, LocalDate to); }
+
+    /**
+     * The home and widget statement period: statementPeriod(salaryDay, today) snapped to the day the salary really
+     * landed (salaryArrival). A salary that already arrived early for the coming pay day starts the new period at once,
+     * so two salaries are never added together; without a pay day or a declared salary the nominal period is returned.
+     */
+    static LocalDate[] statementPeriod(int salaryDay, long declaredMinor, String currency, ZoneId zone, LocalDate today, ItemsBetween items) {
+        LocalDate[] nominal = statementPeriod(salaryDay, today);
+        if (salaryDay <= 0 || salaryDay > DailyAllowance.MONTH_END || declaredMinor <= 0) return nominal;
+        List<Item> around = items.read(nominal[0].minusDays(SALARY_EARLY_DAYS), today.plusDays(1));
+        LocalDate next = payDayIn(YearMonth.from(nominal[0]).plusMonths(1), salaryDay);
+        LocalDate early = salaryArrival(around, next, declaredMinor, currency, zone, today);
+        if (early != null && early.isAfter(nominal[0])) return new LocalDate[]{early, nominal[1]};
+        LocalDate landed = salaryArrival(around, nominal[0], declaredMinor, currency, zone, today);
+        return landed == null ? nominal : new LocalDate[]{landed, nominal[1]};
+    }
+
     /** A credit whose descriptor says it was moved to the user, not earned: phone-banking, instant transfers, InstaPay handles. */
     static boolean incomingTransfer(String merchant) {
         if (merchant == null) return false;
@@ -361,7 +410,7 @@ final class MoneyFlow {
         long income = 0, living = 0, commitment = 0, openTransfer = 0, cash = 0, internal = 0, cashSpending = 0;
         int outCount = 0;
         Item salary = null, largestTransfer = null;
-        boolean salaryOnPayDay = false;
+        int salaryRank = 0;
         for (Item item : items) {
             if (item.when < start || item.when >= end || !currency.equals(item.currency)) continue;
             // Anything paid from the cash wallet was counted when the cash was withdrawn: detail only, in every «خرج» bucket.
@@ -371,10 +420,13 @@ final class MoneyFlow {
             switch (item.bucket) {
                 case INFLOW: {
                     income = Math.addExact(income, item.amountMinor);
-                    if (incomingTransfer(item.merchant)) break;
                     boolean onPayDay = Instant.ofEpochMilli(item.when).atZone(zone).toLocalDate().equals(period[0]);
-                    if (salary == null || onPayDay && !salaryOnPayDay || onPayDay == salaryOnPayDay && item.amountMinor > salary.amountMinor) {
-                        salary = item; salaryOnPayDay = onPayDay;
+                    // Rank: a non-transfer credit on the pay day, then a transfer that landed on the pay day (salaries often
+                    // arrive as instant transfers), then a non-transfer credit on any day. Transfers elsewhere stay transfers in.
+                    int rank = onPayDay ? (incomingTransfer(item.merchant) ? 2 : 3) : (incomingTransfer(item.merchant) ? 0 : 1);
+                    if (rank == 0) break;
+                    if (salary == null || rank > salaryRank || rank == salaryRank && item.amountMinor > salary.amountMinor) {
+                        salary = item; salaryRank = rank;
                     }
                     break;
                 }

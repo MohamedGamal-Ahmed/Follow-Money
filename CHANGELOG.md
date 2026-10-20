@@ -4,6 +4,14 @@
 
 ## 0.3.0 — 2026-10-xx
 
+- Redraw the home statement card: one ring for the share of the income that went out (full and coral when more went out than came in) with «باقي من دخل الفترة» in its centre, and three orbs — «دخل», «خرج», «صرف يومي» — each opening exactly its rows; the salary/transfers-in split and the definitions line stay.
+- Start the statement on the day the salary really landed: a credit of at least half the declared monthly salary within seven days before or three days after the nominal pay day (instant transfers included) moves the period start to that day, and a salary that already arrived early for the coming pay day starts the new period at once; a transfer that landed on the pay day counts as the salary when no wage credit did. Without a declared salary nothing is guessed.
+- Simplify the transactions header to one row: a period chip (month, or «7 أكتوبر → 13 أكتوبر») whose menu offers a month, a day-to-day range or a return to the month, and a «فلاتر» chip with the count of active filters that opens the filter sheet (now holding the type as well as category and account), plus one muted line naming the active filters; the verbose «عمليات من … · رجوع يرجعك لمكان البداية» line and the row of type chips are gone.
+- Add «الرسالة اتقرت غلط؟ بلّغ عنها» to a captured transaction's options: an editable, redacted copy of the original message beside what the app recorded and a field for the correction, opening a support e-mail draft the user sends themselves.
+- Group the message-samples tool by sender with up to three masked shapes each (digits and month names masked, so one bank template is one shape), and list first the messages from known banks that the parser did not read.
+
+- Show the «جديد في النسخة» card as a headline (two points and a «كل التفاصيل» link to the full notes) and give the transactions period pickers a compact Arabic spinner instead of the calendar grid.
+
 - Show a one-time «جديد في النسخة» card on the home screen after an update (never on a first install), with a permanent «ما الجديد» row in Settings → Help; notes are read from `assets/whats-new.txt` and `tools/check-repo.py` requires the newest section to match `versionName`.
 
 - Keep the last three crashes locally without exception messages, with an optional reviewed crash text in support drafts; explain battery restrictions in capture settings; offer editable, masked email drafts for unrecognized SMS formats from known bank senders, excluding OTP and promotional messages.

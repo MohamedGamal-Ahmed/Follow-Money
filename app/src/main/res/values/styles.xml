@@ -7,6 +7,7 @@
         <item name="android:navigationBarColor">#000000</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
+        <item name="android:datePickerStyle">@style/AppDatePicker</item>
     </style>
     <style name="AppTheme.Dark" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
@@ -16,6 +17,12 @@
         <item name="android:navigationBarColor">#0D1A16</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:alertDialogTheme">@style/AppAlertDialog.Dark</item>
+        <item name="android:datePickerStyle">@style/AppDatePicker</item>
+    </style>
+    <!-- Spinner mode: the calendar mode draws a grey header block and a month grid that do not fit the app dialogs. -->
+    <style name="AppDatePicker" parent="android:style/Widget.Material.DatePicker">
+        <item name="android:datePickerMode">spinner</item>
+        <item name="android:calendarViewShown">false</item>
     </style>
     <style name="AppAlertDialog" parent="android:style/Theme.Material.Light.Dialog.Alert">
         <item name="android:windowBackground">@drawable/dialog_background</item>

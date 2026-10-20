@@ -223,6 +223,41 @@ final class UiKit {
         }
     }
 
+    /**
+     * The statement ring on the home card: a soft track and one arc for the share of the income that has gone out,
+     * full when more went out than came in. Colors and stroke are set by the caller, so the ring reads on the
+     * brand background in both themes.
+     */
+    static final class Donut extends View {
+        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float fraction, strokeDp = 14;
+
+        Donut(Context context) {
+            super(context);
+            for (Paint paint : new Paint[]{track, fill}) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+            }
+        }
+
+        void set(float value, int trackColor, int fillColor, float stroke) {
+            fraction = Math.max(0f, Math.min(1f, value));
+            track.setColor(trackColor); fill.setColor(fillColor); strokeDp = stroke;
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float stroke = strokeDp * getResources().getDisplayMetrics().density;
+            track.setStrokeWidth(stroke); fill.setStrokeWidth(stroke);
+            float size = Math.min(getWidth(), getHeight());
+            RectF box = new RectF(stroke / 2 + (getWidth() - size) / 2, stroke / 2 + (getHeight() - size) / 2,
+                    (getWidth() + size) / 2 - stroke / 2, (getHeight() + size) / 2 - stroke / 2);
+            canvas.drawArc(box, 0, 360, false, track);
+            if (fraction > 0) canvas.drawArc(box, -90, Math.max(4f, 360 * fraction), false, fill);
+        }
+    }
+
     /** How a known bank's card face looks: display name and gradient colors. */
     static final class CardFace {
         final String name;
