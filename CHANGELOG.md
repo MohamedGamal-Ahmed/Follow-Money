@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an optional device-authenticated app lock for the main ledger and SMS import, with an elapsed-time timeout, a covered screen before financial content, and an optional secure recent-app preview.
+
 - Add a from/to date picker to the existing transactions period filter, keeping the last day inclusive in the list.
 - Add a local backup and restore: one `.fmbackup` file (AES-256-GCM, key from the user's password via PBKDF2 with 200,000 rounds) holding the whole ledger with its source text, the settings and the profile picture, saved and opened through the document picker; restore shows a summary first, keeps the previous database beside the restored one until re-encryption with the device's Keystore key and the settings have all succeeded (a failure at any step, or an app start after an interrupted restore, puts the previous data back exactly as it was), and refuses a wrong password, a damaged file, a file above 200 MB, a header with an out-of-range round count or a backup from a newer app without touching current data. The home screen reminds after 30 days without a backup; the privacy policy describes the file.
 - Replace the home «آخر 7 أيام» card with the month statement from the pay day to today: «دخل» (salary vs transfers that arrived), «خرج» = day-to-day spending + commitments + transfers to people + cash withdrawals, «باقي من دخل الفترة», one line per component opening exactly its rows; own-account moves and repayments to the user's own credit cards are internal, a purchase paid from cash is detail only, and an unlinked transfer worth a quarter of the income or more shows a link warning. The widget follows the same function.

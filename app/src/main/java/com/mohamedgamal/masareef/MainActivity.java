@@ -147,6 +147,8 @@ public final class MainActivity extends Activity {
     };
     private static final String[] CURRENCIES = {"EGP", "USD", "EUR", "GBP"};
     private ExpenseDb db;
+    private AppLock appLock;
+    private boolean initialActionsPending, initialDirect, initialFresh, pendingIntentActions;
     private LinearLayout page;
     private LinearLayout settingsGroup;
     private LocalDate selectedMonth = LocalDate.now().withDayOfMonth(1);
@@ -193,6 +195,7 @@ public final class MainActivity extends Activity {
             ACCENT_PALE = 0xff1c3a2e; BORDER = 0xff2a3b33; SURFACE = 0xff16261f; CORAL = 0xfff07070; INCOME = 0xff3ccb8b;
         }
         super.onCreate(state);
+        appLock = new AppLock(this, this::onAppUnlocked);
         loadFonts();
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(SURFACE);
@@ -243,13 +246,22 @@ public final class MainActivity extends Activity {
         refreshLedger(true);
         refreshMerchantCatalog();
         runRepair(false);
-        if (state == null && !direct) playOpening(false);
+        initialActionsPending = true;
+        initialDirect = direct;
+        initialFresh = state == null;
+        if (!appLock.locked()) runInitialActions();
+    }
+
+    private void runInitialActions() {
+        if (!initialActionsPending || appLock.guard()) return;
+        initialActionsPending = false;
+        if (initialFresh && !initialDirect) playOpening(false);
         handleShare(getIntent());
         openTransactionFromIntent(getIntent());
         openCaptureEventFromIntent(getIntent());
         openWidgetAction(getIntent());
         openMonthlyIntent(getIntent());
-        if (!introVisible && state==null && !direct) {
+        if (!introVisible && initialFresh && !initialDirect) {
             requestSmsAtStartup();
             if (checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
                 requestNotificationAtStartup();
@@ -259,8 +271,19 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void onAppUnlocked() {
+        if (db == null || isFinishing() || isDestroyed()) return;
+        render();
+        if (initialActionsPending) runInitialActions();
+        else if (pendingIntentActions) {
+            pendingIntentActions = false;
+            processIncomingIntent(getIntent());
+        }
+    }
+
     @Override protected void onResume() {
         super.onResume();
+        if (appLock.guard()) return;
         if (db != null) {render();refreshLedger(true);MonthlySummaryReceiver.refresh(this);}
         if (db != null && !introVisible && hasNotificationAccess()) {
             SharedPreferences settings = getSharedPreferences("notification_settings", MODE_PRIVATE);
@@ -275,19 +298,31 @@ public final class MainActivity extends Activity {
     @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag") // API 26–32 uses a signature permission below.
     @Override protected void onStart() {
         super.onStart();
+        appLock.onStart();
         IntentFilter filter = new IntentFilter(SmsReceiver.ACTION_DATA_CHANGED);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(dataChanged, filter, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(dataChanged, filter, getPackageName() + ".INTERNAL_BROADCAST", null);
     }
 
     @Override protected void onStop() {
+        appLock.onStop();
         unregisterReceiver(dataChanged);
         super.onStop();
+    }
+
+    @Override protected void onDestroy() {
+        appLock.dispose();
+        super.onDestroy();
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (appLock.guard()) { pendingIntentActions = true; return; }
+        processIncomingIntent(intent);
+    }
+
+    private void processIncomingIntent(Intent intent) {
         handleShare(intent);
         openTransactionFromIntent(intent);
         openCaptureEventFromIntent(intent);
@@ -613,6 +648,12 @@ public final class MainActivity extends Activity {
                 break;
             case "data":
                 note("مصادر العمليات محفوظة مشفرة. CSV يحتوي على معاملاتك، ويحتاج مشاركة واعية منك.");
+                setting(appLock.enabled()?"قفل التطبيق: مفعل":"قفل التطبيق: متوقف",this::appLockSettingsDialog);
+                if (!appLock.deviceSecure()) {
+                    View lockRow=settingsGroup.getChildAt(settingsGroup.getChildCount()-1);
+                    lockRow.setEnabled(false);lockRow.setAlpha(0.5f);lockRow.setOnClickListener(null);
+                    note("فعّل قفل الشاشة في إعدادات الجهاز أولًا لاستخدام قفل التطبيق.");
+                }
                 setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("استيراد معاملات CSV",this::chooseCsvImport);
                 setting("تصدير معاملات "+selectedMonth.toString().substring(0,7)+" CSV",this::exportCsv);
@@ -673,6 +714,27 @@ public final class MainActivity extends Activity {
 
     private void reportProblem() {
         supportDialog(false);
+    }
+
+    private void appLockSettingsDialog() {
+        String timeout=appLock.timeoutSeconds()==0?"فورًا":appLock.timeoutSeconds()==60?"دقيقة":"5 دقائق";
+        String[] choices={appLock.enabled()?"إيقاف قفل التطبيق":"تشغيل قفل التطبيق",
+                "القفل بعد: "+timeout,
+                "منع لقطات الشاشة: "+(appLock.securePreview()?"مفعّل":"متوقف")};
+        new ChoiceDialogBuilder().setTitle("قفل التطبيق")
+                .setItems(choices,(dialog,index)->{
+                    if(index==0) {
+                        if(appLock.enabled()){appLock.disable();render();}
+                        else appLock.enable(this::render);
+                    } else if(index==1) {
+                        new ChoiceDialogBuilder().setTitle("اقفل التطبيق بعد")
+                                .setItems(new String[]{"فورًا","بعد دقيقة","بعد 5 دقائق"},(d,which)->{
+                                    appLock.setTimeoutSeconds(new int[]{0,60,300}[which]);render();
+                                }).show();
+                    } else {
+                        appLock.setSecurePreview(!appLock.securePreview());render();
+                    }
+                }).show();
     }
 
     private void privacyPolicyDialog() {
@@ -1233,8 +1295,18 @@ public final class MainActivity extends Activity {
         });
     }
 
+    @Override public void startActivityForResult(Intent intent, int requestCode) {
+        if (appLock != null) appLock.beginOwnResult(requestCode);
+        try { super.startActivityForResult(intent, requestCode); }
+        catch (RuntimeException error) {
+            if (appLock != null) appLock.endOwnResult(requestCode);
+            throw error;
+        }
+    }
+
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (appLock != null && appLock.onActivityResult(requestCode,resultCode)) return;
         if(requestCode==PROFILE_PHOTO_REQUEST){if(resultCode==RESULT_OK&&data!=null&&data.getData()!=null)saveProfilePhoto(data.getData());return;}
         if (requestCode == VOICE_REQUEST) {
             if (resultCode == RESULT_OK && data != null) {
@@ -2334,6 +2406,7 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
+        if (appLock != null && appLock.guard()) return;
         // Any committed tracked write bumps the persistent revision, so the cached suggestions cannot stay stale
         // behind a page whose only refresh path is this render().
         sourceKindCache = null;
@@ -2422,6 +2495,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (appLock != null && appLock.locked()) { finish(); return; }
         if(introVisible){if(introStep>0){introStep--;render();}else finishIntro(false);return;}
         if(bulkMode){bulkMode=false;bulkSelected.clear();render();return;}
         if(selectedTab==4&&!insightsSection.isEmpty()){insightsSection="";render();return;}
