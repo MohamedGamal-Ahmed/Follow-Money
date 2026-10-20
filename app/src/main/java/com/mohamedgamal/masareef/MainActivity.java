@@ -690,7 +690,7 @@ public final class MainActivity extends Activity {
                 setting("اقتراح تحسين",()->supportDialog(true));
                 setting("نسخ بيانات التشخيص",this::copySupportDetails);
                 setting("للمطورين: متابعة على GitHub",()->openGitHub(Uri.parse(GitHubSupport.REPOSITORY+"/issues")));
-                note("الدعم بالإيميل: "+EmailSupport.ADDRESS+". التطبيق بيضيف بيانات النسخة والجهاز والنظام واللغة فقط؛ إنت بتراجع المسودة وبتضغط إرسال في تطبيق الإيميل. بلاغات GitHub عامة وتحتاج حسابًا.");
+                note("الدعم بالإيميل: "+EmailSupport.ADDRESS+". التطبيق بيضيف بيانات النسخة والجهاز والنظام واللغة، وتقدر تختار إرفاق آخر عطل بعد معاينته؛ إنت بتراجع المسودة وبتضغط إرسال في تطبيق الإيميل. بلاغات GitHub عامة وتحتاج حسابًا.");
                 break;
         }
     }
@@ -762,9 +762,19 @@ public final class MainActivity extends Activity {
         description.setPadding(dp(14),dp(10),dp(14),dp(10));
         description.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(4000)});
         form.addView(label("متكتبش أرقام حسابات أو كروت، ولا تلصق رسائل البنك الأصلية.",12,CORAL,false));
-        form.addView(label("التطبيق بيضيف بيانات النسخة والجهاز والنظام واللغة فقط:",12,MUTED,false));
+        form.addView(label("بيانات النسخة والجهاز والنظام واللغة:",12,MUTED,false));
         TextView metadata=label(GitHubSupport.details(this),12,INK,false);
         metadata.setTextDirection(View.TEXT_DIRECTION_LTR);metadata.setTextIsSelectable(true);form.addView(metadata);
+        String lastCrash=suggestion?null:CrashLog.latest(this);
+        CheckBox attachCrash=new CheckBox(this);
+        if(lastCrash!=null) {
+            attachCrash.setText("إرفاق آخر عطل كنص في المسودة");attachCrash.setTypeface(REGULAR);form.addView(attachCrash);
+            TextView preview=label(lastCrash,11,INK,false);preview.setTextDirection(View.TEXT_DIRECTION_LTR);
+            preview.setTextIsSelectable(true);preview.setVisibility(View.GONE);form.addView(preview);
+            attachCrash.setOnCheckedChangeListener((button,checked)->preview.setVisibility(checked?View.VISIBLE:View.GONE));
+        }
+        java.util.function.Supplier<String> reviewed=()->description.getText().toString().trim()
+                +(attachCrash.isChecked()&&lastCrash!=null?"\n\nآخر عطل (محلي):\n"+lastCrash:"");
         form.addView(label("هيفتح مسودة في تطبيق الإيميل؛ راجعها واضغط إرسال بنفسك. محتاج إيميل متظبط على الموبايل.",12,MUTED,false));
         AlertDialog dialog=new ChoiceDialogBuilder().setTitle(suggestion?"اقتراح تحسين":"الإبلاغ عن مشكلة")
                 .setView(scrollForm(form)).setPositiveButton("فتح مسودة إيميل",null)
@@ -773,10 +783,10 @@ public final class MainActivity extends Activity {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
                 String text=description.getText().toString().trim();
                 if(text.isEmpty()){description.setError("اكتب وصف مختصر الأول");return;}
-                try {startActivity(EmailSupport.draft(this,suggestion,text));}
-                catch(android.content.ActivityNotFoundException error){copySupportRequest(suggestion,text,"مفيش تطبيق إيميل متاح؛ اتنسخ عنوان الدعم والطلب");}
+                try {startActivity(EmailSupport.draft(this,suggestion,reviewed.get()));}
+                catch(android.content.ActivityNotFoundException error){copySupportRequest(suggestion,reviewed.get(),"مفيش تطبيق إيميل متاح؛ اتنسخ عنوان الدعم والطلب");}
             });
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->copySupportRequest(suggestion,description.getText().toString(),"اتنسخ عنوان الدعم والطلب"));
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->copySupportRequest(suggestion,reviewed.get(),"اتنسخ عنوان الدعم والطلب"));
         });
         dialog.show();
     }
@@ -6699,7 +6709,7 @@ public final class MainActivity extends Activity {
     private void reviewToolsDialog() {
         if(!BuildConfig.DEBUG)return;
         String[] options = {"تصحيح البيانات: إعلانات وتكرار وتحويلات داخلية", "فحص تغطية رسائل SMS", "تقرير تشخيص الأرقام",
-                "مراجعة التحويلات بين حساباتك", "عينات رسائل البنوك"};
+                "مراجعة التحويلات بين حساباتك", "عينات رسائل البنوك", "عطل تجريبي"};
         new ChoiceDialogBuilder().setTitle("أدوات المراجعة")
                 .setItems(options, (dialog, which) -> {
                     switch (which) {
@@ -6708,9 +6718,19 @@ public final class MainActivity extends Activity {
                         case 2: diagnosticsDialog(); break;
                         case 3: repairTransfersDialog(); break;
                         case 4: messageSamples(); break;
+                        case 5: debugCrashDialog(); break;
                         default: break;
                     }
                 }).setNegativeButton("إغلاق", null).show();
+    }
+
+    private void debugCrashDialog() {
+        if(!BuildConfig.DEBUG)return;
+        new ChoiceDialogBuilder().setTitle("عطل تجريبي")
+                .setMessage("هيقفل نسخة التطوير عشان تختبر حفظ آخر عطل. استخدم بيانات مصطنعة فقط.")
+                .setPositiveButton("إحداث العطل",(dialog,which)->{
+                    throw new IllegalStateException("Synthetic debug crash");
+                }).setNegativeButton("إلغاء",null).show();
     }
 
     private void smsCoverageDialog() {
