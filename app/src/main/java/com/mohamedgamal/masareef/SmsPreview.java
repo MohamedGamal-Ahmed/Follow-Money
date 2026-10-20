@@ -62,11 +62,41 @@ final class SmsPreview {
 
     boolean isTransaction() { return "expense".equals(kind)||"income".equals(kind)||"transfer".equals(kind); }
 
-    /** Conservative support-only selection; never changes parser acceptance or books an operation. */
+    /** A currency next to a number («EGP 1,250.00», «1250 ج.م», «USD 20»): the one thing every transaction alert carries. */
+    private static final java.util.regex.Pattern AMOUNT=java.util.regex.Pattern.compile(
+            "(?iu)(?:(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)\\.?\\s*[0-9][0-9,.]*|[0-9][0-9,.]*\\s*(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)(?![\\p{L}]))");
+
+    /**
+     * Conservative support-only selection; never changes parser acceptance or books an operation. A known bank sender,
+     * financial wording, an amount in the text (card-delivery notices, system-maintenance notes and «تم إضافة الراتب»
+     * teasers carry none and are not formats to fix), not an OTP, not a promotion, and refused by the parser.
+     */
     static boolean canReport(String sender,String body) {
-        return BrandCatalog.bank(sender)!=null && ExpenseParser.isFinancialCandidate(body)
+        return BrandCatalog.bank(sender)!=null && ExpenseParser.isFinancialCandidate(body) && hasAmount(body)
                 && !ExpenseParser.isVerificationMessage(body) && !ExpenseParser.isPromotion(body)
                 && parse(sender,body,0)==null;
+    }
+    static boolean hasAmount(String body) { return body!=null && AMOUNT.matcher(ExpenseParser.normalizeDigits(body)).find(); }
+
+    /**
+     * The masked shape of a message for the samples tool: digits become #, a run of digits with its separators
+     * (1,234.56 or 12:30) one #, a token mixing digits and letters (a reference such as 3a7f9c) ###, InstaPay handles
+     * xxx@instapay and English month names MMM — so one bank template is one shape. Without the run collapse, 279 HSBC
+     * messages gave 249 shapes (20 October).
+     */
+    static String shape(String text) {
+        if(text==null)return "";
+        String clean=ExpenseParser.normalizeDigits(text);
+        clean=clean.replaceAll("(?i)[a-z0-9._-]+@instapay","xxx@instapay");
+        // A reference has letters after digits (1a2b3c4d, 1234fc56); a masked account (xxx1234), a date token (05JUL26)
+        // and an amount glued to its currency (56000EGP, EGP1250) are not references and keep their letters.
+        clean=clean.replaceAll("(?i)(?<![\\p{L}0-9])(?![0-9]{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[0-9]{2,4}(?![a-z0-9]))"
+                +"(?![0-9][0-9,.]*(?:egp|usd|eur|gbp|sar|aed|kwd|le)(?![a-z0-9]))(?!(?:egp|usd|eur|gbp|sar|aed|kwd|le)[0-9])"
+                +"(?=[a-z0-9]*[0-9][a-z0-9]*[a-z])[a-z0-9]{4,}(?![\\p{L}0-9])","###");
+        clean=clean.replaceAll("(?i)(?<![a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(?![a-z])","MMM");
+        clean=clean.replaceAll("[0-9]+(?:[.,:/٬٫][0-9]+)*","#");
+        clean=clean.replaceAll("[*]{2,}","**");
+        return clean.replaceAll("\\s+"," ").trim();
     }
     boolean canUseReceiptKey(java.util.Set<String> sentKeys) {
         return CaptureIdentity.receiptKeySafe(sender,body,receivedAt,captureAt,sentKeys);

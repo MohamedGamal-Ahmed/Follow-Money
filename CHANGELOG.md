@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Message samples: collapse digit runs, references and masked accounts into one shape (`SmsPreview.shape`), so 279 HSBC messages no longer give 249 shapes; the «ما اتقرتش» section requires an amount in the text (`SmsPreview.hasAmount`), so card-delivery notices, maintenance notes and «تم إضافة الراتب» teasers without a figure stay out.
+
 ## 0.3.0 — 2026-10-xx
 
 - Redraw the home statement card: one ring for the share of the income that went out (full and coral when more went out than came in) with «باقي من دخل الفترة» in its centre, and three orbs — «دخل», «خرج», «صرف يومي» — each opening exactly its rows; the salary/transfers-in split and the definitions line stay.
