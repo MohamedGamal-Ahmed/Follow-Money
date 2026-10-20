@@ -37,6 +37,12 @@ final class MoneyFlow {
 
     private MoneyFlow() {}
 
+    /** A debit whose destination is one of the user's own credit cards pays purchases already counted: it is internal. */
+    static Bucket bucket(String kind, String category, boolean toOwnCard) {
+        if (toOwnCard && "expense".equals(kind)) return Bucket.INTERNAL;
+        return bucket(kind, category);
+    }
+
     static Bucket bucket(String kind, String category) {
         if ("transfer".equals(kind)) return Bucket.INTERNAL;
         if ("income".equals(kind)) return Bucket.INFLOW;
@@ -63,15 +69,27 @@ final class MoneyFlow {
         return bucket == Bucket.LIVING || bucket == Bucket.COMMITMENT;
     }
 
+    /** Pseudo-filter for the list behind the statement's «خرج»: the four buckets isStatementOut() names. */
+    static final String OUT_FILTER = "OUT";
+
+    /**
+     * What left the user's money in the month statement (owner's decision, 20 October): day-to-day spending,
+     * commitments, transfers to people and cash withdrawals. Cash taken out counts once, when withdrawn.
+     */
+    static boolean isStatementOut(Bucket bucket) {
+        return isOutflow(bucket) || bucket == Bucket.CASH_WITHDRAWAL;
+    }
+
     /** True when a bucket passes a list filter; an empty filter passes everything. */
     static boolean matchesFilter(String filter, Bucket bucket) {
         if (filter == null || filter.isEmpty()) return true;
         if (SPENDING_FILTER.equals(filter)) return isSpending(bucket);
+        if (OUT_FILTER.equals(filter)) return isStatementOut(bucket);
         return bucket.name().equals(filter);
     }
 
     static String filterLabel(String filter) {
-        return SPENDING_FILTER.equals(filter) ? "مصروفات" : label(Bucket.valueOf(filter));
+        return SPENDING_FILTER.equals(filter) ? "مصروفات" : OUT_FILTER.equals(filter) ? "خرج" : label(Bucket.valueOf(filter));
     }
 
     /**
@@ -79,7 +97,7 @@ final class MoneyFlow {
      * The list behind a home number must add up to that number, so it shows transactions only.
      */
     static boolean listsCaptureHistory(String filter) {
-        return !SPENDING_FILTER.equals(filter);
+        return !SPENDING_FILTER.equals(filter) && !OUT_FILTER.equals(filter);
     }
 
     /** The buckets the home card lists under «حركات غير داخلة في المصروفات», in display order. */
@@ -126,11 +144,17 @@ final class MoneyFlow {
         final long id, when, amountMinor;
         final String currency, kind, category, merchant;
         final Bucket bucket;
+        /** Paid from the cash wallet: the money was already counted when it was withdrawn. */
+        final boolean fromCash;
         Item(long id, long when, long amountMinor, String currency, String kind, String category, String merchant) {
+            this(id, when, amountMinor, currency, kind, category, merchant, false, false);
+        }
+        /** toOwnCard: a debit whose destination is the user's own credit card (see bucket(kind, category, toOwnCard)). */
+        Item(long id, long when, long amountMinor, String currency, String kind, String category, String merchant, boolean toOwnCard, boolean fromCash) {
             if (amountMinor < 0) throw new IllegalArgumentException("Negative amount");
             this.id = id; this.when = when; this.amountMinor = amountMinor; this.currency = currency;
-            this.kind = kind; this.category = category; this.merchant = merchant;
-            this.bucket = bucket(kind, category);
+            this.kind = kind; this.category = category; this.merchant = merchant; this.fromCash = fromCash;
+            this.bucket = bucket(kind, category, toOwnCard);
         }
     }
 
@@ -270,6 +294,109 @@ final class MoneyFlow {
     static Week week(List<Item> items, LocalDate today, ZoneId zone, String currency) {
         LocalDate[] period = rollingWeek(today);
         return new Week(summarize(items, period, zone).get(currency), period[0]);
+    }
+
+    /**
+     * [start, today+1): from the saved pay day (1–31, or DailyAllowance.MONTH_END for the last day of the month)
+     * through today, using the same monthly cycle as the daily allowance; without a pay day, the calendar month.
+     */
+    static LocalDate[] statementPeriod(int salaryDay, LocalDate today) {
+        LocalDate start = salaryDay > 0 && salaryDay <= DailyAllowance.MONTH_END
+                ? BudgetPeriod.bounds("monthly", LocalDate.of(2000, 1, Math.min(31, salaryDay)), 30, today)[0]
+                : today.withDayOfMonth(1);
+        return new LocalDate[]{start, today.plusDays(1)};
+    }
+
+    /** A credit whose descriptor says it was moved to the user, not earned: phone-banking, instant transfers, InstaPay handles. */
+    static boolean incomingTransfer(String merchant) {
+        if (merchant == null) return false;
+        String name = merchant.trim().toLowerCase(java.util.Locale.ROOT);
+        return name.contains("phone banking transfer") || name.contains("تحويل لحظي") || name.contains("instapay")
+                || name.matches("(?s).*\\bipn\\b.*") || name.contains("تحويل وارد");
+    }
+
+    /**
+     * The month statement for one currency (owner's decision, 20 October): «دخلك كام، خرج منك كام، باقي كام» from the
+     * pay day to today. دخل = INFLOW; خرج = LIVING + COMMITMENT + OPEN_TRANSFER + CASH_WITHDRAWAL; باقي = دخل − خرج.
+     * INTERNAL moves and linked refunds (already offset upstream) are in none of the three. A purchase paid from the
+     * cash wallet is detail only: its money was counted when withdrawn.
+     */
+    static final class Statement {
+        final String currency;
+        final LocalDate start, end;
+        final long income, salary, transfersIn, living, commitment, openTransfer, cash, out, remaining, internal, cashSpending;
+        final int outCount;
+        /** The inflow shown as salary: the one on the pay day, else the largest non-transfer credit; -1 / 0 when none. */
+        final long salaryItemId, salaryWhen;
+        /** The largest transfer to a person at or above a quarter of the period's income: likely between own accounts, not linked. */
+        final long unlinkedTransfer, unlinkedTransferId;
+        Statement(String currency, LocalDate[] period, long income, long salary, long transfersIn, long salaryItemId, long salaryWhen,
+                  long living, long commitment, long openTransfer, long cash, int outCount, long internal, long cashSpending,
+                  long unlinkedTransfer, long unlinkedTransferId) {
+            this.currency = currency; this.start = period[0]; this.end = period[1];
+            this.income = income; this.salary = salary; this.transfersIn = transfersIn; this.salaryItemId = salaryItemId; this.salaryWhen = salaryWhen;
+            this.living = living; this.commitment = commitment; this.openTransfer = openTransfer; this.cash = cash; this.outCount = outCount;
+            this.out = living + commitment + openTransfer + cash; this.remaining = income - out;
+            this.internal = internal; this.cashSpending = cashSpending;
+            this.unlinkedTransfer = unlinkedTransfer; this.unlinkedTransferId = unlinkedTransferId;
+        }
+        /** One component of «خرج»; zero for buckets that are not part of it. */
+        long component(Bucket bucket) {
+            switch (bucket) {
+                case LIVING: return living;
+                case COMMITMENT: return commitment;
+                case OPEN_TRANSFER: return openTransfer;
+                case CASH_WITHDRAWAL: return cash;
+                default: return 0;
+            }
+        }
+    }
+
+    /** The buckets that make up «خرج», in the order the statement lists them. */
+    static final Bucket[] STATEMENT_OUT_BUCKETS = {Bucket.LIVING, Bucket.COMMITMENT, Bucket.OPEN_TRANSFER, Bucket.CASH_WITHDRAWAL};
+
+    static Statement statement(List<Item> items, LocalDate[] period, ZoneId zone, String currency) {
+        long start = period[0].atStartOfDay(zone).toInstant().toEpochMilli();
+        long end = period[1].atStartOfDay(zone).toInstant().toEpochMilli();
+        long income = 0, living = 0, commitment = 0, openTransfer = 0, cash = 0, internal = 0, cashSpending = 0;
+        int outCount = 0;
+        Item salary = null, largestTransfer = null;
+        boolean salaryOnPayDay = false;
+        for (Item item : items) {
+            if (item.when < start || item.when >= end || !currency.equals(item.currency)) continue;
+            // Anything paid from the cash wallet was counted when the cash was withdrawn: detail only, in every «خرج» bucket.
+            if (item.fromCash && isStatementOut(item.bucket) && item.bucket != Bucket.CASH_WITHDRAWAL) {
+                cashSpending = Math.addExact(cashSpending, item.amountMinor); continue;
+            }
+            switch (item.bucket) {
+                case INFLOW: {
+                    income = Math.addExact(income, item.amountMinor);
+                    if (incomingTransfer(item.merchant)) break;
+                    boolean onPayDay = Instant.ofEpochMilli(item.when).atZone(zone).toLocalDate().equals(period[0]);
+                    if (salary == null || onPayDay && !salaryOnPayDay || onPayDay == salaryOnPayDay && item.amountMinor > salary.amountMinor) {
+                        salary = item; salaryOnPayDay = onPayDay;
+                    }
+                    break;
+                }
+                case INTERNAL: internal = Math.addExact(internal, item.amountMinor); break;
+                case CASH_WITHDRAWAL: cash = Math.addExact(cash, item.amountMinor); outCount++; break;
+                case OPEN_TRANSFER:
+                    openTransfer = Math.addExact(openTransfer, item.amountMinor); outCount++;
+                    if (largestTransfer == null || item.amountMinor > largestTransfer.amountMinor) largestTransfer = item;
+                    break;
+                case COMMITMENT: commitment = Math.addExact(commitment, item.amountMinor); outCount++; break;
+                default: living = Math.addExact(living, item.amountMinor); outCount++;
+            }
+        }
+        // No non-transfer credit at all: the largest credit of any kind is still the period's main income.
+        if (salary == null) for (Item item : items)
+            if (item.bucket == Bucket.INFLOW && item.when >= start && item.when < end && currency.equals(item.currency)
+                    && (salary == null || item.amountMinor > salary.amountMinor)) salary = item;
+        long salaryAmount = salary == null ? 0 : salary.amountMinor;
+        boolean warn = largestTransfer != null && income > 0 && largestTransfer.amountMinor * 4 >= income;
+        return new Statement(currency, period, income, salaryAmount, income - salaryAmount, salary == null ? -1 : salary.id, salary == null ? 0 : salary.when,
+                living, commitment, openTransfer, cash, outCount, internal, cashSpending,
+                warn ? largestTransfer.amountMinor : 0, warn ? largestTransfer.id : -1);
     }
 
     static final class MonthPeak {

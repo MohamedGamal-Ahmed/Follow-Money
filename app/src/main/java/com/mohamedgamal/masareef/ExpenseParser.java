@@ -55,6 +55,10 @@ public final class ExpenseParser {
             "(?i)(?:card|visa|بطاقة|فيزا)[^\\n]{0,35}?(?:\\*{2,}|x{2,}|ending\\s+)(\\d{4})");
     private static final Pattern ACCOUNT_LAST_FOUR = Pattern.compile(
             "(?i)(?:account|acct|a/c|حساب)[^\\n]{0,35}?(?:\\*{2,}|x{2,}|ending\\s+|رقم\\s+)(\\d{3,4})(?!\\d)");
+    /** The card named in the message ("to credit card ****1234"), or null; accounts are not cards. */
+    static String cardLast4(String body){
+        if(body==null)return null;Matcher card=CARD_LAST_FOUR.matcher(normalizeDigits(body));return card.find()?card.group(1):null;
+    }
     static String debitAccountLast4(String body){
         if(body==null)return null;String normalized=normalizeDigits(body);
         Matcher account=ACCOUNT_LAST_FOUR.matcher(normalized);if(account.find())return account.group(1);

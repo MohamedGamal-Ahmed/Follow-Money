@@ -18,7 +18,7 @@
                 android:textColor="#B9D3C8" android:singleLine="true" android:ellipsize="end" />
         </LinearLayout>
         <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:paddingStart="10dp">
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_rolling_week_label" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" />
+            <TextView android:id="@+id/widget_week_label" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_rolling_week_label" android:textSize="9sp" android:textColor="#B9D3C8" android:singleLine="true" />
             <TextView android:id="@+id/widget_week" android:layout_width="match_parent" android:layout_height="19dp"
                 android:text="@string/widget_preview_week_amount" android:textSize="13sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="9sp" android:autoSizeMaxTextSize="13sp" android:autoSizeStepGranularity="1sp"
                 android:textColor="#FFFFFF" android:singleLine="true" android:ellipsize="end" />

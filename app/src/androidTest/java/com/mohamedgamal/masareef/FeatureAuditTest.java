@@ -1145,6 +1145,24 @@ final class FeatureAuditTest {
         eq(4,db.transactionCount());eq(0,db.repairAll().trailingSigns);
     }
 
+    /** 2ج: a debit to one of the user's own credit cards is captured with that card as destination, so the statement treats it as internal. */
+    public void testKnownCardRepaymentIsCapturedWithTheCardAsDestination() {
+        long t=at(LocalDate.now().minusDays(1));
+        long account=db.addPaymentSource("QA Bank","حساب","5678");
+        long card=db.addPaymentSource("QA Bank Card","بطاقة ائتمان","1234");
+        ok(db.addSms("QA Bank","Transfer of EGP 4,000.00 from your account ****5678 to credit card ****1234 on 10/10/2026",t));
+        ExpenseDb.Transaction repayment=db.lastCaptured();
+        eq("expense",repayment.kind);eq(400000L,repayment.amountMinor);
+        ok(repayment.destinationSourceId!=null&&repayment.destinationSourceId==card);
+        ok(repayment.paymentSourceId!=null&&repayment.paymentSourceId==account);
+        ok(MoneyFlow.bucket(repayment.kind,repayment.category,true)==MoneyFlow.Bucket.INTERNAL);
+        // An unknown card keeps today's behaviour: no destination, still an outgoing transfer.
+        ok(db.addSms("QA Bank","Transfer of EGP 1,000.00 from your account ****5678 to credit card ****9999 on 11/10/2026",t+1000));
+        ExpenseDb.Transaction unknown=db.lastCaptured();
+        ok(unknown.destinationSourceId==null);eq("expense",unknown.kind);
+        ok(MoneyFlow.bucket(unknown.kind,unknown.category,false)==MoneyFlow.Bucket.OPEN_TRANSFER);
+    }
+
     private long oldPurchase(String merchant,String category,long t,boolean edited) {
         db.addManual(t,8250,"EGP",merchant,category);long id=db.latestInserted().id;
         ContentValues values=new ContentValues();values.put("source","SMS");values.put("user_edited",edited?1:0);

@@ -54,19 +54,11 @@ public class SummaryWidget extends AppWidgetProvider {
             boolean hidden=context.getSharedPreferences("widget_settings",Context.MODE_PRIVATE).getBoolean("hide_amounts",false);
             String currency=context.getSharedPreferences("widget_settings",Context.MODE_PRIVATE).getString("currency","EGP");
             DailyAllowance.Result result=snapshot.currencies.get(currency);
-            // Same definition as the app: «صرف» is day-to-day spending only (MoneyFlow LIVING).
-            long week=0,month=0;
-            LocalDate weekStart=today.minusDays(6),monthStart=today.withDayOfMonth(1);
-            LocalDate from=weekStart.isBefore(monthStart)?weekStart:monthStart;
-            java.util.Map<Long,Long> offsets=db.reimbursementOffsets();
+            // Same function as the home card: the statement from the pay day to today (MoneyFlow.statement).
             boolean needsStats=false;for(int id:ids)if(isLarge(manager,id)||isWideSmall(context,manager,id)){needsStats=true;break;}
-            for(ExpenseDb.Transaction tx:needsStats?db.transactionsBetween(from,today.plusDays(1),snapshot.zone):java.util.Collections.<ExpenseDb.Transaction>emptyList()) {
-                if(!currency.equals(tx.currency)||MoneyFlow.bucket(tx.kind,tx.category)!=MoneyFlow.Bucket.LIVING)continue;
-                LocalDate day=java.time.Instant.ofEpochMilli(tx.when).atZone(snapshot.zone).toLocalDate();
-                long amount=ExpenseDb.effectiveAmount(tx,offsets);
-                if(!day.isBefore(weekStart))week+=amount;
-                if(!day.isBefore(monthStart))month+=amount;
-            }
+            int salaryDay=context.getSharedPreferences(DailySummary.SETTINGS,Context.MODE_PRIVATE).getInt("salary_"+currency,0);
+            LocalDate[] period=MoneyFlow.statementPeriod(salaryDay,today);
+            MoneyFlow.Statement statement=needsStats?MoneyFlow.statement(db.flowItems(period[0],period[1],snapshot.zone),period,snapshot.zone,currency):null;
             String time=snapshot.updated.atZone(snapshot.zone).format(DateTimeFormatter.ofPattern("h:mm a",new Locale("ar")));
             for (int id : ids) {
                 boolean small=isSmall(manager,id);
@@ -92,9 +84,11 @@ public class SummaryWidget extends AppWidgetProvider {
                 PendingIntent home=PendingIntent.getActivity(context,2000105,new Intent(context,MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
                 views.setOnClickPendingIntent(R.id.widget_root, home);
                 if(large||isWideSmall(context,manager,id)) {
-                    views.setTextViewText(R.id.widget_week,hidden?"••••":MainActivity.money(week,currency));
-                    views.setTextViewText(R.id.widget_month_label,"صرفت "+today.format(DateTimeFormatter.ofPattern("MMMM",new Locale("ar"))));
-                    views.setTextViewText(R.id.widget_month,hidden?"••••":MainActivity.money(month,currency));
+                    views.setTextViewText(R.id.widget_week_label,"خرج من "+period[0].format(DateTimeFormatter.ofPattern("d MMMM",new Locale("ar"))));
+                    views.setTextViewText(R.id.widget_week,hidden?"••••":MainActivity.money(statement==null?0:statement.out,currency));
+                    views.setTextViewText(R.id.widget_month_label,"باقي من دخل الفترة");
+                    long left=statement==null?0:statement.remaining;
+                    views.setTextViewText(R.id.widget_month,hidden?"••••":(left<0?"−":"")+MainActivity.money(Math.abs(left),currency));
                 }
                 if(small) {
                     views.setTextViewText(R.id.widget_updated,"النهارده · "+currency);
