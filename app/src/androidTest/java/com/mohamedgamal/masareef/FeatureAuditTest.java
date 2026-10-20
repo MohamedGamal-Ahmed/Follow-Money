@@ -41,6 +41,28 @@ final class FeatureAuditTest {
     void run(String mode) {
         if (!"ranchu".equals(android.os.Build.HARDWARE) && !"goldfish".equals(android.os.Build.HARDWARE)) throw new SecurityException("Emulator only");
         Bundle result = new Bundle(); StringBuilder report = new StringBuilder(); int passed = 0, failed = 0;
+        if ("recent_benchmark".equals(mode)) {
+            try { setup(); report.append(benchmarkRecentTransactions()); passed++; }
+            catch (Throwable e) { failed++; report.append("recent_benchmark: FAILED ").append(e).append('\n'); }
+            finally { if (db != null) db.close(); if (file != null) SQLiteDatabase.deleteDatabase(file); }
+            result.putString("stream", report + "Passed: " + passed + "; failed: " + failed + "\n");
+            runner.finish(failed == 0 ? -1 : 0, result);
+            return;
+        }
+        if ("recent_live_seed".equals(mode) || "recent_home_render".equals(mode)) {
+            try {
+                if("recent_live_seed".equals(mode)) {
+                    try(ExpenseDb live=new ExpenseDb(runner.getTargetContext())) {
+                        if(live.transactionCount()!=0)throw new IllegalStateException("Live benchmark requires an empty disposable emulator app");
+                        seedRecentRows(live);report.append("Seeded 3000 synthetic live rows\n");
+                    }
+                } else report.append(benchmarkHomeRender());
+                passed++;
+            } catch(Throwable e) { failed++;report.append(mode).append(": FAILED ").append(e).append('\n'); }
+            result.putString("stream",report+"Passed: "+passed+"; failed: "+failed+"\n");
+            runner.finish(failed==0?-1:0,result);
+            return;
+        }
         if ("seed".equals(mode)) {
             try { seed(); result.putString("stream", "Synthetic scenario seeded; original emulator rows retained\n"); runner.finish(-1, result); }
             catch (Throwable e) { result.putString("stream", e.toString()); runner.finish(0, result); }
@@ -635,6 +657,75 @@ final class FeatureAuditTest {
     }
     private long countRows(String table) {
         try(android.database.Cursor c=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM "+table,null)){c.moveToFirst();return c.getLong(0);}
+    }
+    public void testRecentTransactionsMatchLedgerOrderAndExclusions() {
+        long base=at(LocalDate.of(2026,10,20));
+        for(int i=0;i<52;i++) {
+            ContentValues row=new ContentValues();
+            row.put("unique_key","qa-recent-"+i);
+            row.put("occurred_at",base+(i%7)*60000L);
+            row.put("received_at",base+(i%7)*60000L);
+            row.put("amount_minor",1000+i);
+            row.put("currency",i%2==0?"EGP":"USD");
+            row.put("merchant","QA recent "+i);
+            row.put("category","غير مصنف");
+            row.put("source","يدوي");
+            row.put("kind","expense");
+            long id=db.getWritableDatabase().insertOrThrow("transactions",null,row);
+            if(i==50) db.archiveEntry(id,"QA archived",true);
+            if(i==51) db.archiveEntry(id,"QA cancelled",false);
+        }
+        java.util.List<ExpenseDb.Transaction> all=db.transactions();
+        java.util.List<ExpenseDb.Transaction> recent=db.recentTransactions(5);
+        eq(50,all.size());eq(5,recent.size());eq(0,db.recentTransactions(0).size());
+        eq(50,db.recentTransactions(1000).size());
+        for(int i=0;i<recent.size();i++) eq(all.get(i).id,recent.get(i).id);
+        for(int i=1;i<all.size();i++) if(all.get(i-1).when==all.get(i).when)
+            ok(all.get(i-1).id<all.get(i).id);
+    }
+    private void seedRecentRows(ExpenseDb target) {
+        SQLiteDatabase sql=target.getWritableDatabase();long base=at(LocalDate.of(2026,10,20));
+        sql.beginTransaction();
+        try {
+            for(int i=0;i<3000;i++) {
+                ContentValues row=new ContentValues();row.put("unique_key","qa-benchmark-"+i);
+                row.put("occurred_at",base+i*1000L);row.put("received_at",base+i*1000L);
+                row.put("amount_minor",1000+i);row.put("currency",i%2==0?"EGP":"USD");
+                row.put("merchant","QA benchmark "+i);row.put("category","غير مصنف");
+                row.put("source","يدوي");row.put("kind","expense");
+                sql.insertOrThrow("transactions",null,row);
+            }
+            sql.setTransactionSuccessful();
+        } finally { sql.endTransaction(); }
+    }
+    private String benchmarkRecentTransactions() {
+        seedRecentRows(db);
+        for(int i=0;i<5;i++){db.transactions();db.recentTransactions(5);}
+        long allNanos=0,recentNanos=0;
+        for(int i=0;i<30;i++) {
+            long start=System.nanoTime();eq(500,db.transactions().size());allNanos+=System.nanoTime()-start;
+            start=System.nanoTime();eq(5,db.recentTransactions(5).size());recentNanos+=System.nanoTime()-start;
+        }
+        return "3000 synthetic rows; 30-call mean, transactions(500): "+(allNanos/30/1000000.0)
+                +" ms; recentTransactions(5): "+(recentNanos/30/1000000.0)+" ms\n";
+    }
+    private String benchmarkHomeRender() throws Exception {
+        MainActivity activity=(MainActivity)runner.startActivitySync(new android.content.Intent(runner.getTargetContext(),MainActivity.class)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        final long[] elapsed={0};final Throwable[] failure={null};
+        try {
+            runner.runOnMainSync(()->{
+                try {
+                    java.lang.reflect.Field intro=MainActivity.class.getDeclaredField("introVisible");intro.setAccessible(true);intro.setBoolean(activity,false);
+                    java.lang.reflect.Field tab=MainActivity.class.getDeclaredField("selectedTab");tab.setAccessible(true);tab.setInt(activity,0);
+                    java.lang.reflect.Method render=MainActivity.class.getDeclaredMethod("render");render.setAccessible(true);
+                    render.invoke(activity);
+                    for(int i=0;i<20;i++){long start=System.nanoTime();render.invoke(activity);elapsed[0]+=System.nanoTime()-start;}
+                } catch(Throwable e){failure[0]=e;}
+            });
+            if(failure[0]!=null)throw new AssertionError(failure[0]);
+            return "3000 synthetic live rows; 20-call mean home render: "+(elapsed[0]/20/1000000.0)+" ms\n";
+        } finally { runner.runOnMainSync(activity::finish); }
     }
     public void testRescanPreservesHistoricalFutureAndFailedRows() {
         long t=at(LocalDate.now());

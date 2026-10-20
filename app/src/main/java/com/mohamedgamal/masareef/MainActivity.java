@@ -2362,7 +2362,7 @@ public final class MainActivity extends Activity {
             tipCard("✉", "ربط الحسابات من الرسائل", "امسح رسائل البنوك لتكتشف البطاقات والأرصدة تلقائيًا", "فحص الرسائل", this::requestSmsImport);
 
         section("آخر العمليات", "عرض الكل", () -> { selectedTab = 6; render(); });
-        List<ExpenseDb.Transaction> all = db.transactions();
+        List<ExpenseDb.Transaction> all = db.recentTransactions(5);
         if (all.isEmpty()) empty("لسه مفيش عمليات", "ابدأ بإضافة مصروف أو استيراد رسائل البنك");
         else {
             Set<Long> candidates = recurringCandidates;

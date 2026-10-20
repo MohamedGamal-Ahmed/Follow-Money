@@ -22,7 +22,23 @@ final class TransactionRepository {
     List<Transaction> transactions() {
         List<Transaction> result = new ArrayList<>();
         try (Cursor cursor = db.getReadableDatabase().query("transactions", TRANSACTION_COLUMNS,
-                null, null, null, null, "occurred_at DESC", "500")) {
+                null, null, null, null, "occurred_at DESC,id ASC", "500")) {
+            while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
+                    cursor.getLong(2), cursor.getString(3), cursor.getString(4),
+                    cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),
+                    cursor.getString(9), cursor.isNull(10) ? null : cursor.getLong(10), cursor.getString(11), cursor.getInt(12)!=0,cursor.getString(13)));
+        }
+        return result;
+    }
+
+    /** The home page uses the same ledger order and 500-row display window. */
+    List<Transaction> recentTransactions(int limit) {
+        List<Transaction> result = new ArrayList<>();
+        if (limit <= 0) return result;
+        try (Cursor cursor = db.getReadableDatabase().rawQuery(
+                "SELECT " + String.join(",", TRANSACTION_COLUMNS) +
+                        " FROM transactions ORDER BY occurred_at DESC,id ASC LIMIT ?",
+                new String[]{Integer.toString(Math.min(limit, 500))})) {
             while (cursor.moveToNext()) result.add(new Transaction(cursor.getLong(0), cursor.getLong(1),
                     cursor.getLong(2), cursor.getString(3), cursor.getString(4),
                     cursor.getString(5), cursor.getString(6), cursor.isNull(7) ? null : cursor.getLong(7), cursor.getString(8),

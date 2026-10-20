@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Limit the home page's recent transactions query to the five displayed rows while preserving ledger ordering.
+
 - Add an owner-requested private tester APK variant with a separate Beta package, labels, signature permission and dedicated local signing key; preserve production app data and identity.
 
 - Prepare versionCode 3 signed distribution artifacts; add an explicit lock-widget privacy notice and review clean points screenshots plus white-background widget readability. Keep oldest-Android and actual Samsung lock-screen acceptance open.

@@ -1331,6 +1331,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public List<Transaction> transactions() { return transactionRows.transactions(); }
 
+    public List<Transaction> recentTransactions(int limit) { return transactionRows.recentTransactions(limit); }
+
     public List<Transaction> recurringCandidateTransactions() { return transactionRows.recurringCandidateTransactions(); }
 
     /** Uncapped ledger count; UI lists intentionally show only the latest 500 rows. */
