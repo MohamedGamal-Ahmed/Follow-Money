@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-xx
+
 - Show a one-time «جديد في النسخة» card on the home screen after an update (never on a first install), with a permanent «ما الجديد» row in Settings → Help; notes are read from `assets/whats-new.txt` and `tools/check-repo.py` requires the newest section to match `versionName`.
 
 - Keep the last three crashes locally without exception messages, with an optional reviewed crash text in support drafts; explain battery restrictions in capture settings; offer editable, masked email drafts for unrecognized SMS formats from known bank senders, excluding OTP and promotional messages.
