@@ -33,8 +33,8 @@ talabat,merchant,Talabat,TALABAT|طلبات,https://www.talabat.com/egypt,downlo
 cleopatra,merchant,Cleopatra Hospitals Group,CLEOPATRA HOSPITAL|كليوباترا,https://www.cleopatrahospitals.com/,downloaded_validated,review_brand_terms_before_release,Group identity is not proof of an individual branch.
 fawry,payment_provider,Fawry,FAWRY|فوري,https://www.fawry.com/,downloaded_validated,review_brand_terms_before_release,Provider is separate from transaction merchant.
 instapay,payment_provider,InstaPay,INSTAPAY|IPN|إنستاباي,https://www.instapay.eg/?lang=en,downloaded_validated,review_brand_terms_before_release,Provider is separate from transaction merchant.
-nbe,bank,National Bank of Egypt,,https://www.nbe.com.eg/NBE/E/,pending_source_or_identity_review,not_reviewed,No validated local asset yet; do not substitute similar brand or generic logo.
-cib,bank,CIB,,https://www.cibeg.com/,pending_source_or_identity_review,not_reviewed,No validated local asset yet; do not substitute similar brand or generic logo.
+nbe,bank,National Bank of Egypt,,https://www.nbe.com.eg/NBE/E/,provided_by_owner_2026-10-20,review_brand_terms_before_release,Logo supplied by the app owner and bundled as brand_nbe.png; the CIB file is the «CIB Business» lockup.
+cib,bank,CIB,,https://www.cibeg.com/,provided_by_owner_2026-10-20,review_brand_terms_before_release,Logo supplied by the app owner and bundled as brand_cib.png; the CIB file is the «CIB Business» lockup.
 bdc,bank,Banque du Caire,,https://www.bdc.com.eg/,pending_source_or_identity_review,not_reviewed,No validated local asset yet; do not substitute similar brand or generic logo.
 aaib,bank,AAIB,,https://www.aaib.com/,pending_source_or_identity_review,not_reviewed,No validated local asset yet; do not substitute similar brand or generic logo.
 hdb,bank,HDB,,https://www.hdb-egy.com/,pending_source_or_identity_review,not_reviewed,No validated local asset yet; do not substitute similar brand or generic logo.

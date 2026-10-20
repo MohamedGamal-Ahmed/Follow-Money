@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add logos and names for NBE, CIB, Butlers, Seoudi, ChatGPT, OneDrive, Truecaller, Google One, Costa, Etoile, Zaher, Ted's, El Ezaby, illy and TRU (supplied by the owner); Etoile, Zaher, Ted's, El Ezaby and illy also get categories.
+
 - Keep the figure inside the home ring on large-font phones (more padding, smaller auto-size range) and show the InstaPay logo on «تحويل لحظي» transactions.
 
 - Message samples: collapse digit runs, references and masked accounts into one shape (`SmsPreview.shape`), so 279 HSBC messages no longer give 249 shapes; the «ما اتقرتش» section requires an amount in the text (`SmsPreview.hasAmount`), so card-delivery notices, maintenance notes and «تم إضافة الراتب» teasers without a figure stay out.

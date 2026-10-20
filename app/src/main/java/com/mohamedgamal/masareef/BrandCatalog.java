@@ -22,6 +22,8 @@ final class BrandCatalog {
         new Entry("banknxt",true,new String[]{"Bank NXT","BANKNXT","aiBANK","Arab Investment Bank","بنك نكست"}),
         new Entry("kfh",true,new String[]{"KFH Egypt","Ahli United Bank Egypt","الأهلي المتحد مصر","بيت التمويل الكويتي مصر"}),
         new Entry("ca",true,new String[]{"Credit Agricole","CA Egypt","كريدي أجريكول","كريدي أجريكول مصر","Crédit Agricole Egypt","كريدي اجريكول"}),
+        new Entry("nbe",true,new String[]{"NBE","NBE Egypt","National Bank of Egypt","البنك الأهلي المصري","الأهلي المصري"}),
+        new Entry("cib",true,new String[]{"CIB","CIB Egypt","Commercial International Bank","البنك التجاري الدولي","التجاري الدولي"}),
         new Entry("starbucks",false,new String[]{"Starbucks","ستاربكس"}),
         new Entry("carrefour",false,new String[]{"Carrefour","كارفور"}),
         new Entry("mcdonalds",false,new String[]{"McDonald's","ماكدونالدز","MCDONALD","McDonalds","McDonald s","ماكدونالد"}),
@@ -48,6 +50,19 @@ final class BrandCatalog {
         new Entry("espressolab",false,new String[]{"Espressolab","Espresso Lab","إسبريسو لاب","اسبرسو لاب"}),
         new Entry("fawry",false,new String[]{"FAWRY","فوري","Fawry"}),
         new Entry("instapay",false,new String[]{"INSTAPAY","IPN","إنستاباي","InstaPay"}),
+        new Entry("butlers",false,new String[]{"Butlers","Butlers & Co"}),
+        new Entry("seoudi",false,new String[]{"Seoudi","Saudi Market","سعودي","سعودى"}),
+        new Entry("chatgpt",false,new String[]{"ChatGPT","OpenAI ChatGPT","OpenAI"}),
+        new Entry("onedrive",false,new String[]{"OneDrive"}),
+        new Entry("truecaller",false,new String[]{"Truecaller"}),
+        new Entry("googleone",false,new String[]{"Google One"}),
+        new Entry("costa",false,new String[]{"Costa Coffee","Costa","كوستا كوفي"}),
+        new Entry("etoile",false,new String[]{"Etoile","Etoile Patisserie","إتوال"}),
+        new Entry("zaher",false,new String[]{"Zaher","زاهر"}),
+        new Entry("teds",false,new String[]{"Ted's","Teds"}),
+        new Entry("ezaby",false,new String[]{"El Ezaby","Ezaby Pharmacy","العزبي","صيدلية العزبي"}),
+        new Entry("illy",false,new String[]{"illy","illy caffe"}),
+        new Entry("tru",false,true,new String[]{"TRU"}),
         // The label the parser gives an InstaPay transfer that has no handle: the channel itself is the identity.
         new Entry("instapay",false,true,new String[]{"تحويل لحظي"})
     };
