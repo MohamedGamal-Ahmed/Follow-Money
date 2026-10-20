@@ -148,6 +148,7 @@ public final class MainActivity extends Activity {
     private static final String[] CURRENCIES = {"EGP", "USD", "EUR", "GBP"};
     private ExpenseDb db;
     private AppLock appLock;
+    private WhatsNew.Section whatsNew;
     private boolean initialActionsPending, initialDirect, initialFresh, pendingIntentActions;
     private LinearLayout page;
     private LinearLayout settingsGroup;
@@ -203,6 +204,7 @@ public final class MainActivity extends Activity {
         if (!dark && Build.VERSION.SDK_INT >= 27) systemBars |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         getWindow().getDecorView().setSystemUiVisibility(systemBars);
         db = AppResources.database(this);
+        loadWhatsNew(readAsset("whats-new.txt"));
         if (state == null) AppResources.read(() -> LocalBackup.removeLeftovers(this));
         boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
@@ -695,6 +697,7 @@ public final class MainActivity extends Activity {
                 break;
             default:
                 note("Follow Money · "+GitHubSupport.version(this));
+                setting("ما الجديد",this::whatsNewDialog);
                 setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("الإبلاغ عن مشكلة",this::reportProblem);
                 setting("اقتراح تحسين",()->supportDialog(true));
@@ -1226,6 +1229,48 @@ public final class MainActivity extends Activity {
     }
 
     /** Thirty days without a backup: one dismissible card, no numbers, pointing to the settings entry. */
+    private static final String APP_STATE = "app_state", LAST_SEEN_VERSION = "last_seen_version_code";
+
+    private String readAsset(String name) {
+        try (java.io.InputStream stream = getAssets().open(name)) {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096]; int read;
+            while ((read = stream.read(buffer)) != -1) bytes.write(buffer, 0, read);
+            return bytes.toString("UTF-8");
+        } catch (java.io.IOException unavailable) { return ""; }
+    }
+
+    /** Runs once per activity: decides from the stored version code whether this launch follows an update. */
+    private void loadWhatsNew(String text) {
+        SharedPreferences state = getSharedPreferences(APP_STATE, MODE_PRIVATE);
+        int lastSeen = WhatsNew.lastSeen(state.getInt(LAST_SEEN_VERSION, WhatsNew.ABSENT),
+                getPreferences(MODE_PRIVATE).getBoolean("intro_completed", false), db.transactionCount() > 0);
+        whatsNew = WhatsNew.due(BuildConfig.VERSION_CODE, lastSeen) ? WhatsNew.forVersion(text, BuildConfig.VERSION_NAME) : null;
+        if (whatsNew == null && lastSeen != BuildConfig.VERSION_CODE) state.edit().putInt(LAST_SEEN_VERSION, BuildConfig.VERSION_CODE).apply();
+    }
+
+    private void whatsNewCard() {
+        if (whatsNew == null) return;
+        LinearLayout box = card();
+        box.addView(label("جديد في النسخة " + whatsNew.version, 15, INK, true));
+        for (String point : whatsNew.points) box.addView(label("• " + point, 12, MUTED, false));
+        TextView done = label("تمام", 13, ACCENT, true); done.setPadding(0, dp(8), 0, 0);
+        done.setOnClickListener(v -> {
+            getSharedPreferences(APP_STATE, MODE_PRIVATE).edit().putInt(LAST_SEEN_VERSION, BuildConfig.VERSION_CODE).apply();
+            whatsNew = null; render();
+        });
+        box.addView(done);
+    }
+
+    private void whatsNewDialog() {
+        String text = WhatsNew.readable(readAsset("whats-new.txt"));
+        if (text.isEmpty()) { toast("لا توجد ملاحظات للنسخة دي"); return; }
+        LinearLayout notes = form();
+        TextView body = label(text, 14, INK, false);
+        body.setTextIsSelectable(true); notes.addView(body);
+        new ChoiceDialogBuilder().setTitle("ما الجديد").setView(scrollForm(notes)).setPositiveButton("إغلاق", null).show();
+    }
+
     private void backupReminderCard() {
         if (!LocalBackup.reminderDue(this, db.transactionCount(), System.currentTimeMillis())) return;
         LinearLayout box = card();
@@ -2573,6 +2618,7 @@ public final class MainActivity extends Activity {
         top.addView(iconButton(R.drawable.ic_settings, "الإعدادات", () -> { settingsSection="";selectedTab = 5; render(); }), settingsParams);
         page.addView(top);
 
+        whatsNewCard();
         monthlyReadyCard();
         // MVP home: one number, one period, one definition. The daily budget and points keep their data, dialogs,
         // widgets and settings entry («الميزانية اليومية والراتب», «ميزانياتك»); only their home card is off.
