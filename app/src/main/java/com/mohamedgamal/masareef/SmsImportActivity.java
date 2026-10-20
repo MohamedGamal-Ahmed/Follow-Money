@@ -36,6 +36,8 @@ public final class SmsImportActivity extends Activity {
         catch(RuntimeException unreadable){android.util.Log.e("FollowMoney","Imported data; review list unavailable: "+unreadable.getClass().getSimpleName());return Collections.emptyList();}
     }
     private Session session;
+    private AppLock appLock;
+    private boolean started;
     private LinearLayout page, rows, footer;
     private TextView status, selection;
     private ProgressBar progress;
@@ -58,6 +60,7 @@ public final class SmsImportActivity extends Activity {
         dark=mainPreferences(this).getBoolean("dark_mode",false);
         if(dark)setTheme(R.style.AppTheme_Dark);
         super.onCreate(state);
+        appLock=new AppLock(this,this::onAppUnlocked);
         if(dark) {
             INK=0xffeef3ef;MUTED=0xff9aaaa2;background=0xff0d1a16;surface=0xff16261f;accent=0xff2bbf85;border=0xff2a3b33;
         }
@@ -70,11 +73,37 @@ public final class SmsImportActivity extends Activity {
         pageNumber=state==null?0:state.getInt("page",0);
         show();
     }
-    @Override protected void onStart() {super.onStart();session.attach(this);}
-    @Override protected void onStop() {session.detach(this);super.onStop();}
+    @Override protected void onStart() {
+        super.onStart();started=true;appLock.onStart();
+        if(!appLock.locked())session.attach(this);
+    }
+    @Override protected void onStop() {
+        started=false;session.detach(this);appLock.onStop();super.onStop();
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        if(!appLock.guard()&&started)session.attach(this);
+    }
+    @Override public void startActivityForResult(Intent intent,int requestCode) {
+        if(appLock!=null)appLock.beginOwnResult(requestCode);
+        try{super.startActivityForResult(intent,requestCode);}
+        catch(RuntimeException error){
+            if(appLock!=null)appLock.endOwnResult(requestCode);
+            throw error;
+        }
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
+        super.onActivityResult(requestCode,resultCode,data);
+        appLock.onActivityResult(requestCode,resultCode);
+    }
+    private void onAppUnlocked() {
+        if(isFinishing()||isDestroyed())return;
+        show();if(started)session.attach(this);
+    }
     @Override public Object onRetainNonConfigurationInstance() {return session;}
     @Override protected void onSaveInstanceState(Bundle out) {super.onSaveInstanceState(out);out.putInt("page",pageNumber);}
     @Override protected void onDestroy() {
+        appLock.dispose();
         if(!isChangingConfigurations()) session.cancelScan();
         super.onDestroy();
     }
@@ -97,6 +126,7 @@ public final class SmsImportActivity extends Activity {
         button.setTextColor(dark?0xff0d1f1a:0xffffffff);button.setTypeface(font,Typeface.BOLD);
     }
     private void show() {
+        if(appLock!=null&&appLock.guard())return;
         status=null;selection=null;progress=null;save=null;rows=null;
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);root.setBackgroundColor(background);
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setVerticalScrollBarEnabled(false);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
@@ -261,6 +291,7 @@ public final class SmsImportActivity extends Activity {
         if(progress!=null){progress.setMax(Math.max(1,session.total));progress.setProgress(session.scanned);}
     }
     @Override public void onBackPressed() {
+        if(appLock!=null&&appLock.locked()){finish();return;}
         synchronized(session){
             if("apply".equals(session.phase)){Toast.makeText(this,"انتظر اكتمال الحفظ",Toast.LENGTH_SHORT).show();return;}
             if("details".equals(session.phase)){session.phase="done";show();return;}
