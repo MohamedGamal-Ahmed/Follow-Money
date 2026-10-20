@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a from/to date picker to the existing transactions period filter, keeping the last day inclusive in the list.
+
 - Limit the home page's recent transactions query to the five displayed rows while preserving ledger ordering.
 - Recognize explicit ChatGPT/OpenAI subscription payments as recurring suggestions and cover the first-to-next-cycle SMS journey.
 

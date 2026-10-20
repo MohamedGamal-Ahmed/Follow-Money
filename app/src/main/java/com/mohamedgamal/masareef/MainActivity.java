@@ -2615,9 +2615,11 @@ public final class MainActivity extends Activity {
         chipScroll.addView(chips);
         TextView monthChip = addChip(chips, selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", new Locale("ar"))) + "  ⌄", false, this::chooseMonth);
         monthChip.setBackground(rounded(ACCENT_PALE, 99)); monthChip.setTextColor(ACCENT);
-        if(transactionPeriod!=null) addChip(chips, transactionPeriod[0]+" → "+transactionPeriod[1].minusDays(1)+(transactionCurrencyFilter.isEmpty()?"":" · "+transactionCurrencyFilter),true,() -> {
+        addChip(chips, "فترة  ⌄", false, this::chooseTransactionPeriod);
+        if(transactionPeriod!=null) { TextView periodChip = addChip(chips, transactionPeriod[0]+" → "+transactionPeriod[1].minusDays(1)+(transactionCurrencyFilter.isEmpty()?"":" · "+transactionCurrencyFilter),true,() -> {
             transactionPeriod=null;transactionCurrencyFilter="";transactionExcludeTransfers=false;render();
         });
+            periodChip.setTextDirection(View.TEXT_DIRECTION_LTR); }
         String[][] kinds = {{"الكل", ""}, {"مصروف", "expense"}, {"دخل", "income"}, {"تحويل", "transfer"}};
         if (!transactionBucketFilter.isEmpty()) {
             addChip(chips, MoneyFlow.filterLabel(transactionBucketFilter) + "  ✕", true, () -> { transactionBucketFilter = ""; render(); });
@@ -2772,6 +2774,33 @@ public final class MainActivity extends Activity {
                     int count=db.updateCategories(ids,category.getSelectedItem().toString());
                     bulkSelected.clear();bulkMode=false;toast("تم تصنيف "+count+" مصروف");render();
                 }).setNegativeButton("رجوع",null).show();
+    }
+
+    private void chooseTransactionPeriod() {
+        LocalDate shownStart=transactionPeriod==null?selectedMonth:transactionPeriod[0];
+        showTransactionDatePicker("من يوم",shownStart,start->{
+            LocalDate shownEnd=transactionPeriod==null?selectedMonth.plusMonths(1).minusDays(1):transactionPeriod[1].minusDays(1);
+            if(shownEnd.isBefore(start))shownEnd=start;
+            showTransactionDatePicker("إلى يوم",shownEnd,end->{
+                if(end.isBefore(start)){toast("تاريخ النهاية لازم يكون بعد البداية أو يساويه");return;}
+                transactionPeriod=new LocalDate[]{start,end.plusDays(1)};
+                render();
+            });
+        });
+    }
+
+    private void showTransactionDatePicker(String heading,LocalDate shown,java.util.function.Consumer<LocalDate> selected) {
+        android.widget.DatePicker picker=new android.widget.DatePicker(this);
+        picker.updateDate(shown.getYear(),shown.getMonthValue()-1,shown.getDayOfMonth());
+        new ChoiceDialogBuilder().setCustomTitle(periodPickerTitle(heading)).setView(picker)
+                .setPositiveButton("موافق",(dialog,which)->selected.accept(LocalDate.of(picker.getYear(),picker.getMonth()+1,picker.getDayOfMonth())))
+                .setNegativeButton("إلغاء",null).show();
+    }
+
+    private TextView periodPickerTitle(String text) {
+        TextView title=label(text,16,INK,true);
+        title.setPadding(dp(20),dp(12),dp(20),dp(8));
+        return title;
     }
 
     private void transactionFilterDialog() {
