@@ -133,6 +133,10 @@ public final class MainActivity extends Activity {
     private static final int CSV_REQUEST = 9;
     private static final int VOICE_REQUEST = 10;
     private static final int CSV_IMPORT_REQUEST = 11;
+    private static final int BACKUP_CREATE_REQUEST = 13;
+    private static final int BACKUP_OPEN_REQUEST = 14;
+    /** The password typed for a backup, held only between the dialog and the document picker's answer, then wiped. */
+    private char[] pendingBackupPassword;
     private static final String[] CATEGORIES = {
             "غير مصنف", "أكل وشرب", "مقاهي", "بقالة", "مواصلات", "فواتير", "اشتراكات", "أقساط", "تسوق", "رعاية صحية", "صحة", "عائلة ومساعدات", "سكن وإيجار",
             "تحويلات", "رسوم تحويل", "رسوم بنكية", "سحب نقدي", "أخرى"
@@ -196,6 +200,7 @@ public final class MainActivity extends Activity {
         if (!dark && Build.VERSION.SDK_INT >= 27) systemBars |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         getWindow().getDecorView().setSystemUiVisibility(systemBars);
         db = AppResources.database(this);
+        if (state == null) AppResources.read(() -> LocalBackup.removeLeftovers(this));
         boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
         introStep=state==null?0:Math.min(3,state.getInt("intro_step",0));
@@ -611,6 +616,12 @@ public final class MainActivity extends Activity {
                 setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("استيراد معاملات CSV",this::chooseCsvImport);
                 setting("تصدير معاملات "+selectedMonth.toString().substring(0,7)+" CSV",this::exportCsv);
+                section("نسخة احتياطية",null,null);
+                long lastBackup=LocalBackup.lastBackupAt(this);
+                note(lastBackup==0?"لسه ما عملتش نسخة. ملف واحد مشفر بكلمة سر تختارها، يتحفظ في المكان اللي تختاره ويرجع على أي جهاز."
+                        :"آخر نسخة: "+Instant.ofEpochMilli(lastBackup).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL));
+                setting("نسخة احتياطية",this::backupDialog);
+                setting("استعادة نسخة",this::chooseRestore);
                 if(BuildConfig.DEBUG) {
                     section("أدوات متقدمة",null,null);
                     setting("أدوات المراجعة",this::reviewToolsDialog);
@@ -994,6 +1005,159 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, CSV_IMPORT_REQUEST);
     }
 
+    // ---- Local backup and restore (LocalBackup + BackupVault): one password-encrypted file through the document picker ----
+
+    private EditText passwordInput(String hint, LinearLayout parent) {
+        EditText field = input(hint, parent);
+        field.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        field.setTypeface(REGULAR);
+        return field;
+    }
+
+    private static char[] chars(EditText field) {
+        int length = field.getText().length(); char[] out = new char[length];
+        field.getText().getChars(0, length, out, 0); return out;
+    }
+
+    private void backupDialog() {
+        LinearLayout form = form();
+        form.addView(label("ملف واحد مشفر بكلمة سر إنت اللي تختارها (8 أحرف على الأقل). فيه عملياتك ونصوص رسائل البنك المحفوظة وإعداداتك. لو نسيت كلمة السر مفيش طريقة نفتح النسخة.", 13, MUTED, false));
+        EditText first = passwordInput("كلمة السر", form);
+        EditText second = passwordInput("تأكيد كلمة السر", form);
+        new ChoiceDialogBuilder().setTitle("نسخة احتياطية").setView(form)
+                .setPositiveButton("اختار مكان الحفظ", (dialog, which) -> {
+                    char[] password = chars(first), confirm = chars(second);
+                    boolean same = java.util.Arrays.equals(password, confirm);
+                    BackupVault.wipe(confirm);
+                    if (password.length < BackupVault.MIN_PASSWORD) { BackupVault.wipe(password); toast("كلمة السر لازم تكون 8 أحرف على الأقل"); return; }
+                    if (!same) { BackupVault.wipe(password); toast("كلمتا السر مش متطابقتين"); return; }
+                    BackupVault.wipe(pendingBackupPassword); pendingBackupPassword = password;
+                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("application/octet-stream");
+                    intent.putExtra(Intent.EXTRA_TITLE, BackupVault.fileName(LocalDate.now()));
+                    startActivityForResult(intent, BACKUP_CREATE_REQUEST);
+                }).setNegativeButton("إلغاء", null).show();
+    }
+
+    /** Builds the file on the capture worker (the database is read there) and streams it to the chosen document. */
+    private void writeBackup(Uri uri, char[] password) {
+        toast("بنجهز النسخة...");
+        CaptureQueue.submit(() -> {
+            String failure = null;
+            try {
+                byte[] file = LocalBackup.export(this, db, password);
+                try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                    if (out == null) throw new java.io.IOException("No output stream");
+                    out.write(file);
+                }
+                LocalBackup.recordBackup(this);
+            } catch (Exception error) {
+                android.util.Log.e("FollowMoney", "Backup failed: " + error.getClass().getSimpleName());
+                failure = "فشل حفظ النسخة. جرّب مكانًا آخر.";
+            }
+            String message = failure == null ? "اتحفظت النسخة. احتفظ بكلمة السر في مكان آمن." : failure;
+            postUi(() -> { if (isFinishing() || isDestroyed()) return; toast(message); render(); });
+        });
+    }
+
+    private void chooseRestore() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(intent, BACKUP_OPEN_REQUEST);
+    }
+
+    private void restorePasswordDialog(Uri uri) {
+        LinearLayout form = form();
+        form.addView(label("اكتب كلمة سر النسخة. هنعرض لك ملخصها قبل ما نستبدل أي حاجة.", 13, MUTED, false));
+        EditText password = passwordInput("كلمة السر", form);
+        new ChoiceDialogBuilder().setTitle("استعادة نسخة").setView(form)
+                .setPositiveButton("افتح النسخة", (dialog, which) -> prepareRestore(uri, chars(password)))
+                .setNegativeButton("إلغاء", null).show();
+    }
+
+    /** Reads and decrypts off the main thread; a refusal is one clear sentence and the current data is untouched. */
+    private void prepareRestore(Uri uri, char[] password) {
+        toast("بنفتح النسخة...");
+        CaptureQueue.submit(() -> {
+            LocalBackup.Prepared prepared = null; String failure = null;
+            try {
+                byte[] file;
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    if (in == null) throw new java.io.IOException("No input stream");
+                    java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                    byte[] buffer = new byte[64 * 1024];
+                    for (int read; (read = in.read(buffer)) > 0; ) bytes.write(buffer, 0, read);
+                    file = bytes.toByteArray();
+                }
+                prepared = LocalBackup.prepare(this, file, password);
+            } catch (BackupVault.Rejected rejected) {
+                failure = rejected.getMessage();
+            } catch (Exception error) {
+                BackupVault.wipe(password);
+                android.util.Log.e("FollowMoney", "Restore preparation failed: " + error.getClass().getSimpleName());
+                failure = "تعذر قراءة الملف. ما اتغيرش أي حاجة في بياناتك.";
+            }
+            final LocalBackup.Prepared ready = prepared; final String message = failure;
+            postUi(() -> {
+                if (isFinishing() || isDestroyed()) { if (ready != null) ready.discard(); return; }
+                if (ready == null) { toast(message); return; }
+                restoreSummaryDialog(ready);
+            });
+        });
+    }
+
+    private void restoreSummaryDialog(LocalBackup.Prepared prepared) {
+        LocalBackup.Summary s = prepared.summary;
+        String created = Instant.ofEpochMilli(s.createdAt).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL);
+        String text = "نسخة من " + created + "\n" + s.transactions + " عملية · " + s.sources + " حساب أو كارت\n\n" +
+                "ستُستبدل كل البيانات الحالية بالنسخة دي: العمليات والحسابات والالتزامات والإعدادات. لا يمكن التراجع.";
+        new ChoiceDialogBuilder().setTitle("استعادة النسخة؟").setMessage(text)
+                .setPositiveButton("استبدل بياناتي بالنسخة", (dialog, which) -> applyRestore(prepared))
+                .setNegativeButton("إلغاء", (dialog, which) -> prepared.discard())
+                .setOnCancelListener(dialog -> prepared.discard()).show();
+    }
+
+    private void applyRestore(LocalBackup.Prepared prepared) {
+        toast("بنستعيد النسخة...");
+        CaptureQueue.submit(() -> {
+            ExpenseDb restored = null; String failure = null;
+            try { restored = prepared.apply(this); }
+            catch (LocalBackup.RestoreFailed error) {
+                android.util.Log.e("FollowMoney", "Restore failed: " + (error.getCause() == null ? "" : error.getCause().getClass().getSimpleName()) + (error.rolledBack ? ", previous data back" : ", rollback pending"));
+                failure = error.rolledBack ? "فشلت الاستعادة ورجعت بياناتك السابقة كما كانت." : "فشلت الاستعادة. افتح التطبيق من جديد وراجع بياناتك.";
+            } catch (Exception error) {
+                android.util.Log.e("FollowMoney", "Restore failed: " + error.getClass().getSimpleName());
+                failure = "فشلت الاستعادة. افتح التطبيق من جديد وراجع بياناتك.";
+            }
+            final ExpenseDb fresh = restored; final String message = failure;
+            postUi(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                // Success or rollback, the shared helper was reopened: point at it and forget cached rows.
+                db = fresh != null ? fresh : AppResources.database(this); invalidateLedger(); ledgerChanges = null;
+                selectedTab = 0; render();
+                toast(message == null ? "تمت الاستعادة. راجع عملياتك وحساباتك." : message);
+            });
+        });
+    }
+
+    /** Thirty days without a backup: one dismissible card, no numbers, pointing to the settings entry. */
+    private void backupReminderCard() {
+        if (!LocalBackup.reminderDue(this, db.transactionCount(), System.currentTimeMillis())) return;
+        LinearLayout box = card();
+        box.addView(label("خد نسخة احتياطية", 15, INK, true));
+        box.addView(label("ملف واحد مشفر بكلمة سرك يرجّع عملياتك وإعداداتك على أي جهاز. مفيش سحابة.", 12, MUTED, false));
+        LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
+        TextView go = label("اعمل نسخة دلوقتي", 13, ACCENT, true); go.setPadding(0, dp(8), dp(16), 0);
+        go.setOnClickListener(v -> backupDialog());
+        TextView later = label("مش دلوقتي", 13, MUTED, true); later.setPadding(0, dp(8), 0, 0);
+        later.setOnClickListener(v -> { LocalBackup.dismissReminder(this); render(); });
+        actions.addView(go); actions.addView(later);
+        box.addView(actions);
+    }
+
     private void pinWidget() {
         AppWidgetManager manager = AppWidgetManager.getInstance(this);
         ComponentName provider = new ComponentName(this, SummaryWidget.class);
@@ -1081,6 +1245,16 @@ public final class MainActivity extends Activity {
         }
         if (requestCode == CSV_IMPORT_REQUEST) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) previewCsvImport(data.getData());
+            return;
+        }
+        if (requestCode == BACKUP_CREATE_REQUEST) {
+            char[] password = pendingBackupPassword; pendingBackupPassword = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && password != null) writeBackup(data.getData(), password);
+            else BackupVault.wipe(password);
+            return;
+        }
+        if (requestCode == BACKUP_OPEN_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) restorePasswordDialog(data.getData());
             return;
         }
         if (requestCode != CSV_REQUEST || resultCode != RESULT_OK || data == null || data.getData() == null) return;
@@ -2312,6 +2486,7 @@ public final class MainActivity extends Activity {
         // One card, one period, one definition (MoneyFlow.statement): «دخل / خرج / باقي» from the pay day to today.
         // Nothing else on the home screen carries a number with another period or definition (lesson of 19 October).
         homeStatementCard();
+        backupReminderCard();
         nextCommitmentCard();
         section("كروتك وحساباتك", "عرض الكل", () -> { selectedTab = 1; render(); });
         homeSourceCards();
