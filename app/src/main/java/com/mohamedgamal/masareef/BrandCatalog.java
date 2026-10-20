@@ -47,7 +47,9 @@ final class BrandCatalog {
         new Entry("cleopatra",false,new String[]{"CLEOPATRA HOSPITAL","كليوباترا","مستشفيات كليوباترا","Cleopatra Hospitals Group"}),
         new Entry("espressolab",false,new String[]{"Espressolab","Espresso Lab","إسبريسو لاب","اسبرسو لاب"}),
         new Entry("fawry",false,new String[]{"FAWRY","فوري","Fawry"}),
-        new Entry("instapay",false,new String[]{"INSTAPAY","IPN","إنستاباي","InstaPay"})
+        new Entry("instapay",false,new String[]{"INSTAPAY","IPN","إنستاباي","InstaPay"}),
+        // The label the parser gives an InstaPay transfer that has no handle: the channel itself is the identity.
+        new Entry("instapay",false,true,new String[]{"تحويل لحظي"})
     };
     static String merchant(String name){return match(MerchantClassifier.displayName(name),false);}
     static String bank(String name){return match(name,true);}

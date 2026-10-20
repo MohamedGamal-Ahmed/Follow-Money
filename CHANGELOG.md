@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the figure inside the home ring on large-font phones (more padding, smaller auto-size range) and show the InstaPay logo on «تحويل لحظي» transactions.
+
 - Message samples: collapse digit runs, references and masked accounts into one shape (`SmsPreview.shape`), so 279 HSBC messages no longer give 249 shapes; the «ما اتقرتش» section requires an amount in the text (`SmsPreview.hasAmount`), so card-delivery notices, maintenance notes and «تم إضافة الراتب» teasers without a figure stay out.
 
 ## 0.3.0 — 2026-10-xx

@@ -40,6 +40,7 @@ public final class MerchantClassificationTest {
         eq(false,MerchantClassifier.matchesRule("Superuber Shop","uber"));
         eq("cleopatra",BrandCatalog.merchant("PAYMOB*CLEOPATRA HOSPITAL CAIRO"));
         eq("espressolab",BrandCatalog.merchant("ESPRESSOLAB MALL"));
+        eq("instapay",BrandCatalog.merchant("تحويل لحظي"));
         eq("تحويلات",ExpenseParser.parse("BANK","تم تحويل 88.25 EGP من حسابك الى Butlers يوم 12/10/2026").category);
         for(int screen:new int[]{0,1,5,7}) eq(0,NavigationState.destination(screen,6));
         for(int screen:new int[]{3,4,8,9,13,14}) eq(4,NavigationState.destination(screen,6));
