@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Limit the home page's recent transactions query to the five displayed rows while preserving ledger ordering.
+- Recognize explicit ChatGPT/OpenAI subscription payments as recurring suggestions and cover the first-to-next-cycle SMS journey.
 
 - Add an owner-requested private tester APK variant with a separate Beta package, labels, signature permission and dedicated local signing key; preserve production app data and identity.
 
