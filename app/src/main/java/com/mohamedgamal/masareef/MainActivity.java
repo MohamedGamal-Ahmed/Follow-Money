@@ -1592,12 +1592,13 @@ public final class MainActivity extends Activity {
 
     private void refreshMerchantCatalog() {
         SharedPreferences prefs=getPreferences(MODE_PRIVATE);
-        if(prefs.getInt("merchant_catalog_version",0)>=1) return;
+        // Bumped when the catalog gains merchants, so untouched automatic purchases get the new categories.
+        if(prefs.getInt("merchant_catalog_version",0)>=2) return;
         Context app=getApplicationContext();
         CaptureQueue.submit(()->{
             try(ExpenseDb catalogDb=new ExpenseDb(app)) {
                 int count=catalogDb.refreshMerchantCategories();
-                prefs.edit().putInt("merchant_catalog_version",1).apply();
+                prefs.edit().putInt("merchant_catalog_version",2).apply();
                 postUi(()->{if(!isFinishing() && !isDestroyed()){render();if(count>0)toast("اتحسن تصنيف "+count+" عمليات تلقائية");}});
             } catch(RuntimeException error) {android.util.Log.e("FollowMoney","Merchant categories skipped: "+error.getClass().getSimpleName());}
         });
@@ -5598,6 +5599,28 @@ public final class MainActivity extends Activity {
             case "espressolab" -> R.drawable.brand_espressolab;
             case "fawry" -> R.drawable.brand_fawry;
             case "instapay" -> R.drawable.brand_instapay;
+            case "nbe" -> R.drawable.brand_nbe;
+            case "bdc" -> R.drawable.brand_bdc;
+            case "cib" -> R.drawable.brand_cib;
+            case "sharafdg" -> R.drawable.brand_sharafdg;
+            case "centrepoint" -> R.drawable.brand_centrepoint;
+            case "max" -> R.drawable.brand_max;
+            case "lcwaikiki" -> R.drawable.brand_lcwaikiki;
+            case "raya" -> R.drawable.brand_raya;
+            case "aman" -> R.drawable.brand_aman;
+            case "butlers" -> R.drawable.brand_butlers;
+            case "seoudi" -> R.drawable.brand_seoudi;
+            case "chatgpt" -> R.drawable.brand_chatgpt;
+            case "onedrive" -> R.drawable.brand_onedrive;
+            case "truecaller" -> R.drawable.brand_truecaller;
+            case "googleone" -> R.drawable.brand_googleone;
+            case "costa" -> R.drawable.brand_costa;
+            case "etoile" -> R.drawable.brand_etoile;
+            case "zaher" -> R.drawable.brand_zaher;
+            case "teds" -> R.drawable.brand_teds;
+            case "ezaby" -> R.drawable.brand_ezaby;
+            case "illy" -> R.drawable.brand_illy;
+            case "tru" -> R.drawable.brand_tru;
             default -> 0;
         };
     }
