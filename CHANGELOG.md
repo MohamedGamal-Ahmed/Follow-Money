@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add logos and names for NBE, CIB, Butlers, Seoudi, ChatGPT, OneDrive, Truecaller, Google One, Costa, Etoile, Zaher, Ted's, El Ezaby, illy and TRU (supplied by the owner); Etoile, Zaher, Ted's, El Ezaby and illy also get categories.
+- Add logos and names for NBE, Banque du Caire, CIB, Butlers, Seoudi, ChatGPT, OneDrive, Truecaller, Google One, Costa, Etoile, Zaher, Ted's, El Ezaby, illy and TRU (supplied by the owner); Etoile, Zaher, Ted's, El Ezaby and illy also get categories.
 
 - Keep the figure inside the home ring on large-font phones (more padding, smaller auto-size range) and show the InstaPay logo on «تحويل لحظي» transactions.
 
