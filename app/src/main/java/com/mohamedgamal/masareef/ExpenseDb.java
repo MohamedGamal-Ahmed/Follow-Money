@@ -28,8 +28,105 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final CommitmentPayments commitmentPayments = new CommitmentPayments(this);
     private final ReimbursementRepository reimbursements = new ReimbursementRepository(this);
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
+    static final String DATABASE_NAME = "masareef.db";
+    /** The schema a backup file records; a backup from a newer schema is refused on restore. */
+    static final int SCHEMA_VERSION = 25;
+
     public ExpenseDb(Context context) {
-        super(context, "masareef.db", null, 25);
+        super(context, DATABASE_NAME, null, SCHEMA_VERSION);
+    }
+
+    /**
+     * Backup: writes a consistent copy of the whole database to a temporary file (VACUUM INTO where SQLite supports it,
+     * otherwise a checkpoint and a file copy under a write lock). The copy still holds Keystore ciphertext; the caller
+     * decrypts it inside the copy only.
+     */
+    void exportSnapshot(java.io.File target) throws java.io.IOException {
+        SQLiteDatabase sql = getWritableDatabase();
+        if (target.exists() && !target.delete()) throw new java.io.IOException("Could not replace " + target.getName());
+        try {
+            sql.execSQL("VACUUM INTO ?", new Object[]{target.getAbsolutePath()});
+            return;
+        } catch (android.database.SQLException unsupported) {
+            if (target.exists()) target.delete();
+        }
+        try (Cursor c = sql.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null)) { c.moveToFirst(); }
+        sql.beginTransaction();
+        try {
+            java.nio.file.Files.copy(new java.io.File(sql.getPath()).toPath(), target.toPath());
+            sql.setTransactionSuccessful();
+        } finally { sql.endTransaction(); }
+    }
+
+    /** The restored file waiting beside the live one, and the live one kept until the restore has completed. */
+    static final String INCOMING_SUFFIX = ".new", KEPT_SUFFIX = ".restore-bak";
+    private static final String[] JOURNAL_SUFFIXES = {"-wal", "-shm", "-journal"};
+
+    /**
+     * Restore, step one: swaps the database file while no helper is open (AppResources.closeDatabase() first). The
+     * restored copy is first brought into the database folder as masareef.db.new, the live file is then renamed to
+     * masareef.db.restore-bak (its journal files removed so neither file opens with a stale journal), and finally .new
+     * takes the live name. Nothing is deleted: a failure at any step leaves the old data in place or, after the swap,
+     * recoverable through rollbackRestore(); the next ExpenseDb runs onUpgrade for an older schema.
+     */
+    static void replaceDatabase(Context context, java.io.File snapshot) throws java.io.IOException {
+        java.io.File live = context.getDatabasePath(DATABASE_NAME);
+        java.io.File parent = live.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) throw new java.io.IOException("Database folder unavailable");
+        java.io.File incoming = new java.io.File(live.getPath() + INCOMING_SUFFIX), kept = new java.io.File(live.getPath() + KEPT_SUFFIX);
+        java.nio.file.Files.move(snapshot.toPath(), incoming.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        try {
+            removeJournals(live);
+            if (live.exists()) java.nio.file.Files.move(live.toPath(), kept.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            else java.nio.file.Files.write(kept.toPath(), new byte[0]); // no data before: a rollback brings back an empty database, which SQLite opens as new
+            try {
+                java.nio.file.Files.move(incoming.toPath(), live.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.io.IOException failed) {
+                if (kept.exists()) java.nio.file.Files.move(kept.toPath(), live.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                throw failed;
+            }
+        } finally { incoming.delete(); /* only still there when a step above failed */ }
+    }
+
+    /** Restore, last step: the old database is no longer needed. */
+    static void finishRestore(Context context) {
+        new java.io.File(context.getDatabasePath(DATABASE_NAME).getPath() + KEPT_SUFFIX).delete();
+    }
+
+    /**
+     * Restore failed after the swap (the restored file would not open, its text could not be re-encrypted, the settings
+     * were unreadable): puts the old database back exactly as it was. Called with no helper open.
+     */
+    static void rollbackRestore(Context context) throws java.io.IOException {
+        java.io.File live = context.getDatabasePath(DATABASE_NAME), kept = new java.io.File(live.getPath() + KEPT_SUFFIX);
+        if (!kept.exists()) throw new java.io.IOException("No previous database to restore");
+        removeJournals(live);
+        java.nio.file.Files.move(kept.toPath(), live.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /**
+     * App start: a masareef.db.restore-bak that still exists means a restore was interrupted after the swap and before
+     * it completed (the process died, or the rollback itself failed), so the live file may hold restored text that was
+     * never re-encrypted. The old database comes back and the half-restored one is discarded; a stray .new is removed.
+     * Returns true when something was repaired.
+     */
+    static boolean recoverInterruptedRestore(Context context) {
+        java.io.File live = context.getDatabasePath(DATABASE_NAME);
+        java.io.File kept = new java.io.File(live.getPath() + KEPT_SUFFIX), incoming = new java.io.File(live.getPath() + INCOMING_SUFFIX);
+        boolean repaired = false;
+        if (kept.exists()) {
+            try { rollbackRestore(context); repaired = true; }
+            catch (java.io.IOException failed) { android.util.Log.e("FollowMoney", "Could not recover the previous database: " + failed.getClass().getSimpleName()); }
+        }
+        if (incoming.exists() && incoming.delete()) repaired = true;
+        return repaired;
+    }
+
+    private static void removeJournals(java.io.File database) throws java.io.IOException {
+        for (String suffix : JOURNAL_SUFFIXES) {
+            java.io.File file = new java.io.File(database.getPath() + suffix);
+            if (file.exists() && !file.delete()) throw new java.io.IOException("Could not remove " + file.getName());
+        }
     }
 
     @Override public void onCreate(SQLiteDatabase db) {

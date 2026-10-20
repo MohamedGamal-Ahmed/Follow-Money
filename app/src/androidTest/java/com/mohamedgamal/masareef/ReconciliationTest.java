@@ -37,6 +37,7 @@ public final class ReconciliationTest extends Instrumentation {
         if("period_ui".equals(featureAudit)){new PeriodFilterUiTest(this).run();return;}
         if("hsbc_ui".equals(featureAudit)){new HsbcFormatUiTest(this).run();return;}
         if("statement_ui".equals(featureAudit)){new StatementUiTest(this).run();return;}
+        if(featureAudit!=null&&featureAudit.startsWith("backup_")){new BackupRestoreTest(this,featureAudit).run();return;}
         if("lifetime".equals(featureAudit)){new ResourceLifetimeTest(this).run();return;}
         if(featureAudit!=null&&featureAudit.startsWith("review_alerts_")){new ReviewAlertsUiTest(this).run(!"review_alerts_light".equals(featureAudit),"review_alerts_large".equals(featureAudit)?1.3f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("sms_ui_")){new SmsImportUiTest(this).run(!"sms_ui_light".equals(featureAudit),"sms_ui_large".equals(featureAudit)?1.3f:1f);return;}

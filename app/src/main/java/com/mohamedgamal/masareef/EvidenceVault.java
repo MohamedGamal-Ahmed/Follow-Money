@@ -52,4 +52,101 @@ final class EvidenceVault {
     static String decrypt(String text) {
         return read(text).body;
     }
+
+    /** Every table whose encrypted_body column holds Keystore-encrypted source text; all have a rowid. */
+    static final String[] ENCRYPTED_TABLES = {"capture_evidence", "capture_events", "commitment_payments", "commitment_suggestions", "commitment_observations"};
+
+    /**
+     * Backup: replaces every stored ciphertext inside a snapshot copy of the database with its plain text, because the
+     * Keystore key never leaves this device. Text this device can no longer open becomes NULL and is counted.
+     * Only ever called on a temporary snapshot, never on the live database.
+     */
+    static int decryptAll(android.database.sqlite.SQLiteDatabase snapshot) {
+        int unreadable = 0;
+        for (String table : ENCRYPTED_TABLES) {
+            if (!hasTable(snapshot, table)) continue;
+            java.util.List<Object[]> updates = new java.util.ArrayList<>();
+            try (android.database.Cursor c = snapshot.rawQuery("SELECT rowid, encrypted_body FROM " + table + " WHERE encrypted_body IS NOT NULL", null)) {
+                while (c.moveToNext()) {
+                    Read body = read(c.getString(1));
+                    if (body.failed) unreadable++;
+                    updates.add(new Object[]{body.body, c.getLong(0)});
+                }
+            }
+            for (Object[] update : updates) snapshot.execSQL("UPDATE " + table + " SET encrypted_body=? WHERE rowid=?", update);
+        }
+        if (hasTable(snapshot, "transaction_archive")) {
+            java.util.List<Object[]> updates = new java.util.ArrayList<>();
+            try (android.database.Cursor c = snapshot.rawQuery("SELECT id, payload FROM transaction_archive WHERE payload LIKE '%encrypted_body%'", null)) {
+                while (c.moveToNext()) {
+                    int[] failed = new int[1];
+                    String rewritten = rewriteArchive(c.getString(1), true, failed);
+                    unreadable += failed[0];
+                    if (rewritten != null) updates.add(new Object[]{rewritten, c.getLong(0)});
+                }
+            }
+            for (Object[] update : updates) snapshot.execSQL("UPDATE transaction_archive SET payload=? WHERE id=?", update);
+        }
+        return unreadable;
+    }
+
+    /** Restore: encrypts every plain-text body of a freshly restored database with this device's Keystore key. Runs once. */
+    static int encryptAll(android.database.sqlite.SQLiteDatabase live) {
+        int encrypted = 0;
+        for (String table : ENCRYPTED_TABLES) {
+            if (!hasTable(live, table)) continue;
+            java.util.List<Object[]> updates = new java.util.ArrayList<>();
+            try (android.database.Cursor c = live.rawQuery("SELECT rowid, encrypted_body FROM " + table + " WHERE encrypted_body IS NOT NULL", null)) {
+                while (c.moveToNext()) {
+                    String sealed = encrypt(c.getString(1));
+                    if (sealed == null) throw new IllegalStateException("Source text could not be encrypted on this device");
+                    updates.add(new Object[]{sealed, c.getLong(0)});
+                }
+            }
+            for (Object[] update : updates) { live.execSQL("UPDATE " + table + " SET encrypted_body=? WHERE rowid=?", update); encrypted++; }
+        }
+        if (hasTable(live, "transaction_archive")) {
+            java.util.List<Object[]> updates = new java.util.ArrayList<>();
+            try (android.database.Cursor c = live.rawQuery("SELECT id, payload FROM transaction_archive WHERE payload LIKE '%encrypted_body%'", null)) {
+                while (c.moveToNext()) {
+                    String rewritten = rewriteArchive(c.getString(1), false, new int[1]);
+                    if (rewritten != null) updates.add(new Object[]{rewritten, c.getLong(0)});
+                }
+            }
+            for (Object[] update : updates) { live.execSQL("UPDATE transaction_archive SET payload=? WHERE id=?", update); encrypted++; }
+        }
+        return encrypted;
+    }
+
+    /** An archived row keeps its evidence inside a JSON payload; its bodies follow the same rule as the tables. */
+    private static String rewriteArchive(String payload, boolean toPlain, int[] failed) {
+        try {
+            org.json.JSONObject json = new org.json.JSONObject(payload);
+            org.json.JSONArray evidence = json.optJSONArray("evidence");
+            if (evidence == null) return null;
+            boolean changed = false;
+            for (int i = 0; i < evidence.length(); i++) {
+                org.json.JSONObject row = evidence.getJSONObject(i);
+                if (row.isNull("encrypted_body")) continue;
+                String stored = row.getString("encrypted_body");
+                if (toPlain) {
+                    Read body = read(stored);
+                    if (body.failed) failed[0]++;
+                    row.put("encrypted_body", body.body == null ? org.json.JSONObject.NULL : body.body);
+                } else {
+                    String sealed = encrypt(stored);
+                    if (sealed == null) throw new IllegalStateException("Archived source text could not be encrypted on this device");
+                    row.put("encrypted_body", sealed);
+                }
+                changed = true;
+            }
+            return changed ? json.toString() : null;
+        } catch (org.json.JSONException malformed) {
+            return null; // an unreadable payload is left exactly as it is
+        }
+    }
+
+    private static boolean hasTable(android.database.sqlite.SQLiteDatabase db, String table) {
+        try (android.database.Cursor c = db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", new String[]{table})) { return c.moveToFirst(); }
+    }
 }

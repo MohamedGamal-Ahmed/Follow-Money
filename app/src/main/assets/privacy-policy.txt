@@ -1,5 +1,5 @@
 Follow Money — سياسة الخصوصية / Privacy Policy
-آخر تحديث / Last updated: 12 October 2026
+آخر تحديث / Last updated: 20 October 2026
 المطور / Developer: Mohamed Gamal
 للاستفسارات والخصوصية / Privacy contact: mgamal.ahmed@outlook.com
 
@@ -15,7 +15,9 @@ Follow Money تطبيق لتتبع المعاملات والميزانية مح�
 الخدمات والمشاركة الاختيارية
 الإدخال الصوتي يفتح خدمة التعرف على الصوت في النظام. مزود الخدمة قد يعالج الصوت خارج الجهاز وفق إعداداته وسياسة خصوصيته. يعرض التطبيق إفصاحًا قبل فتح الخدمة ويستقبل النص لتراجعه قبل الحفظ؛ لا يحفظ التسجيل الصوتي. الإدخال اليدوي متاح بدل الصوت.
 
-تصدير CSV يبدأ باختيارك عبر منتقي مستندات Android، ويحتوي على معاملات مالية ولا يتضمن نصوص SMS الأصلية. المكان الذي تختاره قد يكون خدمة سحابية ذات سياسة مستقلة. مشاركة النصوص أو التقارير ونسخها للحافظة تتم بطلبك؛ قد تحتوي تقارير المراجعة في نسخ التطوير على بيانات مالية. الملفات والحافظة والنسخ خارج التطبيق تظل تحت تحكمك والخدمة المختارة.
+تصدير CSV يبدأ باختيارك عبر منتقي مستندات Android، ويحتوي على معاملات مالية ولا يتضمن نصوص SMS الأصلية. المكان الذي تختاره قد يكون خدمة سحابية ذات سياسة مستقلة.
+
+النسخة الاحتياطية المحلية تبدأ بطلبك وتُحفظ عبر منتقي المستندات في المكان الذي تختاره (التخزين أو خدمة سحابية أو تطبيق مراسلة). الملف يحتوي على سجلك المالي كاملًا بما فيه نصوص الرسائل المالية المحفوظة وأدلة الأرشيف والإعدادات والصورة الشخصية إن وجدت، وهو مشفر بالكامل بكلمة سر تختارها ولا تُحفظ في التطبيق؛ من دونها لا يمكن فتحه، ولا يستطيع المطور استعادتها. المكان الذي تختاره والخدمة التي تحمله خارج سيطرة التطبيق. الاستعادة تستبدل كل البيانات الحالية على الجهاز بعد تأكيدك. مشاركة النصوص أو التقارير ونسخها للحافظة تتم بطلبك؛ قد تحتوي تقارير المراجعة في نسخ التطوير على بيانات مالية. الملفات والحافظة والنسخ خارج التطبيق تظل تحت تحكمك والخدمة المختارة.
 
 طلب الدعم اختياري. يعرض التطبيق وصفك ونسخة التطبيق وطراز الجهاز والشركة المصنعة ونسخة Android واللغة، ثم يسلمها لتطبيق البريد كمسودة إلى mgamal.ahmed@outlook.com. أنت تراجع المسودة وترسلها؛ لا يقرأ التطبيق المعاملات لإعدادها. عند عدم توفر تطبيق بريد يمكن نسخ الطلب إلى الحافظة. رابط GitHub يفتح المتصفح؛ البلاغات والصور المنشورة في مستودع الدعم عامة. لا ترفق رسائل بنك أو أرقام حسابات أو ملفات مالية. مزود البريد والمتصفح وGitHub لهم سياسات مستقلة.
 
@@ -36,7 +38,9 @@ Transactions, accounts, balances, commitments, budgets, rules, preferences and o
 Optional providers and sharing
 Voice entry invokes the system speech recognition provider, which may process audio off device under its own settings and privacy policy. An in-app disclosure precedes this action. Follow Money receives the resulting text for your review and does not save audio. Manual entry is available.
 
-User-requested CSV export uses Android's document picker and includes financial transactions, without original SMS text. Your selected destination may be a cloud provider. Sharing reports/text and copying to the clipboard require your action; development review reports may contain financial data. Exported files and external copies are controlled by you and the selected provider.
+User-requested CSV export uses Android's document picker and includes financial transactions, without original SMS text. Your selected destination may be a cloud provider.
+
+The local backup is user-initiated and saved through the document picker wherever you choose (storage, a cloud provider or a messaging app). The file contains your complete ledger, including saved financial message text, archived evidence, settings and the optional profile picture, and is fully encrypted with a password you choose that the app never stores; without it the file cannot be opened and the developer cannot recover it. The destination and the service carrying the file are outside the app's control. Restoring replaces all current data on the device after your confirmation. Sharing reports/text and copying to the clipboard require your action; development review reports may contain financial data. Exported files and external copies are controlled by you and the selected provider.
 
 Optional support drafts contain your description, app version, device manufacturer/model, Android version and locale. You review and send the draft in your email app to mgamal.ahmed@outlook.com; the ledger is not read to compose it. If no email app is available, the request can be copied to the clipboard. GitHub opens in your browser; published support issues and attachments are public. Do not send bank SMS, account numbers or financial exports. Email, browser and GitHub providers have their own policies.
 
