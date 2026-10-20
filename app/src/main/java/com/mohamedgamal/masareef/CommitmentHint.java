@@ -103,7 +103,7 @@ final class CommitmentHint {
         ExpenseParser.Parsed paid=ExpenseParser.parse(sender,body);
         if(paid!=null && ("اشتراكات".equals(paid.category) || "Vodafone".equals(paid.merchant))) {
             boolean subscription="اشتراكات".equals(paid.category);
-            boolean explicit=text.matches("(?is).*(subscription|monthly|yearly|annual|اشتراك|تجديد|google one|onedrive|truecaller|claude|netflix|spotify).*" );
+            boolean explicit=text.matches("(?is).*(subscription|monthly|yearly|annual|اشتراك|تجديد|google one|onedrive|truecaller|claude|netflix|spotify|chatgpt|openai|subscr).*" );
             if(subscription && !explicit) return null;
             String cycle=text.matches("(?is).*(yearly|annual|سنوي).*" )?"yearly":"monthly";
             String explanation="آخر سداد فعلي؛ اكتشاف الدورية يحتاج تأكيدك. مدة المنتج قد تختلف عن دورية الخصم.";

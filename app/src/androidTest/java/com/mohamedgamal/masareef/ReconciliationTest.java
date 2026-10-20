@@ -33,6 +33,7 @@ public final class ReconciliationTest extends Instrumentation {
     @Override public void onStart() {
         if("points_ui".equals(featureAudit)){new DailyPointsUiTest(this).run();return;}
         if("commitment_ui".equals(featureAudit)){new CommitmentPaymentUiTest(this).run();return;}
+        if("commitment_cycle_ui".equals(featureAudit)){new CommitmentCycleUiTest(this).run();return;}
         if("lifetime".equals(featureAudit)){new ResourceLifetimeTest(this).run();return;}
         if(featureAudit!=null&&featureAudit.startsWith("review_alerts_")){new ReviewAlertsUiTest(this).run(!"review_alerts_light".equals(featureAudit),"review_alerts_large".equals(featureAudit)?1.3f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("sms_ui_")){new SmsImportUiTest(this).run(!"sms_ui_light".equals(featureAudit),"sms_ui_large".equals(featureAudit)?1.3f:1f);return;}

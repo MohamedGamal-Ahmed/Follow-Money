@@ -35,6 +35,12 @@ public final class CommitmentHintSmokeTest {
         if(!arabic.merchant.equals("Google One")) throw new AssertionError("Arabic subscription merchant");
         expect("AnyBank","تم خصم مبلغ EGP 89.99 فيGoogle One بتاريخ 15/09/2026",8999,"subscription","EGP");
         expect("Billing","You paid USD 20.00 to Netflix for annual subscription",2000,"subscription","USD");
+        expect("BANK","Purchase of USD 20.00 at OPENAI *CHATGPT SUBSCR",2000,"subscription","USD");
+        skip("Purchase of EGP 120.00 at CARREFOUR");
+        String unconfirmedSubscription="Purchase of EGP 120.00 at YOUTUBE";
+        ExpenseParser.Parsed parsedSubscription=ExpenseParser.parse("AnyProvider",unconfirmedSubscription);
+        if(parsedSubscription==null || !"اشتراكات".equals(parsedSubscription.category)) throw new AssertionError("YouTube purchase is not classified as a subscription");
+        skip(unconfirmedSubscription);
         skip("قسط عضويتك بقيمة 4900 جنيه، العرض ساري حتى نهاية الشهر");
         skip("Your OTP is 123456 for installment payment EGP 4900");
         skip("Your installment payment of EGP 4900 failed");
