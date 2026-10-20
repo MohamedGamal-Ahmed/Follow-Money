@@ -40,6 +40,7 @@ public final class ReconciliationTest extends Instrumentation {
         if("app_lock".equals(featureAudit)||"app_lock_no_secure".equals(featureAudit)){
             new AppLockUiTest(this,featureAudit).run();return;
         }
+        if(featureAudit!=null&&featureAudit.startsWith("support_")){new SupportAidsUiTest(this).run(featureAudit);return;}
         if(featureAudit!=null&&featureAudit.startsWith("backup_")){new BackupRestoreTest(this,featureAudit).run();return;}
         if("lifetime".equals(featureAudit)){new ResourceLifetimeTest(this).run();return;}
         if(featureAudit!=null&&featureAudit.startsWith("review_alerts_")){new ReviewAlertsUiTest(this).run(!"review_alerts_light".equals(featureAudit),"review_alerts_large".equals(featureAudit)?1.3f:1f);return;}

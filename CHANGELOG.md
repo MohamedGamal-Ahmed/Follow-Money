@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the last three crashes locally without exception messages, with an optional reviewed crash text in support drafts; explain battery restrictions in capture settings; offer editable, masked email drafts for unrecognized SMS formats from known bank senders, excluding OTP and promotional messages.
+
 - Add an optional device-authenticated app lock for the main ledger and SMS import, with an elapsed-time timeout, a covered screen before financial content, and an optional secure recent-app preview.
 
 - Add a from/to date picker to the existing transactions period filter, keeping the last day inclusive in the list.

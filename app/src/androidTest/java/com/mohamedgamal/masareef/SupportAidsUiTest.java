@@ -1,0 +1,136 @@
+package com.mohamedgamal.masareef;
+
+import android.app.Instrumentation;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Bundle;
+import android.view.accessibility.AccessibilityNodeInfo;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.List;
+
+/** Synthetic support flows in a disposable package. Opens no mail app and sends nothing. */
+final class SupportAidsUiTest {
+    private final Instrumentation runner;
+    private MainActivity main;
+    private SmsImportActivity sms;
+    private int checked;
+    SupportAidsUiTest(Instrumentation runner){this.runner=runner;}
+    private void ok(boolean value,String why){if(!value)throw new AssertionError(why);checked++;}
+    private void idle(){runner.waitForIdleSync();try{runner.getUiAutomation().waitForIdle(250,3000);}catch(java.util.concurrent.TimeoutException ignored){}}
+    private boolean has(String text){AccessibilityNodeInfo root=runner.getUiAutomation().getRootInActiveWindow();return root!=null&&!root.findAccessibilityNodeInfosByText(text).isEmpty();}
+    private void click(String text){
+        long until=android.os.SystemClock.elapsedRealtime()+4000;
+        do{
+            AccessibilityNodeInfo root=runner.getUiAutomation().getRootInActiveWindow();
+            if(root!=null)for(AccessibilityNodeInfo found:root.findAccessibilityNodeInfosByText(text))
+                for(AccessibilityNodeInfo node=found;node!=null;node=node.getParent())if(node.isClickable()&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){idle();return;}
+            android.os.SystemClock.sleep(100);
+        }while(android.os.SystemClock.elapsedRealtime()<until);
+        StringBuilder diagnostic=new StringBuilder();texts(runner.getUiAutomation().getRootInActiveWindow(),diagnostic);
+        throw new AssertionError("Cannot click "+text+"; active="+diagnostic);
+    }
+    private void texts(AccessibilityNodeInfo node,StringBuilder out){if(node==null)return;if(node.getText()!=null)out.append('[').append(node.getText()).append(']');for(int i=0;i<node.getChildCount();i++)texts(node.getChild(i),out);}
+    private Object get(Object object,String name)throws Exception{Field field=object.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(object);}
+    private void set(Object object,String name,Object value)throws Exception{Field field=object.getClass().getDeclaredField(name);field.setAccessible(true);field.set(object,value);}
+    private void call(Object object,String name)throws Exception{Method method=object.getClass().getDeclaredMethod(name);method.setAccessible(true);method.invoke(object);}
+    private void mainCall(String name){runner.runOnMainSync(()->{try{call(main,name);}catch(Exception error){throw new RuntimeException(error);}});idle();}
+    private void settings(String section){runner.runOnMainSync(()->{try{set(main,"selectedTab",5);set(main,"settingsSection",section);call(main,"render");}catch(Exception error){throw new RuntimeException(error);}});idle();}
+    private void shot(Context context,String name)throws Exception{
+        idle();android.os.SystemClock.sleep(350);
+        File folder=new File(context.getCacheDir(),"support-aids");ok(folder.isDirectory()||folder.mkdirs(),"No screenshot folder");
+        android.graphics.Bitmap bitmap=runner.getUiAutomation().takeScreenshot();ok(bitmap!=null,"No screenshot");
+        try(FileOutputStream out=new FileOutputStream(new File(folder,name+".png"))){ok(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out),"Screenshot save failed");}
+        finally{bitmap.recycle();}
+    }
+    private boolean setEdit(AccessibilityNodeInfo node,String value){
+        if(node==null)return false;
+        if("android.widget.EditText".contentEquals(node.getClassName())){
+            Bundle text=new Bundle();text.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value);
+            return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text);
+        }
+        for(int i=0;i<node.getChildCount();i++)if(setEdit(node.getChild(i),value))return true;
+        return false;
+    }
+    private Intent interceptMail(){
+        Intent[] captured={null};
+        Instrumentation.ActivityMonitor monitor=new Instrumentation.ActivityMonitor(){
+            @Override public Instrumentation.ActivityResult onStartActivity(Intent intent){
+                if(Intent.ACTION_SENDTO.equals(intent.getAction())){captured[0]=intent;return new Instrumentation.ActivityResult(0,null);}
+                return null;
+            }
+        };
+        runner.addMonitor(monitor);
+        try{click("فتح مسودة إيميل");}finally{runner.removeMonitor(monitor);}
+        return captured[0];
+    }
+    @SuppressWarnings("unchecked") void run(String mode){
+        Bundle result=new Bundle();int status=-1;
+        try{
+            Context target=runner.getTargetContext();
+            if(!target.getPackageName().endsWith(".supportQa")||!android.os.Build.HARDWARE.matches("ranchu|goldfish"))throw new SecurityException("Isolated supportQa emulator required");
+            target.getSharedPreferences(MainActivity.class.getName(),0).edit().putBoolean("intro_completed",true)
+                    .putString("opening_mode","off").putBoolean("initial_import_prompted",true).putBoolean("sms_permission_prompted",true).commit();
+            target.getSharedPreferences("notification_settings",0).edit().putBoolean("access_prompted",true).commit();
+            main=(MainActivity)runner.startActivitySync(new Intent(target,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));idle();
+            if("support_crash".equals(mode)){
+                mainCall("debugCrashDialog");
+                Bundle marker=new Bundle();marker.putString("stream","Triggering expected debug crash\n");runner.sendStatus(0,marker);
+                click("إحداث العطل");throw new AssertionError("Debug crash did not terminate the process");
+            }
+            if("support_battery_allowed".equals(mode)){
+                android.os.PowerManager power=(android.os.PowerManager)target.getSystemService(Context.POWER_SERVICE);
+                ok(power.isIgnoringBatteryOptimizations(target.getPackageName()),"QA battery exemption not active");
+                settings("capture");ok(!has("إعدادات البطارية"),"Battery card stayed after exemption");shot(target,"03-battery-exempt");
+            }else{
+                String crash=CrashLog.latest(target);ok(crash!=null&&crash.contains("IllegalStateException"),"Actual debug crash was not persisted");
+                ok(!crash.contains("Synthetic debug crash"),"Exception message leaked");
+                settings("help");click("الإبلاغ عن مشكلة");
+                ok(has("إرفاق آخر عطل"),"Crash attachment option absent");
+                ok(setEdit(runner.getUiAutomation().getRootInActiveWindow(),"Synthetic support QA"),"Description edit failed");idle();
+                Intent defaultDraft=interceptMail();
+                ok(defaultDraft!=null&&!defaultDraft.getStringExtra(Intent.EXTRA_TEXT).contains("IllegalStateException"),"Crash attached by default");
+                click("إرفاق آخر عطل");ok(has("message omitted"),"Crash preview not visible");shot(target,"01-crash-preview");
+                Intent draft=interceptMail();
+                ok(draft!=null&&draft.getStringExtra(Intent.EXTRA_TEXT).contains("IllegalStateException")
+                        &&draft.getStringExtra(Intent.EXTRA_TEXT).contains("Synthetic support QA"),"Mail draft omitted selected crash");
+                click("إلغاء");
+                for(int i=0;i<4;i++){CrashLog.save(target,new NumberFormatException("SECRET SMS EGP 1250.00 card 1234567890"));android.os.SystemClock.sleep(5);}
+                File[] files=new File(target.getFilesDir(),"crashes").listFiles();ok(files!=null&&files.length==3,"Crash retention did not keep exactly three files");
+                String latest=CrashLog.latest(target);ok(!latest.contains("SECRET")&&!latest.contains("1250")&&!latest.contains("1234567890"),"Crash log contains a financial exception message");
+                settings("capture");ok(has("إعدادات البطارية"),"Battery card absent before exemption");shot(target,"02-battery-restricted");
+                sms=(SmsImportActivity)runner.startActivitySync(new Intent(target,SmsImportActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));idle();
+                Object session=get(sms,"session");runner.runOnMainSync(()->{try{
+                    set(session,"reviewBeforeImport",true);
+                    Method scan=SmsImportActivity.class.getDeclaredMethod("scan",java.time.LocalDate.class);scan.setAccessible(true);scan.invoke(sms,java.time.LocalDate.now().minusDays(1));
+                }catch(Exception error){throw new RuntimeException(error);}});
+                for(int i=0;i<100&&!"ready".equals(get(session,"phase"));i++){android.os.SystemClock.sleep(100);idle();}
+                ok("ready".equals(get(session,"phase")),"Synthetic inbox preview did not finish");
+                List<SmsImportActivity.RejectedSms> rejected=(List<SmsImportActivity.RejectedSms>)get(session,"rejected");
+                SmsImportActivity.RejectedSms sample=null;
+                for(SmsImportActivity.RejectedSms row:rejected){
+                    ok(!row.body.contains("OTP")&&!row.body.contains("cashback")&&!row.sender.startsWith("+"),"OTP/promotion/personal message offered for support");
+                    if(row.body.contains("SUPPORT_QA"))sample=row;
+                }
+                ok(sample!=null,"Unknown bank format absent from actual SMS scan");
+                ok(AppResources.database(target).transactionCount()==0,"Support preview wrote a financial transaction");
+                SmsImportActivity.RejectedSms selected=sample;
+                runner.runOnMainSync(()->{try{
+                    int index=((List<?>)get(session,"items")).size()+rejected.indexOf(selected);set(sms,"pageNumber",index/40);call(sms,"drawRows");
+                }catch(Exception error){throw new RuntimeException(error);}});idle();
+                ok(has("أرسل صيغتها"),"Rejected-message row has no format button");
+                runner.runOnMainSync(()->{try{Method report=SmsImportActivity.class.getDeclaredMethod("reportFormat",SmsImportActivity.RejectedSms.class);report.setAccessible(true);report.invoke(sms,selected);}catch(Exception error){throw new RuntimeException(error);}});idle();
+                ok(has("المرسل: HSBC")&&has("NAME"),"Redacted sender/name preview absent");
+                ok(!has("SECRET PERSON")&&!has("12345678"),"Raw financial identifiers in draft preview");shot(target,"04-redacted-message");
+                ok(setEdit(runner.getUiAutomation().getRootInActiveWindow(),"USER REVIEWED FORMAT"),"Redacted text is not editable");idle();
+                Intent format=interceptMail();
+                ok(format!=null&&format.getStringExtra(Intent.EXTRA_TEXT).contains("USER REVIEWED FORMAT")
+                        &&!format.getStringExtra(Intent.EXTRA_TEXT).contains("SECRET PERSON"),"Mail draft did not use edited text");
+            }
+            result.putString("stream","Support aids UI checks passed: "+checked+"; mode="+mode+"\n");
+        }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Support aids UI FAILED: "+trace);}
+        finally{if(sms!=null)runner.runOnMainSync(sms::finish);if(main!=null)runner.runOnMainSync(main::finish);runner.finish(status,result);}
+    }
+}

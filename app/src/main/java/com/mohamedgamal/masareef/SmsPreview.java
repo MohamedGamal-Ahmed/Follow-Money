@@ -61,6 +61,13 @@ final class SmsPreview {
     }
 
     boolean isTransaction() { return "expense".equals(kind)||"income".equals(kind)||"transfer".equals(kind); }
+
+    /** Conservative support-only selection; never changes parser acceptance or books an operation. */
+    static boolean canReport(String sender,String body) {
+        return BrandCatalog.bank(sender)!=null && ExpenseParser.isFinancialCandidate(body)
+                && !ExpenseParser.isVerificationMessage(body) && !ExpenseParser.isPromotion(body)
+                && parse(sender,body,0)==null;
+    }
     boolean canUseReceiptKey(java.util.Set<String> sentKeys) {
         return CaptureIdentity.receiptKeySafe(sender,body,receivedAt,captureAt,sentKeys);
     }

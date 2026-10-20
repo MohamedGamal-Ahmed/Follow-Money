@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
-    <application android:allowBackup="false" android:label="${appLabel}"
+    <application android:name=".FollowMoneyApp" android:allowBackup="false" android:label="${appLabel}"
         android:enableOnBackInvokedCallback="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
