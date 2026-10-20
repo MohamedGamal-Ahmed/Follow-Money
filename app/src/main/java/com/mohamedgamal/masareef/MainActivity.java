@@ -197,7 +197,6 @@ public final class MainActivity extends Activity {
         }
         super.onCreate(state);
         appLock = new AppLock(this, this::onAppUnlocked);
-        loadWhatsNew(readAsset("whats-new.txt"));
         loadFonts();
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(SURFACE);
@@ -205,6 +204,7 @@ public final class MainActivity extends Activity {
         if (!dark && Build.VERSION.SDK_INT >= 27) systemBars |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         getWindow().getDecorView().setSystemUiVisibility(systemBars);
         db = AppResources.database(this);
+        loadWhatsNew(readAsset("whats-new.txt"));
         if (state == null) AppResources.read(() -> LocalBackup.removeLeftovers(this));
         boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
@@ -1243,7 +1243,8 @@ public final class MainActivity extends Activity {
     /** Runs once per activity: decides from the stored version code whether this launch follows an update. */
     private void loadWhatsNew(String text) {
         SharedPreferences state = getSharedPreferences(APP_STATE, MODE_PRIVATE);
-        int lastSeen = state.getInt(LAST_SEEN_VERSION, WhatsNew.ABSENT);
+        int lastSeen = WhatsNew.lastSeen(state.getInt(LAST_SEEN_VERSION, WhatsNew.ABSENT),
+                getPreferences(MODE_PRIVATE).getBoolean("intro_completed", false), db.transactionCount() > 0);
         whatsNew = WhatsNew.due(BuildConfig.VERSION_CODE, lastSeen) ? WhatsNew.forVersion(text, BuildConfig.VERSION_NAME) : null;
         if (whatsNew == null && lastSeen != BuildConfig.VERSION_CODE) state.edit().putInt(LAST_SEEN_VERSION, BuildConfig.VERSION_CODE).apply();
     }

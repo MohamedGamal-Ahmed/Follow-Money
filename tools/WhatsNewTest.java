@@ -22,6 +22,10 @@ public final class WhatsNewTest {
         check(WhatsNew.readable(text).startsWith("النسخة 0.3.1\n• أولى"), "readable form");
         check(!WhatsNew.due(4, WhatsNew.ABSENT), "first install or pre-feature update: no card");
         check(WhatsNew.due(5, 4) && !WhatsNew.due(5, 5) && !WhatsNew.due(4, 5), "card only when code increased");
+        check(WhatsNew.lastSeen(WhatsNew.ABSENT, false, false) == WhatsNew.ABSENT, "true first install stays silent");
+        check(WhatsNew.due(4, WhatsNew.lastSeen(WhatsNew.ABSENT, true, false)), "pre-feature update with intro done shows the card");
+        check(WhatsNew.due(4, WhatsNew.lastSeen(WhatsNew.ABSENT, false, true)), "pre-feature update with data shows the card");
+        check(WhatsNew.lastSeen(3, false, false) == 3, "stored number wins");
         String shipped = new String(Files.readAllBytes(Paths.get("app/src/main/assets/whats-new.txt")), StandardCharsets.UTF_8);
         check(WhatsNew.parse(shipped) != null, "shipped file has a newest section");
         System.out.println("WhatsNewTest passed");

@@ -59,10 +59,17 @@ final class WhatsNewUiTest {
             String code=String.valueOf(BuildConfig.VERSION_CODE);
             String notes="## "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)+"\n- QA POINT ONE\n- QA POINT TWO\n";
 
+            target.getSharedPreferences(MainActivity.class.getName(),0).edit().putBoolean("intro_completed",false).commit();
             target.getSharedPreferences(STATE,0).edit().clear().commit();
             launch(null);
             ok(!has("جديد في النسخة"),"Card shown on a first install");
             ok(lastSeen()==BuildConfig.VERSION_CODE,"First install did not record the version code");
+            target.getSharedPreferences(MainActivity.class.getName(),0).edit().putBoolean("intro_completed",true).commit();
+
+            target.getSharedPreferences(STATE,0).edit().clear().commit();
+            launch(null);
+            ok(has("جديد في النسخة "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)),"Update from before the feature (no key, intro done) did not show the card");
+            ok(lastSeen()==-99,"Number recorded before «تمام» on a pre-feature update");
 
             target.getSharedPreferences(STATE,0).edit().putInt(KEY,BuildConfig.VERSION_CODE-1).commit();
             launch(null);

@@ -16,6 +16,11 @@ final class WhatsNew {
 
     private WhatsNew() {}
 
+    /** A missing number on a device that already finished the intro or holds data is an update from before this feature. */
+    static int lastSeen(int stored, boolean introCompleted, boolean hasData) {
+        return stored == ABSENT && (introCompleted || hasData) ? 0 : stored;
+    }
+
     /** Show the card only for an update; a first install or a downgrade records the number silently. */
     static boolean due(int current, int lastSeen) { return lastSeen != ABSENT && current > lastSeen; }
 
