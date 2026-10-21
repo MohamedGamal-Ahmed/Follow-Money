@@ -41,6 +41,8 @@ public final class ExpenseParser {
             "(?i)([0-9][0-9., ]*)\\s*(EGP|LE|E£|ج\\.?م\\.?|جنيه\\s+استرليني|جنيه|USD|EUR|GBP|دولار|يورو)(?![A-Za-z])");
     private static final Pattern MERCHANT = Pattern.compile(
             "(?i)(?:\\b(?:at|from|to)\\b|لدى|عند|على|لصالح|الى|إلى|من)\\s+([^.,;\\n]{2,45})");
+    private static final Pattern QUOTED_MERCHANT = Pattern.compile(
+            "(?i)(?:\\bat\\b|في|فى|عند|لدى)\\s*[\"“”«]([^\"“”»\\n]{2,60})[\"“”»]");
     /** An amount after the merchant name, in either order (EGP 200.00 / 200 EGP), and everything after it. */
     private static final Pattern MERCHANT_AMOUNT_TAIL = Pattern.compile(
             "(?i)\\s*(?:(?<![A-Za-z])(?:EGP|LE|E£|USD|EUR|GBP|ج\\.?م\\.?|جنيه|دولار|يورو)\\s*[0-9][0-9., ]*" +
@@ -618,8 +620,10 @@ public final class ExpenseParser {
             String found = dated.group(1).split("\\*")[0].trim();
             if (found.length() >= 2) return found.length() > 36 ? found.substring(0, 36).trim() : found;
         }
+        // Wallet apps quote the shop: Telda's «تم دفع 15 ج.م. في "Kashier Butlers"».
+        Matcher quoted = QUOTED_MERCHANT.matcher(body);
         Matcher matcher = MERCHANT.matcher(body);
-        String candidate = matcher.find() ? matcher.group(1).trim() : "";
+        String candidate = quoted.find() ? quoted.group(1).trim() : matcher.find() ? matcher.group(1).trim() : "";
         candidate = SENSITIVE_TAIL.matcher(candidate).replaceFirst("").trim();
         candidate = CARD_TAIL.matcher(candidate).replaceAll("").trim();
         candidate = candidate.replaceAll("(?i)(?:\\bon\\b|في|بتاريخ|يوم).*$", "").trim();

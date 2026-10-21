@@ -5608,6 +5608,9 @@ public final class MainActivity extends Activity {
             case "lcwaikiki" -> R.drawable.brand_lcwaikiki;
             case "raya" -> R.drawable.brand_raya;
             case "aman" -> R.drawable.brand_aman;
+            case "paymob" -> R.drawable.brand_paymob;
+            case "mahalawy" -> R.drawable.brand_mahalawy;
+            case "pizzaking" -> R.drawable.brand_pizzaking;
             case "butlers" -> R.drawable.brand_butlers;
             case "seoudi" -> R.drawable.brand_seoudi;
             case "chatgpt" -> R.drawable.brand_chatgpt;

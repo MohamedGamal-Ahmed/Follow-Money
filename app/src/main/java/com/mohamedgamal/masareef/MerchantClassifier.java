@@ -32,6 +32,7 @@ final class MerchantClassifier {
         new Entry("LC Waikiki", "تسوق", true, "LC Waikiki", "LCW", "إل سي وايكيكي", "ال سي وايكيكي"),
         new Entry("Raya", "تسوق", true, "Raya", "Raya Shop", "راية", "راية شوب"),
         new Entry("illy", "مقاهي", true, "illy", "illy caffe"),
+        new Entry("Pizza King", "أكل وشرب", true, "Pizza King", "بيتزا كينج", "بيتزا كنج"),
         new Entry("Etoile", "أكل وشرب", true, "Etoile", "Etoile Patisserie", "إتوال"),
         new Entry("Ted's", "أكل وشرب", true, "Ted's", "Teds"),
         new Entry("Zaher", "بقالة", true, "Zaher", "زاهر"),
