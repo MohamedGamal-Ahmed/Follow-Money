@@ -118,6 +118,12 @@ public final class ExpenseParser {
             "(?i)(عروض|عرض\\s+خاص|العرض\\s+سار|استمتع|فرصت|فرصة|للفوز|الفوز|اربح|إربح|جائز|جوائز|كاش\\s*باك|" +
             "يصل\\s+(?:إلى|الى|الي|ل)|حتى\\s+[0-9]+\\s*%|الشروط\\s+و\\s*الأحكام|الشروط\\s+والاحكام|تطبق\\s+الشروط|" +
             "\\boffers?\\b|\\bpromo(?:tion)?\\b|\\bwin\\b|\\bchance\\b|\\bup\\s+to\\b|\\bcash\\s*back\\b|terms\\s+(?:and|&)\\s+conditions|\\bT&Cs?\\b)");
+    private static final Pattern PRICE_NOTICE = Pattern.compile(
+            "(?i)(?:تحديث|تعديل|تغيير|زيادة|رفع|خفض)\\s+(?:سعر|أسعار|اسعار|رسوم|تكلفة|قيمة)|" +
+            "\\b(?:subscription|service|membership|plan)\\s+(?:price|fee|rate)\\b[^.!?\\n]{0,60}\\b(?:change|update|increase|decrease)");
+    /** Adding product features is not a monetary credit, even when the announcement quotes a price. */
+    private static final Pattern FEATURE_ADDITION = Pattern.compile(
+            "(?<![\\p{L}])تم\\s*(?:اضافة|إضافة)\\s+(?:مزايا|مميزات|ميزات|خصائص)(?![\\p{L}])");
     /** Wording a bank uses only once money actually moved. */
     private static final Pattern COMPLETED_EVENT = Pattern.compile(
             "(?i)((?<![\\p{L}])تم\\s+(?:(?:الآن|الان)\\s+)?(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|تنفيذ|إجراء|اجراء|استخدام|ايداع|إيداع|اضافة|إضافة|استلام|إستلام|رد|إرسال|ارسال|شحن)|" +
@@ -168,7 +174,9 @@ public final class ExpenseParser {
     static boolean isPromotion(String body) {
         if (body == null) return false;
         String text = normalizeDigits(body).replaceAll("[\\u064B-\\u0652\\u0640]", "");
-        return PROMOTION.matcher(text).find() && !COMPLETED_EVENT.matcher(text).find();
+        String moneyEvents = FEATURE_ADDITION.matcher(text).replaceAll("");
+        return (PROMOTION.matcher(text).find() || PRICE_NOTICE.matcher(text).find())
+                && !COMPLETED_EVENT.matcher(moneyEvents).find();
     }
 
     private static final Pattern EVENT_DATE_TEXT = Pattern.compile(

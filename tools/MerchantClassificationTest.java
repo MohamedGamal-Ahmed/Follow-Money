@@ -16,6 +16,18 @@ public final class MerchantClassificationTest {
     public static void main(String[] args) {
         purchase("KASHIER*BUTLERS & CO C","Butlers","أكل وشرب");
         purchase("paymob * BUTLERS & CO CAIRO","Butlers","أكل وشرب");
+        purchase("Kashier Butlers","Butlers","أكل وشرب");
+        eq("Butlers",ExpenseParser.parse("Telda","تم دفع 15 ج.م. في \"Kashier Butlers\"\nرصيدك: 16.5 ج.م.").merchant);
+        eq("أكل وشرب",ExpenseParser.parse("Telda","تم دفع 15 ج.م. في \"Kashier Butlers\"\nرصيدك: 16.5 ج.م.").category);
+        eq("butlers",BrandCatalog.merchant("Kashier Butlers"));
+        eq("Kashier QA Unknown",MerchantClassifier.displayName("Kashier QA Unknown"));
+        eq(null,MerchantClassifier.category("Kashier ButlersXYZ"));
+        eq("com.android.vending",BrandCatalog.merchantPackage("google play"));
+        eq("com.android.vending",BrandCatalog.merchantPackage("GOOGLE PLAY STORE"));
+        eq(null,BrandCatalog.merchantPackage("Google One"));
+        eq(null,BrandCatalog.merchantPackage("Google Playground"));
+        eq("io.telda.app",BrandCatalog.sourcePackage("Telda"));
+        eq(null,BrandCatalog.sourcePackage("QA Unknown Bank"));
         purchase("SEOUDI MARKET SODIC E","Seoudi","بقالة");
         purchase("SEOUDI-Sodic East","Seoudi","بقالة");
         purchase("سعودى ماركت","Seoudi","بقالة");

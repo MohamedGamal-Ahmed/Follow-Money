@@ -62,8 +62,15 @@ final class MerchantClassifier {
     }
     private static Entry find(String raw) {
         if(raw==null) return null;
-        // A processor is a prefix, not the merchant. Strip only explicit processor delimiters.
+        // Bare processor prefixes are accepted only when the remainder is a known merchant.
         String value=textKey(withoutProcessor(raw));
+        Entry direct=findKey(value);
+        if(direct!=null)return direct;
+        for(String processor:new String[]{"kashier ","paymob "})
+            if(value.startsWith(processor))return findKey(value.substring(processor.length()));
+        return null;
+    }
+    private static Entry findKey(String value) {
         for(Entry entry:ENTRIES) for(String key:entry.aliases) {
             if(value.equals(key) || entry.branches && key.length()>=4 && value.startsWith(key+" ")) return entry;
         }

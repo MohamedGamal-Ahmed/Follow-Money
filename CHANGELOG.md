@@ -1,5 +1,19 @@
 # Change log
 
+## 0.3.4 — local phone testing candidate, 21 October 2026
+
+- Transaction rows with no merchant logo fall back to their account's bank/card icon, then the selected notification provider's icon and finally the source's identity badge. Descriptions identify the source without relabelling the merchant. Google Play uses the installed store's icon, separately from Google One.
+- Recognize known merchants after a bare Kashier/Paymob prefix (including `Kashier Butlers`); unknown bare descriptors stay intact. Refresh untouched automatic purchase categories using the existing guarded catalog refresh.
+- Explain in capture settings that recorded transactions survive notification dismissal, while missed notifications can be recovered only while still active.
+
+## 0.3.3 — local phone testing candidate, 21 October 2026
+
+- Read title-only payment notifications. The owner's live Telda notification uses DecoratedCustomViewStyle with the full purchase and balance in `android.title`, null `android.text` and no `android.bigText`; previously the listener returned before parsing it. Empty big text now falls back to regular text. Source selection, summary exclusion and deduplication stay enforced.
+
+## 0.3.2 — local phone testing candidate, 21 October 2026
+
+- Price-change announcements mentioning newly added product features are excluded from money movements. Selected payment apps replay still-active notifications after saving sources or resuming the app; a disconnected listener is asked to reconnect, without booking duplicate transactions.
+
 ## 0.3.1 — phone testing candidate, 21 October 2026
 
 - Commitment-link and provider-confirmation pages stay open until the queued database write succeeds, retain the draft on rejection and ignore repeated submission while saving.

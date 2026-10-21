@@ -37,6 +37,8 @@ public final class ReconciliationTest extends Instrumentation {
             new UnifiedUiTest(this).run(!"unified_light".equals(featureAudit),"unified_max".equals(featureAudit)?2f:1f);return;
         }
         if("points_ui".equals(featureAudit)){new DailyPointsUiTest(this).run();return;}
+        if("notification_capture".equals(featureAudit)){new NotificationCaptureTest(this).run();return;}
+        if("merchant_badges".equals(featureAudit)){new MerchantBadgeUiTest(this).run();return;}
         if("commitment_ui".equals(featureAudit)){new CommitmentPaymentUiTest(this).run();return;}
         if("commitment_cycle_ui".equals(featureAudit)){new CommitmentCycleUiTest(this).run();return;}
         if("period_ui".equals(featureAudit)){new PeriodFilterUiTest(this).run();return;}

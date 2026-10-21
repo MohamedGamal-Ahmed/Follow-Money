@@ -1176,8 +1176,10 @@ final class FeatureAuditTest {
         long edited=oldPurchase("SEOUDI MARKET SODIC E","تسوق",t+2000,true);
         long transfer=oldPurchase("Butlers","تحويلات",t+3000,false);
         long installment=oldPurchase("Seoudi","أقساط",t+4000,false);
+        long telda=oldPurchase("Kashier Butlers","غير مصنف",t+4500,false);
         db.addManual(t+5000,2000,"USD","Espresso Lab","أكل وشرب");long manual=db.latestInserted().id;
-        int count=db.transactions().size();eq(2,db.refreshMerchantCategories());eq(0,db.refreshMerchantCategories());
+        int count=db.transactions().size();eq(3,db.refreshMerchantCategories());eq(0,db.refreshMerchantCategories());
+        eq("أكل وشرب",db.transactionById(telda).category);eq("Kashier Butlers",db.transactionById(telda).merchant);
         ExpenseDb.Transaction row=db.transactionById(coffee);eq("مقاهي",row.category);eq("ESPRESSO LAB-CENTER ALMA",row.merchant);
         eq(8250L,row.amountMinor);eq("EGP",row.currency);eq(t,row.when);eq("expense",row.kind);
         eq("رعاية صحية",db.transactionById(hospital).category);eq("تسوق",db.transactionById(edited).category);

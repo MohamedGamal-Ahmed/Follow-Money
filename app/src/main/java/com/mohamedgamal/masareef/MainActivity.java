@@ -288,6 +288,7 @@ public final class MainActivity extends Activity {
         if (appLock.guard()) return;
         if (db != null) {render();refreshLedger(true);MonthlySummaryReceiver.refresh(this);}
         if (db != null && !introVisible && hasNotificationAccess()) {
+            PaymentNotificationListener.refreshSelectedSources(this);
             SharedPreferences settings = getSharedPreferences("notification_settings", MODE_PRIVATE);
             if (!settings.getBoolean("source_picker_shown", false) &&
                     settings.getStringSet("sources", java.util.Collections.emptySet()).isEmpty()) {
@@ -713,6 +714,7 @@ public final class MainActivity extends Activity {
                 }
                 setting("استيراد رسائل SMS القديمة",this::requestSmsImport);
                 setting("تطبيقات الدفع والإشعارات",this::chooseNotificationApps);
+                note("العمليات المسجلة تفضل محفوظة بعد مسح الإشعار. لو عملية ما ظهرتش، سيب إشعارها ظاهر وافتح Follow Money لإعادة فحص إشعارات التطبيقات المختارة؛ الإشعارات الممسوحة قبل التقاطها مش متاحة للاسترجاع.");
                 setting(hasNotificationAccess()?"الوصول للإشعارات: مفعل":"تفعيل الوصول للإشعارات",this::openNotificationSettings);
                 setting("حساباتك على إنستاباي",this::ownHandlesDialog);
                 setting("قواعد التجار والتصنيف",()->{selectedTab=7;render();});
@@ -1929,12 +1931,12 @@ public final class MainActivity extends Activity {
     private void refreshMerchantCatalog() {
         SharedPreferences prefs=getPreferences(MODE_PRIVATE);
         // Bumped when the catalog gains merchants, so untouched automatic purchases get the new categories.
-        if(prefs.getInt("merchant_catalog_version",0)>=2) return;
+        if(prefs.getInt("merchant_catalog_version",0)>=3) return;
         Context app=getApplicationContext();
         CaptureQueue.submit(()->{
             try(ExpenseDb catalogDb=new ExpenseDb(app)) {
                 int count=catalogDb.refreshMerchantCategories();
-                prefs.edit().putInt("merchant_catalog_version",2).apply();
+                prefs.edit().putInt("merchant_catalog_version",3).apply();
                 postUi(()->{if(!isFinishing() && !isDestroyed()){render();if(count>0)toast("اتحسن تصنيف "+count+" عمليات تلقائية");}});
             } catch(RuntimeException error) {android.util.Log.e("FollowMoney","Merchant categories skipped: "+error.getClass().getSimpleName());}
         });
@@ -2317,7 +2319,7 @@ public final class MainActivity extends Activity {
                     getSharedPreferences("notification_settings", MODE_PRIVATE).edit()
                             .putStringSet("sources", selected).apply();
                     if (!hasNotificationAccess()) openNotificationSettings();
-                    else render();
+                    else {PaymentNotificationListener.refreshSelectedSources(this);render();}
                 }).setNegativeButton("إلغاء", null).show();
     }
 
@@ -2438,9 +2440,11 @@ public final class MainActivity extends Activity {
     }
 
     private View sourceBadge(ExpenseDb.PaymentSource source, int size) {
-        String bank = SourceIdentity.bank(source.name);
-        String packageName = "BANKMISR".equals(bank) ? "com.BanqueMisr.MobileBanking" :
-                "HSBC".equals(bank) ? "com.htsu.hsbcpersonalbanking" : null;
+        View logo=sourceLogoBadge(source.name,size);
+        return logo!=null?logo:identityBadge(source.name, source.kind, size);
+    }
+
+    private View applicationBadge(String packageName,String description,int size) {
         if (packageName != null) {
             try {
                 ImageView icon = new ImageView(this);
@@ -2448,15 +2452,31 @@ public final class MainActivity extends Activity {
                 icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 icon.setBackground(rounded(Color.WHITE, size / 2));
                 icon.setPadding(dp(2), dp(2), dp(2), dp(2));
+                icon.setContentDescription(description);
                 return icon;
             } catch (PackageManager.NameNotFoundException ignored) { }
         }
-        String brand=BrandCatalog.bank(source.name);
+        return null;
+    }
+
+    /** A source logo never changes the recorded merchant. */
+    private View sourceLogoBadge(String name,int size) {
+        String description="مصدر العملية: "+name;
+        View appIcon=applicationBadge(BrandCatalog.sourcePackage(name),description,size);
+        if(appIcon!=null)return appIcon;
+        String brand=BrandCatalog.bank(name);
         if(brand!=null) {
             int res=brandLogo(brand);
-            if(res!=0)return UiKit.logoBadge(this,res,brand,source.name,size,dark?0:BORDER);
+            if(res!=0)return UiKit.logoBadge(this,res,brand,description,size,dark?0:BORDER);
         }
-        return identityBadge(source.name, source.kind, size);
+        for(String packageName:getSharedPreferences("notification_settings",MODE_PRIVATE)
+                .getStringSet("sources",java.util.Collections.emptySet())) {
+            try {
+                String label=getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(packageName,0)).toString();
+                if(label.equalsIgnoreCase(name))return applicationBadge(packageName,description,size);
+            }catch(PackageManager.NameNotFoundException ignored){}
+        }
+        return null;
     }
 
     private void metric(LinearLayout parent, String heading, String value, String detail) {
@@ -6360,13 +6380,20 @@ public final class MainActivity extends Activity {
         };
     }
 
-    /** A bank's own operation (TT Payment, ATM Cash Withdrawal…) shows the bank behind the row, not a monogram of the words. */
+    /** Prefer the merchant, then the account/provider behind any unrecognized merchant. */
     private View rowBadge(ExpenseDb.Transaction item, int size) {
-        if (ExpenseParser.bankOperation(item.merchant)) {
-            Long account = item.paymentSourceId != null ? item.paymentSourceId : item.destinationSourceId;
-            ExpenseDb.PaymentSource source = account == null ? null : db.paymentSource(account);
-            if (source != null && BrandCatalog.bank(source.name) != null) return sourceBadge(source, size);
+        if(brandLogo(BrandCatalog.merchant(item.merchant))!=0)
+            return merchantBadge(item.merchant,item.category,size);
+        View merchantApp=applicationBadge(BrandCatalog.merchantPackage(item.merchant),item.merchant,size);
+        if(merchantApp!=null)return merchantApp;
+        Long account=item.paymentSourceId!=null?item.paymentSourceId:item.destinationSourceId;
+        ExpenseDb.PaymentSource source=account==null?null:db.paymentSource(account);
+        if(source!=null){View logo=sourceLogoBadge(source.name,size);if(logo!=null)return logo;}
+        if(item.source!=null&&item.source.startsWith("إشعار: ")){
+            View logo=sourceLogoBadge(item.source.substring("إشعار: ".length()).trim(),size);
+            if(logo!=null)return logo;
         }
+        if(source!=null){View badge=sourceBadge(source,size);badge.setContentDescription("مصدر العملية: "+source.name);return badge;}
         return merchantBadge(item.merchant, item.category, size);
     }
 
@@ -6374,6 +6401,8 @@ public final class MainActivity extends Activity {
         String id=BrandCatalog.merchant(name);
         int logo=brandLogo(id);
         if (logo != 0) return UiKit.logoBadge(this, logo, id, name, size, dark ? 0 : BORDER);
+        View appIcon=applicationBadge(BrandCatalog.merchantPackage(name),name,size);
+        if(appIcon!=null)return appIcon;
         if ("سحب نقدي".equals(category) || "رسوم بنكية".equals(category) || "تحويلات".equals(category) ||
                 ("دخل".equals(category) && UiKit.provider(name) == null)) {
             int[] style = categoryStyle(category);

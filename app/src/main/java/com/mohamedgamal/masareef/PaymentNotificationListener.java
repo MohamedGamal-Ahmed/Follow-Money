@@ -11,9 +11,39 @@ import java.util.Locale;
 
 /** Reads only notifications from apps explicitly selected by the user. */
 public final class PaymentNotificationListener extends NotificationListenerService {
+    private static volatile java.lang.ref.WeakReference<PaymentNotificationListener> connected = new java.lang.ref.WeakReference<>(null);
     @Override public void onListenerConnected() {
-        StatusBarNotification[] active = getActiveNotifications();
-        if (active != null) for (StatusBarNotification item : active) submit(item);
+        connected = new java.lang.ref.WeakReference<>(this);
+        replaySelectedActive();
+    }
+
+    @Override public void onListenerDisconnected() {
+        if (connected.get() == this) connected.clear();
+    }
+
+    @Override public void onDestroy() {
+        if (connected.get() == this) connected.clear();
+        super.onDestroy();
+    }
+
+    /** Selection can happen after the service connected and ignored an already-visible notification. */
+    static void refreshSelectedSources(Context context) {
+        try {
+            PaymentNotificationListener listener = connected.get();
+            if (listener != null) listener.replaySelectedActive();
+            else requestRebind(new android.content.ComponentName(context, PaymentNotificationListener.class));
+        } catch (RuntimeException unavailable) {
+            android.util.Log.w("FollowMoney", "Notification reconnect unavailable: " + unavailable.getClass().getSimpleName());
+        }
+    }
+
+    private void replaySelectedActive() {
+        try {
+            StatusBarNotification[] active = getActiveNotifications();
+            if (active != null) for (StatusBarNotification item : active) submit(item);
+        } catch (RuntimeException unavailable) {
+            android.util.Log.w("FollowMoney", "Notification replay unavailable: " + unavailable.getClass().getSimpleName());
+        }
     }
 
     @Override public void onNotificationPosted(StatusBarNotification item) {
@@ -40,16 +70,26 @@ public final class PaymentNotificationListener extends NotificationListenerServi
         return packageName;
     }
 
+    /** Custom notifications (including Telda) can put the entire payment in the title. */
+    static String notificationBody(Notification notification) {
+        if (notification == null || notification.extras == null ||
+                (notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return null;
+        String title = notificationText(notification, Notification.EXTRA_TITLE);
+        String text = notificationText(notification, Notification.EXTRA_BIG_TEXT);
+        if (text.isEmpty()) text = notificationText(notification, Notification.EXTRA_TEXT);
+        if (title.isEmpty()) return text.isEmpty() ? null : text;
+        return text.isEmpty() || title.equals(text) ? title : title + " " + text;
+    }
+
+    private static String notificationText(Notification notification, String key) {
+        CharSequence value = notification.extras.getCharSequence(key);
+        return value == null ? "" : value.toString().trim();
+    }
+
     private static void process(Context context, StatusBarNotification item, String packageName) {
         try {
-            Notification notification = item.getNotification();
-            if (notification == null || notification.extras == null ||
-                    (notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
-            CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
-            CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
-            if (text == null) text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
-            if (text == null) return;
-            String body = (title == null ? "" : title + " ") + text.toString();
+            String body = notificationBody(item.getNotification());
+            if (body == null) return;
             String label;
             try { label = context.getPackageManager().getApplicationLabel(
                     context.getPackageManager().getApplicationInfo(packageName, 0)).toString(); }

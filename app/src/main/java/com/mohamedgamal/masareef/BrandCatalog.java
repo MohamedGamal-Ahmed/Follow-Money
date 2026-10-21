@@ -78,6 +78,18 @@ final class BrandCatalog {
     };
     static String merchant(String name){return match(MerchantClassifier.displayName(name),false);}
     static String bank(String name){return match(name,true);}
+    /** Keep Play separate from Google One; use the installed store's authentic icon. */
+    static String merchantPackage(String name){
+        String value=name==null?"":normalize(name);
+        return value.equals("google play")||value.startsWith("google play ") ? "com.android.vending" : null;
+    }
+    static String sourcePackage(String name){
+        String bank=SourceIdentity.bank(name);
+        if("BANKMISR".equals(bank))return "com.BanqueMisr.MobileBanking";
+        if("HSBC".equals(bank))return "com.htsu.hsbcpersonalbanking";
+        if("TELDA".equals(bank)||"تيلدا".equals(bank))return "io.telda.app";
+        return null;
+    }
     private static String match(String name,boolean bank) {
         if(name==null)return null;String value=normalize(name);
         for(Entry e:ENTRIES)if(e.bank==bank)for(String raw:e.aliases) {
