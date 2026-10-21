@@ -4,6 +4,35 @@
 comparison baseline for the protected groups. Do not implement the replacement pipeline against this
 file as though it had approval. See [v2 draft and remaining acceptance gates](corpus-v2-draft.md).
 
+## Corpus v2 acceptance policy (owner decision, 21 October 2026)
+
+1. **The corpus proves message-type and writing-shape coverage of the generic logic, not coverage of banks.**
+   No observed sample is required per type or per bank. Unseen banks are the responsibility of the generic
+   design and its safety net (REVIEW / UNUNDERSTOOD), not of fixture rows.
+2. **Evidence levels** in `corpus-v2-sources.tsv`: `user_redacted` (actually observed, redacted) and
+   `synthetic`. Pre-existing rows keep their recorded finer levels (`public_*`, `generated_fixture_v1`);
+   only `user_redacted` counts as observed. A synthetic case is allowed, and required, for any type without
+   an observed sample. It is built on a published format when one exists (registry URL mandatory) or else on
+   the structure of our observed messages. It lives in group `synthetic_coverage`, its note starts with
+   `SYNTHETIC`, and both its `source` and `source_evidence_id` are `PUBLIC_FORMAT_<bank>` or
+   `SYNTHETIC_<type>` — never a bank name presented as observed.
+3. **No synthetic alternative format for a source we have real samples of** (Banque Misr, HSBC, QNB, Telda,
+   TRU). Variations of those samples remain variations of the same structure. The builder and the audit both
+   reject a synthetic source label naming these banks.
+4. **Readiness blockers are "missing coverage of message type"**, not "missing observed sample". A type is
+   covered by a base row tagged with it (observed or synthetic) that has at least two declared variants.
+   Required types: `ipn_explicit_fee`, `cib_dear_customer_purchase`, `nbe_dear_customer_purchase`,
+   `dual_currency_equivalent`, `reversal`, `installment_payment`, `wallet_topup`, `fawry_bill_payment`,
+   `card_decline`, `vodafone_cash`, `instapay_direct`.
+5. **Arabic ≥40%** (measured from message words) may be met with labelled synthetic Arabic cases of the same
+   types. Other gates are unchanged: the 66 protected v1 rows, the 17 observed bases and their variants, the
+   shape-fingerprint fix, the p134/p137/p140 corrections, EGP transactions ≥80% and REVIEW between 15 and 25.
+
+`--require-ready` (`ParserCorpusV2Test`) enforces this policy. Passing it means "ready for owner review",
+never "approved": Normalization and any production parser code still wait for the owner's explicit approval.
+
+## Corpus v1 (historical)
+
 `parser-corpus.tsv` is the first, historical set of **240 synthetic input/expected-result pairs**.
 It was authored before implementing the replacement pipeline. Expectations are not produced by the legacy
 parser or by a new parser. No personal inbox exports, real account identifiers or real notification dumps

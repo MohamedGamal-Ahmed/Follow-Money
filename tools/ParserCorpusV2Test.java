@@ -36,16 +36,42 @@ public final class ParserCorpusV2Test {
         return arabic&&latin?"mixed":arabic?"ar":latin?"en":"neutral";
     }
 
-    private static Map<String,String> sourceLevels(Path path)throws Exception{
+    // Owner policy, 21 October 2026: the corpus proves message-type and writing-shape coverage of the generic logic,
+    // not coverage of particular banks. A missing type is closed by a labelled synthetic base case plus variants.
+    static final String[] REQUIRED_TYPES={"ipn_explicit_fee","cib_dear_customer_purchase","nbe_dear_customer_purchase","dual_currency_equivalent","reversal","installment_payment","wallet_topup","fawry_bill_payment","card_decline","vodafone_cash","instapay_direct"};
+    // Sources with real redacted samples. No synthetic row may present an alternative format for them.
+    static final Set<String> OBSERVED_SOURCES=Set.of("BANKMISR","BANQUEMISR","BANQUE_MISR","HSBC","QNB","TELDA","TRU");
+    static final Set<String> LEVELS=Set.of("user_redacted","synthetic","generated_fixture_v1","public_user_report","public_developer_fixture","public_developer_example");
+
+    /** evidence_id -> {level, url-or-null}. */
+    private static Map<String,String[]> sourceRegistry(Path path)throws Exception{
         List<String> lines=Files.readAllLines(path,StandardCharsets.UTF_8);
         check(lines.get(0).equals("evidence_id\tlevel\turl\tlocator\tlimitations"),"Evidence registry header");
-        Map<String,String> result=new HashMap<>();
+        Map<String,String[]> result=new HashMap<>();
         for(int i=1;i<lines.size();i++){
             String[] fields=lines.get(i).split("\t",-1);check(fields.length==5,"Source registry width "+i);
-            check(result.put(fields[0],fields[1])==null,"Duplicate source evidence ID");
+            check(LEVELS.contains(fields[1]),"Unknown evidence level "+fields[0]+": "+fields[1]);
+            check(result.put(fields[0],new String[]{fields[1],fields[2].equals("\\N")?null:fields[2]})==null,"Duplicate source evidence ID");
             if(fields[1].startsWith("public_"))check(fields[2].startsWith("https://github.com/"),"Missing inspected public source URL");
+            if(fields[1].equals("synthetic")){
+                check(fields[0].startsWith("PUBLIC_FORMAT_")||fields[0].startsWith("SYNTHETIC_"),"Synthetic evidence must be PUBLIC_FORMAT_* or SYNTHETIC_*: "+fields[0]);
+                if(fields[0].startsWith("PUBLIC_FORMAT_"))check(fields[2].startsWith("https://"),"Public-format synthetic evidence needs its published source URL: "+fields[0]);
+                check(!fields[4].isBlank(),"Synthetic evidence needs stated limitations: "+fields[0]);
+            }
         }
         return result;
+    }
+
+    /** Rule 3: synthetic rows carry their own synthetic source label, never an observed bank's name. */
+    private static void syntheticLabelling(ParserCorpusFixture.Row row,String level){
+        String id=row.get("id"),source=row.get("source");
+        if(!level.equals("synthetic")){check(!row.get("group").equals("synthetic_coverage"),"Synthetic group without synthetic evidence "+id);return;}
+        check(row.get("group").equals("synthetic_coverage"),"Synthetic row outside synthetic_coverage group "+id);
+        check(source.matches("(PUBLIC_FORMAT|SYNTHETIC)_[A-Z0-9_]+"),"Synthetic row attributed to a bank as if observed "+id+": "+source);
+        check(source.equals(row.get("source_evidence_id")),"Synthetic source/evidence label mismatch "+id);
+        String subject=source.replaceFirst("^(PUBLIC_FORMAT|SYNTHETIC)_","");
+        for(String observed:OBSERVED_SOURCES)check(!subject.startsWith(observed),"Synthetic substitute for an observed source "+id);
+        check(row.get("note")!=null&&row.get("note").startsWith("SYNTHETIC"),"Synthetic row note must say SYNTHETIC "+id);
     }
 
     private static void oracleRegressions(Map<String,ParserCorpusFixture.Row> ids){
@@ -107,16 +133,18 @@ public final class ParserCorpusV2Test {
         String v1Hash=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(v1Text.getBytes(StandardCharsets.UTF_8)));
         check(v1Hash.equals("628cc295cbbddc7bda70fe90a0dee6c9125df27563140b8b4e0a61d0a6ed806e"),"Historical v1 comparison file changed");
         List<ParserCorpusFixture.Row> rows=ParserCorpusFixture.readV2(folder.resolve("parser-corpus-v2-draft.tsv"));
-        Map<String,String> levels=sourceLevels(folder.resolve("corpus-v2-sources.tsv"));
+        Map<String,String[]> registry=sourceRegistry(folder.resolve("corpus-v2-sources.tsv"));
         Map<String,ParserCorpusFixture.Row> ids=new LinkedHashMap<>();
-        Map<String,Integer> languages=new HashMap<>(),decisions=new HashMap<>();
+        Map<String,Integer> languages=new HashMap<>(),decisions=new HashMap<>(),currencies=new HashMap<>(),evidence=new HashMap<>();
         Map<String,Set<String>> sourceShapes=new java.util.TreeMap<>();
         Set<String> featureTags=new HashSet<>();int tx=0,egp=0,publicBases=0,userBases=0;
         check(rows.size()>=240,"At least the originally requested 240 cases");
         for(ParserCorpusFixture.Row row:rows){
             String id=row.get("id");check(ids.put(id,row)==null,"Duplicate v2 ID "+id);
             check(!row.get("group").equals("source_independence"),"Rejected source-label padding remains");
-            check(levels.containsKey(row.get("source_evidence_id")),"Missing source evidence "+id);
+            check(registry.containsKey(row.get("source_evidence_id")),"Missing source evidence "+id);
+            String level=registry.get(row.get("source_evidence_id"))[0];
+            evidence.merge(level,1,Integer::sum);syntheticLabelling(row,level);
             check(row.get("base_case_id")!=null&&row.get("variant")!=null,"Missing variant lineage "+id);
             check(Set.of("transaction","promo","otp","verification","balance_inquiry","reminder","other").contains(row.get("expected_type")),"Type "+id);
             check(Set.of("AUTO","REVIEW","UNUNDERSTOOD","IGNORE").contains(row.get("expected_decision")),"Decision "+id);
@@ -129,7 +157,7 @@ public final class ParserCorpusV2Test {
             // Generated field-order permutations and paired scenarios are not additional observed formats.
             if(!row.get("source_evidence_id").equals("legacy-v1")&&row.get("variant").equals("base"))
                 sourceShapes.computeIfAbsent(row.get("source"),k->new HashSet<>()).add(SmsPreview.shape(row.inputText()));
-            if(row.get("expected_type").equals("transaction")){tx++;if("EGP".equals(row.get("expected_currency")))egp++;}
+            if(row.get("expected_type").equals("transaction")){tx++;if("EGP".equals(row.get("expected_currency")))egp++;currencies.merge(String.valueOf(row.get("expected_currency")),1,Integer::sum);}
             else{
                 expect(row,"expected_decision","IGNORE");expect(row,"expected_amount_minor",null);expect(row,"expected_direction",null);
                 expect(row,"expected_capture","NONE");
@@ -169,14 +197,30 @@ public final class ParserCorpusV2Test {
         if(languages.getOrDefault("mixed",0)*100>rows.size()*30)blockers.add("Mixed share above 30%");
         if(egp*100<tx*80)blockers.add("EGP transactions below 80%");
         int review=decisions.getOrDefault("REVIEW",0);if(review<15||review>25)blockers.add("REVIEW count outside 15..25");
-        for(String feature:new String[]{"ipn_explicit_fee","cib_dear_customer_purchase","nbe_dear_customer_purchase","dual_currency_equivalent","reversal","installment_payment","wallet_topup","fawry_bill_payment","card_decline_observed","vodafone_cash_observed","instapay_direct_observed"})
-            if(!featureTags.contains(feature))blockers.add("Missing documented sample: "+feature);
+        // A type is covered by any base case (observed or labelled synthetic) with at least two declared variants.
+        // Coverage of unseen banks is the job of the generic design and the REVIEW/UNUNDERSTOOD safety net, not samples.
+        Map<String,String> coverage=new java.util.TreeMap<>();
+        for(String type:REQUIRED_TYPES){
+            for(ParserCorpusFixture.Row base:rows){
+                if(!base.get("variant").equals("base")||!List.of(base.get("feature_tags").split("\\|")).contains(type))continue;
+                long variants=rows.stream().filter(r->r!=base&&r.get("base_case_id").equals(base.get("id"))).count();
+                if(variants>=2){coverage.merge(type,base.get("id")+" ("+registry.get(base.get("source_evidence_id"))[0]+", "+variants+" variants)",(a,b)->a+"; "+b);}
+            }
+            if(!coverage.containsKey(type))blockers.add("Missing coverage of message type: "+type);
+        }
+        int syntheticBases=(int)rows.stream().filter(r->r.get("variant").equals("base")&&r.get("group").equals("synthetic_coverage")).count();
+        String v2Hash=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(Files.readString(folder.resolve("parser-corpus-v2-draft.tsv"),StandardCharsets.UTF_8).replace("\r\n","\n").getBytes(StandardCharsets.UTF_8)));
         Path report=Path.of(".tmp/corpus-v2-audit.md");Files.createDirectories(report.getParent());
         List<String> output=new ArrayList<>();
         output.add("# Corpus v2 draft audit");output.add("");output.add("Fixture integrity/oracle assertions: PASS ("+checks+"). Parser semantic evaluation: NOT RUN.");
         output.add("Rows: "+rows.size()+"; protected v1 rows unchanged: "+protectedRows+"; rejected padding rows removed: "+removed+".");
-        output.add("Provenance: "+userBases+" user-supplied base cases + one owner-specified descriptor expansion; "+publicBases+" public base examples. Variants are not additional observed formats.");
+        output.add("v2 SHA-256 (UTF-8/LF): `"+v2Hash+"`.");
+        output.add("Provenance: "+userBases+" user-supplied base cases + one owner-specified descriptor expansion; "+publicBases+" public base examples; "+syntheticBases+" labelled synthetic base cases. Variants are not additional observed formats.");
         output.add("Decisions: "+new java.util.TreeMap<>(decisions));
+        output.add("Evidence levels (rows): "+new java.util.TreeMap<>(evidence));
+        output.add("Transaction currencies: "+new java.util.TreeMap<>(currencies));
+        output.add("");output.add("## Message-type coverage");output.add("");
+        for(String type:REQUIRED_TYPES)output.add("- "+type+": "+coverage.getOrDefault(type,"MISSING"));
         output.add("");output.add("| Measured language | Count | Share |");output.add("| --- | ---: | ---: |");
         for(String lang:new String[]{"ar","en","mixed","neutral"})output.add(String.format(Locale.ROOT,"| %s | %d | %.2f%% |",lang,languages.getOrDefault(lang,0),100.0*languages.getOrDefault(lang,0)/rows.size()));
         output.add(String.format(Locale.ROOT,"\nEGP transactions: %d/%d (%.2f%%); unresolved-currency transactions stay in the denominator.",egp,tx,100.0*egp/tx));
@@ -188,7 +232,7 @@ public final class ParserCorpusV2Test {
         for(var entry:sourceShapes.entrySet())output.add("- "+entry.getKey()+": "+entry.getValue().size()+" base-case profiles.");
         Files.writeString(report,String.join("\n",output)+"\n",StandardCharsets.UTF_8);
         System.out.println("V2 fixture integrity passed: "+checks+" assertions; "+rows.size()+" rows; "+protectedRows+" protected rows unchanged; "+removed+" padding rows removed.");
-        System.out.println("Measured languages: "+new java.util.TreeMap<>(languages)+"; EGP "+egp+"/"+tx+"; REVIEW "+review+".");
+        System.out.println("Measured languages: "+new java.util.TreeMap<>(languages)+"; EGP "+egp+"/"+tx+"; REVIEW "+review+"; evidence "+new java.util.TreeMap<>(evidence)+"; SHA-256 "+v2Hash+".");
         System.out.println("Parser semantic evaluation: NOT RUN. Readiness: "+(blockers.isEmpty()?"pending explicit owner approval":blockers.size()+" approval blockers")+". Report: "+report);
         if(List.of(args).contains("--require-ready")&&!blockers.isEmpty())throw new IllegalStateException("Corpus v2 is not ready: "+String.join("; ",blockers));
     }

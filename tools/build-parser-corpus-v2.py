@@ -2,6 +2,12 @@
 
 This is fixture tooling, not a production parsing stage. v1 is kept unchanged for historical comparison.
 The draft can be structurally valid while its independently reported readiness gates still fail.
+
+Owner policy (21 October 2026): the corpus proves that the generic logic handles every message type and
+writing shape; it does not prove coverage of particular banks. A message type without an observed sample is
+covered by a labelled synthetic base case (group synthetic_coverage, evidence level synthetic) attributed to
+PUBLIC_FORMAT_<bank> when built on a published format, otherwise SYNTHETIC_<type>. Sources with real redacted
+samples (Banque Misr, HSBC, QNB, Telda, TRU) never receive a synthetic alternative format.
 """
 from __future__ import annotations
 
@@ -96,6 +102,20 @@ def case(identifier, source, text, *, group="user_masked", kind="transaction", a
     return row
 
 
+OBSERVED_SOURCES = ("BANKMISR", "BANQUEMISR", "BANQUE_MISR", "HSBC", "QNB", "TELDA", "TRU")
+
+
+def synthetic(identifier, source, text, *, note, **kwargs):
+    """Labelled synthetic base case for a message type with no observed sample; never presented as observed."""
+    if not re.fullmatch(r"(PUBLIC_FORMAT|SYNTHETIC)_[A-Z0-9_]+", source):
+        raise ValueError(f"Synthetic source must be PUBLIC_FORMAT_<bank> or SYNTHETIC_<type>: {source}")
+    if re.sub(r"^(PUBLIC_FORMAT|SYNTHETIC)_", "", source).startswith(OBSERVED_SOURCES):
+        raise ValueError(f"No synthetic alternative format for an observed source: {source}")
+    row = case(identifier, source, text, group="synthetic_coverage", evidence=source, **kwargs)
+    row.update(source_message_id="synthetic-fixture-" + identifier, note="SYNTHETIC: " + note)
+    return row
+
+
 def field_order(text):
     """Declared test permutation of complete fields/clauses, not another observed bank message."""
     if " Your available balance is " in text:
@@ -126,9 +146,10 @@ def family(row, count=3):
     ]
     for name, transform in transforms[:count]:
         clone = dict(row)
-        clone.update(id=row["id"] + "-" + name, source_message_id="masked-fixture-" + row["id"] + "-" + name,
+        clone.update(id=row["id"] + "-" + name, source_message_id=row["source_message_id"] + "-" + name,
                      body=transform(row["body"]), variant=name,
-                     note="Generated " + name + " variation of " + row["id"] + "; not another observed source format.")
+                     note=("SYNTHETIC: " if row["group"] == "synthetic_coverage" else "") +
+                          "Generated " + name + " variation of " + row["id"] + "; not another observed source format.")
         # A single-clause input may have no breakable boundary. Add a line break at its first space instead.
         if clone["body"] == row["body"]:
             clone["body"] = row["body"].replace(" ", "\n", 1)
@@ -226,8 +247,9 @@ for row in rows:
     if row["group"] not in FROZEN:
         row["language"] = measured_language(row)
 
-# No invented substitutes for the still-missing dual-currency, installments, Fawry, wallet top-up,
-# direct InstaPay, Vodafone Cash or Dear Customer/عزيزي العميل purchase examples.
+for row in rows:
+    if row["group"] == "synthetic_coverage":
+        assert row["source"] == row["source_evidence_id"] and row["note"].startswith("SYNTHETIC"), row["id"]
 assert len({r["id"] for r in rows}) == len(rows)
 frozen_original = {r["id"]: r for r in v1 if r["group"] in FROZEN}
 for row in rows:
@@ -243,4 +265,5 @@ print("Measured languages:", dict(Counter(measured_language(r) for r in rows)))
 tx = [r for r in rows if r["expected_type"] == "transaction"]
 print("Transaction currencies:", dict(Counter(r["expected_currency"] for r in tx)))
 print("Language ratios are measured from message words, excluding URLs, date tokens, ISO currency codes and masked xxx accounts; preserved v1 labels are not quota evidence.")
-print("NOT APPROVED: missing-source and distribution gates must be reported by the v2 audit.")
+print("Evidence groups:", dict(Counter(r["group"] for r in rows if r["group"] in {"user_masked", "public_documented", "synthetic_coverage"})))
+print("NOT APPROVED: message-type coverage and distribution gates are reported by the v2 audit.")
