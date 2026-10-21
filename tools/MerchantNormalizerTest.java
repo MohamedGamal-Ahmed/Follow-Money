@@ -20,7 +20,7 @@ public final class MerchantNormalizerTest {
         {"p011", "عمر علي"}, {"p097", "\"سعودى\""}, {"p098", "KASHIER*BUTLERS"}, {"p101", "FAWRY*BLUE BAKERY EGYPT"},
         {"p102", "SQ *LUNA CAFE EG"}, {"p103", "PAYPAL *ORBIT LABS CAIRO"}, {"p104", "GEIDEA*GREEN LEAF EGYPT"},
         {"p107", "\"مَكْتَبَة النُّور\""}, {"p110", "إي\u0640كيا"}, {"p112", "متجر الهدى"}, {"p113", "مكتبة أمان"},
-        {"p116", "Paper Moon"}, {"p117", "Butler's & Co.! EG"}, {"p118", "Studio 54"}, {"p119", "CAIRO BOOKS"},
+        {"p105", "KASHIER*Butlers Branch 12"}, {"p106", "Butlers BR 009"}, {"p116", "Paper Moon"}, {"p117", "Butler's & Co.! EG"}, {"p118", "Studio 54"}, {"p119", "CAIRO BOOKS"},
         {"p120", "PAYPAL"}, {"p129", "بوتلرز"}, {"p134", "Mona Ali"}, {"p145", "أحمد علي"}, {"p147", "salma@newbank"},
         {"p148", "omar@unknownwallet"}, {"p149", "ATM RIVER"}, {"p152", "NOVA BUILD"}, {"p153", "منى سامي"},
         {"p159", "BLUE BAKERY"}, {"pub-cib-ar", "SAMPLE COFFEE STORE"}, {"pub-cib-refund", "SAMPLE CLOUD"},

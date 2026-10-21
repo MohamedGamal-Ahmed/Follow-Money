@@ -119,10 +119,137 @@ public final class ShadowComparison {
         return out;
     }
 
+    static TransactionExtractor.Extraction extract(ParserCorpusFixture.Row row) {
+        MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(MessageNormalizerTest.raw(row));
+        return TransactionExtractor.extract(normalized, MessageClassifier.classify(normalized), Long.parseLong(row.get("received_at_ms")));
+    }
+
+    static String str(Object value) { return value == null ? null : String.valueOf(value); }
+
+    /** Secondary fields: {label, expected column, compare only when expected is non-null?}. */
+    static final String[][] SECONDARY = {
+        {"balance", "expected_balance_minor", "all"}, {"balance currency", "expected_balance_currency", "all"},
+        {"fee", "expected_fee_minor", "v2"}, {"credit limit", "expected_credit_limit_minor", "v2"},
+        {"original amount", "expected_original_amount_minor", "v2"}, {"original currency", "expected_original_currency", "v2"},
+        {"card last4", "expected_card_last4", "all"}, {"account last4", "expected_account_last4", "v2"},
+        {"counterparty", "expected_counterparty_token", "nonnull"}, {"bank datetime", "expected_datetime", "all"},
+        {"time precision", "expected_time_precision", "all"}, {"time ambiguity", "expected_time_ambiguity", "v2"},
+        {"year origin", "expected_year_origin", "v2"}, {"expiry date", "expected_expiry_date", "v2"},
+        {"accounting effect (expense_offset)", "expected_accounting_effect", "offset"},
+    };
+
+    static String secondary(TransactionExtractor.Extraction x, String column) {
+        switch (column) {
+            case "expected_balance_minor": return str(x.balanceMinor);
+            case "expected_balance_currency": return x.balanceCurrency;
+            case "expected_fee_minor": return str(x.feeMinor);
+            case "expected_credit_limit_minor": return str(x.creditLimitMinor);
+            case "expected_original_amount_minor": return str(x.originalMinor);
+            case "expected_original_currency": return x.originalCurrency;
+            case "expected_card_last4": return x.cardLast4;
+            case "expected_account_last4": return x.accountLast4;
+            case "expected_counterparty_token": return x.counterparty;
+            case "expected_datetime": return x.datetime;
+            case "expected_time_precision": return x.timePrecision;
+            case "expected_time_ambiguity": return x.timeAmbiguity;
+            case "expected_year_origin": return x.yearOrigin;
+            case "expected_expiry_date": return x.expiryDate;
+            default: return x.accountingEffect;
+        }
+    }
+
+    /** Phase 3: exact decision plus principal fields; secondary fields new-vs-expected. */
+    static List<String> extraction(List<ParserCorpusFixture.Row> rows) {
+        int both = 0, newOnly = 0, legacyOnly = 0, neither = 0, newDecision = 0, legacyDecision = 0, legacyStructural = 0;
+        String[] core = {"amount", "currency", "direction", "merchant"};
+        int[] coreCompared = new int[4], coreNew = new int[4], coreLegacy = new int[4];
+        int[][] secondary = new int[SECONDARY.length][2];
+        List<String> table = new ArrayList<>(), misses = new ArrayList<>();
+        for (ParserCorpusFixture.Row row : rows) {
+            Legacy old = legacy(row);
+            TransactionExtractor.Extraction now = extract(row);
+            String expected = expectedDecision(row);
+            boolean transaction = "transaction".equals(row.get("expected_type"));
+            if (expected.equals("REVIEW") || expected.equals("UNUNDERSTOOD")) legacyStructural++;
+            String[] want = {row.get("expected_amount_minor"), row.get("expected_currency"), row.get("expected_direction"), row.get("expected_merchant_key")};
+            String[] got = {str(now.amountMinor), now.currency, now.direction, now.merchantKey};
+            String[] had = {"AUTO".equals(old.decision) ? str(old.amount) : null, "AUTO".equals(old.decision) ? old.currency : null,
+                    "AUTO".equals(old.decision) ? old.direction : null, "AUTO".equals(old.decision) ? MerchantNormalizer.key(old.merchant) : null};
+            boolean newFields = true, legacyFields = true;
+            List<String> diffs = new ArrayList<>();
+            if (transaction) for (int k = 0; k < 4; k++) {
+                coreCompared[k]++;
+                if (Objects.equals(got[k], want[k])) coreNew[k]++; else { newFields = false; diffs.add(core[k] + " " + got[k] + "≠" + want[k]); }
+                if (Objects.equals(had[k], want[k])) coreLegacy[k]++; else legacyFields = false;
+            }
+            // Paired-context rows list context-level reasons; a standalone result is not asked for them.
+            if (transaction && !expected.equals("UNUNDERSTOOD") && row.get("expected_standalone_decision") == null) {
+                for (String reason : row.get("required_reasons").split("\\|"))
+                    if (!now.reasons.contains(reason)) diffs.add("missing reason " + reason);
+            }
+            for (int s = 0; s < SECONDARY.length; s++) {
+                String column = SECONDARY[s][1], mode = SECONDARY[s][2], value = row.get(column);
+                if (!transaction) continue;
+                if (mode.equals("v2") && "legacy-v1".equals(row.get("source_evidence_id"))) continue;
+                if (mode.equals("nonnull") && value == null) continue;
+                if (mode.equals("offset") && !"expense_offset".equals(value)) continue;
+                secondary[s][0]++;
+                if (Objects.equals(secondary(now, column), value)) secondary[s][1]++;
+                else diffs.add(SECONDARY[s][0] + " " + secondary(now, column) + "≠" + value);
+            }
+            boolean newRight = now.decision.equals(expected) && newFields;
+            boolean legacyRight = old.decision.equals(expected) && legacyFields;
+            if (now.decision.equals(expected)) newDecision++;
+            if (old.decision.equals(expected)) legacyDecision++;
+            if (legacyRight && newRight) both++; else if (newRight) newOnly++; else if (legacyRight) legacyOnly++; else neither++;
+            table.add("| " + row.get("id") + " | " + expected + " | " + old.decision + " | " + now.decision + " | " +
+                    (legacyRight ? "✓" : "✗") + " | " + (newRight ? "✓" : "✗") + " | " + cell(String.join("; ", diffs)) + " |");
+            if (!newRight || !diffs.isEmpty())
+                misses.add("| " + row.get("id") + " | " + expected + " | " + now.decision + " | " + cell(String.join("; ", diffs)) + " |");
+        }
+        List<String> out = new ArrayList<>();
+        out.add("Rows: " + rows.size() + ". A row is correct when the decision equals the expected (standalone) decision and, for " +
+                "transaction rows, amount, currency, direction and merchant key all equal the expectation (null included). Legacy can " +
+                "only output AUTO or IGNORE, so it cannot be right on the " + legacyStructural + " rows expecting REVIEW or UNUNDERSTOOD.");
+        out.add("");
+        out.add("| Outcome | Rows |");
+        out.add("| --- | ---: |");
+        out.add("| Both correct | " + both + " |");
+        out.add("| **New correct, legacy wrong** | " + newOnly + " |");
+        out.add("| **Legacy correct, new wrong** | " + legacyOnly + " |");
+        out.add("| Both wrong | " + neither + " |");
+        out.add("| Decision only: new / legacy equal to expected | " + newDecision + " / " + legacyDecision + " |");
+        out.add("");
+        out.add("### Principal fields on transaction rows (" + coreCompared[0] + " rows)");
+        out.add("");
+        out.add("| Field | New correct | Legacy correct |");
+        out.add("| --- | ---: | ---: |");
+        for (int k = 0; k < 4; k++) out.add("| " + core[k] + " | " + coreNew[k] + " | " + coreLegacy[k] + " |");
+        out.add("");
+        out.add("### Secondary fields, new vs expected (transaction rows; v2-only columns skip retained v1 rows)");
+        out.add("");
+        out.add("| Field | Compared | New correct |");
+        out.add("| --- | ---: | ---: |");
+        for (int s = 0; s < SECONDARY.length; s++) out.add("| " + SECONDARY[s][0] + " | " + secondary[s][0] + " | " + secondary[s][1] + " |");
+        out.add("");
+        out.add("### Rows where the new stages differ from the expectation (" + misses.size() + ")");
+        out.add("");
+        out.add("| Row | Expected decision | New decision | Differences (new≠expected) |");
+        out.add("| --- | --- | --- | --- |");
+        out.addAll(misses);
+        out.add("");
+        out.add("### Every corpus row");
+        out.add("");
+        out.add("| Row | Expected | Legacy | New | Legacy | New | New differences |");
+        out.add("| --- | --- | --- | --- | :-: | :-: | --- |");
+        out.addAll(table);
+        return out;
+    }
+
     public static void main(String[] args) throws Exception {
         String phase = args.length == 0 ? "classification" : args[0];
         List<ParserCorpusFixture.Row> rows = ParserCorpusFixture.readV2(Path.of("tools/fixtures/parser-corpus-v2-draft.tsv"));
-        List<String> body = phase.equals("classification") ? classification(rows) : null;
+        List<String> body = phase.equals("classification") ? classification(rows) : phase.equals("extraction") ? extraction(rows) : null;
         Objects.requireNonNull(body, "Unknown phase " + phase);
         List<String> page = new ArrayList<>();
         page.add("# Shadow comparison: " + phase);
@@ -136,7 +263,7 @@ public final class ShadowComparison {
         page.add("");
         page.addAll(body);
         Path report = Path.of("tools/fixtures/shadow-comparison-" + phase + ".md");
-        Files.write(report, page, StandardCharsets.UTF_8);
+        Files.writeString(report, String.join("\n", page) + "\n", StandardCharsets.UTF_8);
         for (String line : body.subList(0, 9)) System.out.println(line);
         System.out.println("Full table: " + report);
     }

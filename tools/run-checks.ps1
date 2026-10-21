@@ -11,9 +11,9 @@ try {
     $out = '.tmp/qa-jvm'
     New-Item -ItemType Directory -Force $out | Out-Null
     $src = 'app/src/main/java/com/mohamedgamal/masareef'
-    $files = @('ExpenseParser','CaptureNotice','MerchantClassifier','NavigationState','TransactionJourney','DailyPoints','CsvImport','BudgetPeriod','SourceIdentity','CaptureIdentity','BalanceTimeline','CommitmentHint','MoneyTotals','SmsPreview','SmsParts','BrandCatalog','DailyAllowance','MoneyFlow','AccountMovement','RepairRules','Insights','MonthlyReport','BackupVault','Redaction','WhatsNew','ParsingPolicy','MessageNormalizer','MerchantNormalizer','MerchantCatalogIndex','ParserShadow','AmountScanner','MessageClassifier') | ForEach-Object { "$src/$_.java" }
+    $files = @('ExpenseParser','CaptureNotice','MerchantClassifier','NavigationState','TransactionJourney','DailyPoints','CsvImport','BudgetPeriod','SourceIdentity','CaptureIdentity','BalanceTimeline','CommitmentHint','MoneyTotals','SmsPreview','SmsParts','BrandCatalog','DailyAllowance','MoneyFlow','AccountMovement','RepairRules','Insights','MonthlyReport','BackupVault','Redaction','WhatsNew','ParsingPolicy','MessageNormalizer','MerchantNormalizer','MerchantCatalogIndex','ParserShadow','AmountScanner','MessageClassifier','TransactionExtractor') | ForEach-Object { "$src/$_.java" }
     $tests = @('CaptureNoticeTest','ParserSmokeTest','TeldaCaptureTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','BalanceTimelineSmokeTest','CommitmentHintSmokeTest','PhaseOneLogicTest','MoneyFlowTest','RepairRulesTest','InsightsTest','MerchantClassificationTest','MonthlyReportTest','JourneyLogicTest','DailyPointsTest','AuditStructureTest','ManualAmountTest','BackupVaultTest','RedactionTest','WhatsNewTest') | ForEach-Object { "tools/$_.java" }
-    $tests += @('tools/ParserCorpusFixture.java','tools/ParserCorpusTest.java','tools/MessageShapeTest.java','tools/ParserCorpusV2Test.java','tools/MessageNormalizerTest.java','tools/MerchantNormalizerTest.java','tools/ParserShadowTest.java','tools/MessageClassifierTest.java','tools/ShadowComparison.java')
+    $tests += @('tools/ParserCorpusFixture.java','tools/ParserCorpusTest.java','tools/MessageShapeTest.java','tools/ParserCorpusV2Test.java','tools/MessageNormalizerTest.java','tools/MerchantNormalizerTest.java','tools/ParserShadowTest.java','tools/MessageClassifierTest.java','tools/ShadowComparison.java','tools/TransactionExtractorTest.java')
     & "$env:JAVA_HOME/bin/javac$suffix" -encoding UTF-8 -d $out @files @tests
     if ($LASTEXITCODE -ne 0) { throw 'JVM compilation failed' }
     foreach ($class in @('com.mohamedgamal.masareef.CaptureNoticeTest','ParserSmokeTest','com.mohamedgamal.masareef.TeldaCaptureTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','com.mohamedgamal.masareef.BalanceTimelineSmokeTest','com.mohamedgamal.masareef.CommitmentHintSmokeTest','com.mohamedgamal.masareef.PhaseOneLogicTest','com.mohamedgamal.masareef.MoneyFlowTest','com.mohamedgamal.masareef.RepairRulesTest','com.mohamedgamal.masareef.InsightsTest','com.mohamedgamal.masareef.MerchantClassificationTest','com.mohamedgamal.masareef.MonthlyReportTest','com.mohamedgamal.masareef.JourneyLogicTest','com.mohamedgamal.masareef.DailyPointsTest','AuditStructureTest','com.mohamedgamal.masareef.ManualAmountTest','com.mohamedgamal.masareef.BackupVaultTest','com.mohamedgamal.masareef.RedactionTest','com.mohamedgamal.masareef.WhatsNewTest')) {
@@ -34,6 +34,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Parser shadow checks failed' }
     & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.MessageClassifierTest
     if ($LASTEXITCODE -ne 0) { throw 'Message classification checks failed' }
+    & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.TransactionExtractorTest
+    if ($LASTEXITCODE -ne 0) { throw 'Transaction extraction checks failed' }
     & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.ShadowComparison classification
     if ($LASTEXITCODE -ne 0) { throw 'Shadow comparison (classification) failed' }
     $wrapper = if ($windowsHost) { './gradlew.bat' } else { './gradlew' }

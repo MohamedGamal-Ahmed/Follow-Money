@@ -52,12 +52,12 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
                 String text = Files.readString(file, StandardCharsets.UTF_8).replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//[^\\n]*", "");
-                boolean uses = text.matches("(?s).*\\b(ParserShadow|MessageNormalizer|MerchantNormalizer|MerchantCatalogIndex|ParsingPolicy|AmountScanner|MessageClassifier)\\b.*");
+                boolean uses = text.matches("(?s).*\\b(ParserShadow|MessageNormalizer|MerchantNormalizer|MerchantCatalogIndex|ParsingPolicy|AmountScanner|MessageClassifier|TransactionExtractor)\\b.*");
                 check(!uses || allowed.contains(name), "Production class uses the shadow pipeline: " + name);
             }
         }
@@ -65,7 +65,7 @@ public final class ParserShadowTest {
         check(capture.matches("(?s).*try \\{\\s*ParserShadow\\.observe\\(.*catch \\(RuntimeException \\| LinkageError.*"), "Shadow call is isolated");
         check(!capture.matches("(?s).*=\\s*ParserShadow\\.observe.*"), "Shadow result is never used by capture");
         String db = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
-        check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner)\\b.*"), "Ledger storage never reads shadow output");
+        check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner|TransactionExtractor)\\b.*"), "Ledger storage never reads shadow output");
 
         ParserShadow.clear();
         System.out.println("Parser shadow checks passed: " + checks + " (" + rows.size() + " corpus rows observed; legacy remains the only ledger authority).");

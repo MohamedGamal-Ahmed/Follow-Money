@@ -6,7 +6,7 @@ package com.mohamedgamal.masareef;
  * The pipeline runs in shadow mode only: the legacy ExpenseParser path remains the sole ledger authority.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-21.2";
+    static final String POLICY_VERSION = "2026-10-21.3";
     static final String NORMALIZER_VERSION = "normalization-1";
     static final String CLASSIFIER_VERSION = "classification-1";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
@@ -36,6 +36,10 @@ final class ParsingPolicy {
      * Arabic place names are excluded: they are usually part of the name itself (بنك مصر, جامعة القاهرة).
      */
     static final String[] TRAILING_LOCATIONS = {"EG", "EGY", "EGYPT", "CAIRO", "GIZA", "ALEXANDRIA"};
+    /** A trailing branch descriptor with its number ("Branch 12", "BR 009", "فرع 3"); the number alone is never removed. */
+    static final String TRAILING_BRANCH = "\\s+(?:branch|br|فرع)\\s*\\d+$";
+    /** A final English "at hh:mm" with no AM/PM and an hour of 1-12 is treated as a cut-off 12-hour time. */
+    static final String TRUNCATED_CLOCK = "\\bat\\s+$";
 
     // Catalog lookup: exact, then branch prefix, then conservative fuzzy.
     /** A known alias accepts a following branch/location suffix only from this length. */
@@ -89,6 +93,37 @@ final class ParsingPolicy {
     static final String MERCHANT_MARKER = "\\bat\\b|@|لدي|عند";
     /** Clause boundaries for counting events: sentence punctuation (not decimals), Arabic comma, "and", و before تم. */
     static final String CLAUSE_BOUNDARY = "(?<!\\d)[.](?!\\d)|[.](?=\\s)|[!?;؛،]|\\band\\b|(?<!\\p{L})و(?=تم)";
+
+    // Extraction vocabulary, matched against length-preserving folded text (lower case; أإآٱ->ا, ؤ->و, ئ->ي, ى->ي, ة->ه).
+    static final String EXTRACTOR_VERSION = "extraction-1";
+    /** How far before an amount a role word (balance, fee, limit, equivalent) may sit inside the same clause. */
+    static final int ROLE_WINDOW_CHARS = 30;
+    static final String ROLE_BALANCE = "balance|available|رصيد|المتاح";
+    static final String ROLE_LIMIT = "\\blimit\\b|الحد المتاح";
+    static final String ROLE_FEE = "\\bfees?\\b|رسوم|عموله|commission";
+    static final String ROLE_EQUIVALENT_BEFORE = "ما يعادل|يعادل|equivalent (?:to|of)";
+    static final String ROLE_EQUIVALENT_AFTER = "^\\s*\\)?\\s*equivalent";
+    /** A principal marker after a role word means the amount is the principal ("شحن رصيد اتصالات بقيمة 50"). */
+    static final String PRINCIPAL_MARKER = "بقيمه|بمبلغ|مبلغ|\\bof\\b";
+    static final String CREDIT_CARD = "credit card|بطاقه الايتمان|بطاقه ايتمان|كارت ايتمان";
+    /** Direction words. Arabic verbs need a standalone تم/تمت; English needs past or completion forms. */
+    static final String DIRECTION_IN = "(?<!\\p{L})(?:تم|تمت)\\s+(?:ايداع|اضافه|استلام|رد|عكس|اعاده)|اعاده المبلغ|تم\\s+شحن\\s+(?:محفظتك|المحفظه|حسابك)|" +
+            "\\b(?:credited|received|deposited|refunded|refund|reversal|inward)\\b|credited back";
+    static final String DIRECTION_OUT = "(?<!\\p{L})(?:تم|تمت)\\s+(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|ارسال|شحن\\s+رصيد)|" +
+            "\\b(?:paid|purchased|debited|charged|withdrawn|sent|transferred|outward)\\b|\\bcash withdrawal\\b|\\bpayment of\\b|\\btransfer of\\b|" +
+            "\\bpayment (?:completed|successful)\\b";
+    /** Purchase wording where a merchant is expected; transfers, cash, installments, bills and refunds are excluded. */
+    static final String PURCHASE = "(?<!\\p{L})تم\\s+(?:دفع|شراء|خصم)|\\b(?:paid|purchased|charged)\\b";
+    static final String NOT_A_PURCHASE = "تحويل|transfer|سحب|withdraw|قسط|installment|فاتوره|\\bbill\\b|refund|reversal|عكس|اعاده|محفظه|wallet|instapay|ipn";
+    static final String QUOTED_MERCHANT = "[\"“«]([^\"”»\\n]{1,60})[\"”»]";
+    static final String MERCHANT_MARKER_STRONG = "\\bat\\b|@(?=\\s)|(?<!\\p{L})(?:لدي|عند)";
+    static final String MERCHANT_MARKER_PARTY = "\\bfrom\\b|\\bto\\b|(?<!\\p{L})(?:من|الي)(?!\\p{L})|(?<!\\p{L})ل(?= )";
+    static final String MERCHANT_BILL = "فاتوره (\\p{L}+)|\\bfor (\\p{L}+) (?:mobile |internet |landline |electricity )?bill\\b|شحن رصيد (\\p{L}+)";
+    static final String MERCHANT_STOP = "\\s+(?:on|with|for|using|via|ref|card|has|have|was|were|is|been|completed|تم|تمت|يوم|بتاريخ|في|فى|من|عبر|عن|رقم|بطاقه|باستخدام|المتاح|الرصيد|الساعه)(?!\\p{L})|[.,;،؛:!?()\\n]|\\s+\\d|يوم(?=\\d)";
+    static final String MERCHANT_GENERIC = "^(?:حساب|حسابك|حسابكم|بطاقه|بطاقتك|بطاقتكم|كارت|محفظه|محفظتك|رقم|ماكينه|account|card|wallet|your|the|you)(?!\\p{L})";
+    static final int MERCHANT_MAX_CHARS = 40;
+    static final String INTERNAL_TRANSFER = "(?:الي|to) (?:كارت|بطاقه|credit card|prepaid)|تم شحن (?:محفظتك|المحفظه)|top.?up (?:your )?wallet";
+    static final String EXPIRY = "صالح حتي|valid until|expires?(?: on)?|تنتهي في";
 
     // Later stages: defined by the approved corpus, not yet used by any implemented stage.
     /** Identity-less identical messages within this window become possible-duplicate review items. */

@@ -24,6 +24,8 @@ final class MerchantNormalizer {
         if (stripped.equals(value)) stripped = BARE.matcher(value).replaceFirst("");
         String folded = MessageNormalizer.fold(stripped).replaceAll("[^\\p{L}\\p{N}]+", " ").trim();
         if (folded.isEmpty()) return "";
+        String withoutBranch = folded.replaceFirst("(?iu)" + ParsingPolicy.TRAILING_BRANCH, "");
+        if (!withoutBranch.isEmpty()) folded = withoutBranch;
         List<String> tokens = new ArrayList<>(Arrays.asList(folded.split(" ")));
         // Only from the end, and never the whole name: CAIRO BOOKS keeps CAIRO; a lone "EGYPT" stays.
         while (tokens.size() > 1 && trailingLocation(tokens.get(tokens.size() - 1))) tokens.remove(tokens.size() - 1);
