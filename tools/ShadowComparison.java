@@ -246,6 +246,8 @@ public final class ShadowComparison {
         return out;
     }
 
+    static final String[] HELD_OUT_SETS = {"tools/fixtures/held-out-blind.tsv", "tools/fixtures/held-out-blind-2.tsv"};
+
     static ConfidenceScorer.Confidence confidence(MessageNormalizer.Raw raw, long receivedAt, TransactionExtractor.Extraction[] phase3) {
         MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);
         MessageClassifier.Result classified = MessageClassifier.classify(normalized);
@@ -298,21 +300,29 @@ public final class ShadowComparison {
             table.add("| " + row.get("id") + " | " + want + " | " + old.decision + " | " + x[0].decision + " | " + c.decision + " | " +
                     (c.components.isEmpty() ? "–" : String.valueOf(c.score)) + " | " + (legacyRight ? "✓" : "✗") + " | " + (newRight ? "✓" : "✗") + " |");
         }
-        // Held-out blind set: decisions only (its own fields are gated by HeldOutBlind).
-        java.util.Map<String, Integer> hExpected = new java.util.TreeMap<>(), hP3 = new java.util.TreeMap<>(), hP4 = new java.util.TreeMap<>(), hBuckets = new java.util.TreeMap<>();
-        List<String> heldChanges = new ArrayList<>();
-        int heldRight = 0;
+        // Held-out blind sets: decisions only (their own fields are gated by HeldOutBlind).
+        List<String> heldSections = new ArrayList<>(), heldChanges = new ArrayList<>();
         long blindReceived = java.time.LocalDateTime.of(2026, 10, 22, 12, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
-        List<java.util.Map<String, String>> held = HeldOutBlind.read(Path.of("tools/fixtures/held-out-blind.tsv"));
-        for (java.util.Map<String, String> h : held) {
-            MessageNormalizer.Raw raw = "sms".equals(h.get("channel")) ? MessageNormalizer.Raw.sms("held-out", h.get("body")) :
-                    MessageNormalizer.Raw.notification("held-out", 0, h.get("android.title"), h.get("android.text"), null, h.get("android.textLines"), null, null);
-            TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
-            ConfidenceScorer.Confidence c = confidence(raw, blindReceived, x);
-            hExpected.merge(h.get("expected_decision"), 1, Integer::sum); hP3.merge(x[0].decision, 1, Integer::sum);
-            hP4.merge(c.decision, 1, Integer::sum); hBuckets.merge(bucket(c), 1, Integer::sum);
-            if (c.decision.equals(h.get("expected_decision"))) heldRight++;
-            if (!c.decision.equals(x[0].decision)) heldChanges.add("| " + h.get("id") + " | " + x[0].decision + " | " + c.decision + " | " + c.score + " |");
+        for (String file : HELD_OUT_SETS) {
+            java.util.Map<String, Integer> hExpected = new java.util.TreeMap<>(), hP3 = new java.util.TreeMap<>(), hP4 = new java.util.TreeMap<>(), hBuckets = new java.util.TreeMap<>();
+            int heldRight = 0;
+            List<java.util.Map<String, String>> held = HeldOutBlind.read(Path.of(file));
+            for (java.util.Map<String, String> h : held) {
+                MessageNormalizer.Raw raw = "sms".equals(h.get("channel")) ? MessageNormalizer.Raw.sms("held-out", h.get("body")) :
+                        MessageNormalizer.Raw.notification("held-out", 0, h.get("android.title"), h.get("android.text"), h.get("android.bigText"), h.get("android.textLines"), null, null);
+                TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
+                ConfidenceScorer.Confidence c = confidence(raw, blindReceived, x);
+                hExpected.merge(h.get("expected_decision"), 1, Integer::sum); hP3.merge(x[0].decision, 1, Integer::sum);
+                hP4.merge(c.decision, 1, Integer::sum); hBuckets.merge(bucket(c), 1, Integer::sum);
+                if (c.decision.equals(h.get("expected_decision"))) heldRight++;
+                if (!c.decision.equals(x[0].decision)) heldChanges.add("| " + h.get("id") + " | " + x[0].decision + " | " + c.decision + " | " + c.score + " | " + cell(String.join(",", c.reasons)) + " |");
+            }
+            heldSections.add("### Decision distribution, " + Path.of(file).getFileName() + " (" + held.size() + " messages)");
+            heldSections.add("");
+            distribution(heldSections, "Decision", new String[]{"Expected", "Phase 3 (rules)", "Phase 4 (scored)"}, List.of(hExpected, hP3, hP4));
+            heldSections.add("");
+            heldSections.add("Phase 4 decisions equal to expected: " + heldRight + " / " + held.size() + ". Score buckets: " + hBuckets + ".");
+            heldSections.add("");
         }
         List<String> out = new ArrayList<>();
         out.add("Score = event " + ParsingPolicy.SCORE_EVENT_EXPLICIT + " (card+merchant context only " + ParsingPolicy.SCORE_EVENT_CONTEXT + ") + amount " +
@@ -335,17 +345,12 @@ public final class ShadowComparison {
         out.add("");
         out.add("Phase 4 score buckets (corpus): " + buckets + ".");
         out.add("");
-        out.add("### Decision distribution, held-out blind set (" + held.size() + " messages)");
-        out.add("");
-        distribution(out, "Decision", new String[]{"Expected", "Phase 3 (rules)", "Phase 4 (scored)"}, List.of(hExpected, hP3, hP4));
-        out.add("");
-        out.add("Phase 4 held-out decisions equal to expected: " + heldRight + " / " + held.size() + ". Score buckets: " + hBuckets + ".");
-        out.add("");
+        out.addAll(heldSections);
         out.add("### Decisions that changed from phase 3 to phase 4");
         out.add("");
         out.add("Corpus: " + changes.size() + ". Held-out: " + heldChanges.size() + ".");
         if (!changes.isEmpty()) { out.add(""); out.add("| Row | Phase 3 | Phase 4 | Score | Components |"); out.add("| --- | --- | --- | ---: | --- |"); out.addAll(changes); }
-        if (!heldChanges.isEmpty()) { out.add(""); out.add("| Held-out | Phase 3 | Phase 4 | Score |"); out.add("| --- | --- | --- | ---: |"); out.addAll(heldChanges); }
+        if (!heldChanges.isEmpty()) { out.add(""); out.add("| Held-out | Phase 3 | Phase 4 | Score | Reasons |"); out.add("| --- | --- | --- | ---: | --- |"); out.addAll(heldChanges); }
         out.add("");
         out.add("### Rows where phase 4 differs from the expectation (" + misses.size() + ")");
         if (!misses.isEmpty()) { out.add(""); out.add("| Row | Expected | Phase 4 | Score |"); out.add("| --- | --- | --- | ---: |"); out.addAll(misses); }

@@ -70,7 +70,28 @@ public final class ConfidenceScorerTest {
             TransactionExtractor.Extraction capped = full(); capped.reasons.add(cap);
             same(ConfidenceScorer.score(transaction("COMPLETED_EVENT"), capped).decision, "REVIEW", "Review cap " + cap);
         }
-        MessageClassifier.Result ignored = new MessageClassifier.Result(MessageClassifier.Type.PROMO, MessageClassifier.Decision.IGNORE, Set.of("PROMOTIONAL_MESSAGE"), 0);
+        // Safety rules (22 Oct 2026), probed with fresh messages rather than blind-set text.
+        String[][] safety = {
+            {"Paid EGP 100.00 at NILE SHOP. EGP 40.00 extra charge applied.", "REVIEW", "UNASSIGNED_SECOND_AMOUNT"},
+            {"تم دفع 50 جنيه لدى مطعم الشروق و 30 جنيه لدى صيدلية الحياة", "UNUNDERSTOOD", "MULTIPLE_EVENTS"},
+            {"Transfer of EGP 300.00 to your savings account completed.", "REVIEW", "POSSIBLE_INTERNAL_TRANSFER"},
+            {"تم تحويل 700 جنيه إلى حسابكم الآخر المنتهي بـ 4411", "REVIEW", "POSSIBLE_INTERNAL_TRANSFER"},
+            {"Your card was charged USD 5.00 (EUR 4.60) at BOOK HOUSE.", "AUTO", "AMOUNT_UNAMBIGUOUS"},
+            {"تم إيداع مكافأة 200 جنيه في محفظتك، صالحة للاستخدام حتى 15/12/2026", "REVIEW", "EXPIRING_CREDIT"},
+            {"Your debit card was used at CAFE ONE for EGP 35.00.", "AUTO", "DIRECTION_OUT"},
+            {"Paid EGP 80.00 at CAFE ONE. A service fee of EGP 2.00 will be charged next month.", "AUTO", "AMOUNT_UNAMBIGUOUS"},
+        };
+        for (String[] probe : safety) {
+            ConfidenceScorer.Confidence c = ShadowComparison.confidence(MessageNormalizer.Raw.sms("probe", probe[0]), received, new TransactionExtractor.Extraction[1]);
+            same(c.decision, probe[1], "Safety probe decision: " + probe[0] + " " + c.reasons);
+            check(c.reasons.contains(probe[2]), "Safety probe reason " + probe[2] + ": " + probe[0] + " " + c.reasons);
+        }
+        TransactionExtractor.Extraction[] paren = new TransactionExtractor.Extraction[1];
+        ShadowComparison.confidence(MessageNormalizer.Raw.sms("probe", safety[4][0]), received, paren);
+        same(paren[0].currency + " " + paren[0].amountMinor + " / " + paren[0].originalCurrency + " " + paren[0].originalMinor, "EUR 460 / USD 500",
+                "Parenthesized different-currency amount is the equivalent");
+
+        MessageClassifier.Result ignored =new MessageClassifier.Result(MessageClassifier.Type.PROMO, MessageClassifier.Decision.IGNORE, Set.of("PROMOTIONAL_MESSAGE"), 0);
         same(ConfidenceScorer.score(ignored, new TransactionExtractor.Extraction()).decision, "IGNORE", "Classification IGNORE passes through unscored");
 
         System.out.println("Confidence checks passed: " + checks + " (" + rows.size() + " corpus rows, 25 held-out, " + changed +

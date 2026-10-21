@@ -42,6 +42,7 @@ final class MessageClassifier {
     private static final Pattern CARD = compile(ParsingPolicy.CARD_CONTEXT);
     private static final Pattern MERCHANT_MARKER = compile(ParsingPolicy.MERCHANT_MARKER);
     private static final Pattern CLAUSE = compile(ParsingPolicy.CLAUSE_BOUNDARY);
+    private static final Pattern AMOUNT_ROLE_WORD = compile(ParsingPolicy.CLAUSE_AMOUNT_ROLE_WORD);
 
     static Result classify(MessageNormalizer.Normalized message) {
         Set<String> reasons = new LinkedHashSet<>();
@@ -57,14 +58,19 @@ final class MessageClassifier {
         int events = 0;
         boolean signed = false, refund = REFUND.matcher(text).find();
         // One event per clause that pairs an amount with a completed verb, a refund, or a signed (+/-) amount.
+        int elided = 0;
         for (String clause : clauses(text)) {
             java.util.List<AmountScanner.Money> amounts = AmountScanner.scan(clause);
-            if (amounts.isEmpty() || CONDITIONAL.matcher(clause).find()) continue;
+            // Conditional or future clauses ("will be charged next month") never describe a completed event.
+            if (amounts.isEmpty() || CONDITIONAL.matcher(clause).find() || FUTURE.matcher(clause).find()) continue;
             boolean clauseSigned = false;
             for (AmountScanner.Money money : amounts) clauseSigned |= money.trailingSign != 0;
             signed |= clauseSigned;
             if (clauseSigned || COMPLETED.matcher(clause).find() || REFUND.matcher(clause).find()) events++;
+            else if (MERCHANT_MARKER.matcher(clause).find() && !AMOUNT_ROLE_WORD.matcher(clause).find()) elided++;
         }
+        // Safety rule: after one completed event, a further "amount at merchant" clause is a second event, never ignored.
+        if (events > 0) events += elided;
         boolean completed = events > 0 || COMPLETED_WITHOUT_AMOUNT.matcher(text).find();
         boolean promo = PROMOTION.matcher(text).find();
         if (promo && !completed) return result(Type.PROMO, reasons, 0, "PROMOTIONAL_MESSAGE");

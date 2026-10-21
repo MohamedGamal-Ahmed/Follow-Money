@@ -57,7 +57,7 @@ final class TransactionExtractor {
         }
     }
 
-    private enum Role { PRINCIPAL, BALANCE, LIMIT, FEE, EQUIVALENT, FUTURE }
+    private enum Role { PRINCIPAL, BALANCE, LIMIT, FEE, EQUIVALENT, PAREN, TOTAL, FUTURE }
 
     private static final int FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     private static final Pattern BALANCE = Pattern.compile(ParsingPolicy.ROLE_BALANCE, FLAGS);
@@ -65,6 +65,9 @@ final class TransactionExtractor {
     private static final Pattern FEE = Pattern.compile(ParsingPolicy.ROLE_FEE, FLAGS);
     private static final Pattern EQUIVALENT_BEFORE = Pattern.compile(ParsingPolicy.ROLE_EQUIVALENT_BEFORE, FLAGS);
     private static final Pattern EQUIVALENT_AFTER = Pattern.compile(ParsingPolicy.ROLE_EQUIVALENT_AFTER, FLAGS);
+    private static final Pattern EQUIVALENT_PAREN = Pattern.compile(ParsingPolicy.ROLE_EQUIVALENT_PAREN, FLAGS);
+    private static final Pattern TOTAL = Pattern.compile(ParsingPolicy.ROLE_TOTAL, FLAGS);
+    private static final Pattern ATM_PHRASE = Pattern.compile(ParsingPolicy.MERCHANT_ATM_PHRASE, FLAGS);
     private static final Pattern PRINCIPAL_MARKER = Pattern.compile(ParsingPolicy.PRINCIPAL_MARKER, FLAGS);
     private static final Pattern CREDIT_CARD = Pattern.compile(ParsingPolicy.CREDIT_CARD, FLAGS);
     private static final Pattern FUTURE = Pattern.compile(ParsingPolicy.FUTURE_OR_REQUEST, FLAGS);
@@ -127,8 +130,11 @@ final class TransactionExtractor {
         List<AmountScanner.Money> money = AmountScanner.scan(t);
         boolean creditCard = CREDIT_CARD.matcher(t).find();
         AmountScanner.Money principal = null, equivalent = null;
+        List<AmountScanner.Money> unassigned = new ArrayList<>();
         for (AmountScanner.Money m : money) {
             Role role = role(t, m, creditCard);
+            // A parenthesized amount right after the principal is its equivalent only when the currency differs.
+            if (role == Role.PAREN) role = principal != null && equivalent == null && !java.util.Objects.equals(m.currency, principal.currency) ? Role.EQUIVALENT : Role.PRINCIPAL;
             if (role == Role.BALANCE && x.balanceMinor == null && m.minor >= 0) {
                 x.balanceMinor = m.leadingMinus ? -m.minor : m.minor; x.balanceCurrency = m.currency;
             } else if (role == Role.LIMIT && x.creditLimitMinor == null && m.minor >= 0) {
@@ -136,7 +142,7 @@ final class TransactionExtractor {
             } else if (role == Role.FEE && x.feeMinor == null && m.minor >= 0) {
                 x.feeMinor = m.minor; x.feeCurrency = m.currency;
             } else if (role == Role.EQUIVALENT && equivalent == null) equivalent = m;
-            else if (role == Role.PRINCIPAL && principal == null) principal = m;
+            else if (role == Role.PRINCIPAL) { if (principal == null) principal = m; else unassigned.add(m); }
         }
         if (equivalent != null && principal != null && !java.util.Objects.equals(equivalent.currency, principal.currency)) {
             // Owner decision: the account-currency equivalent is what left the account; the foreign amount is shown only.
@@ -145,6 +151,9 @@ final class TransactionExtractor {
         }
         if (x.feeMinor != null) x.reasons.add("EXPLICIT_FEE");
         if (principal == null) { x.reasons.add("MISSING_AMOUNT"); return; }
+        // Safety rule: a second amount in the principal's currency with no role is never silently dropped.
+        for (AmountScanner.Money other : unassigned)
+            if (java.util.Objects.equals(other.currency, principal.currency)) { x.reasons.add("UNASSIGNED_SECOND_AMOUNT"); break; }
         x.currency = principal.currency;
         if (principal.trailingSign == '+') x.direction = "in";
         if (principal.trailingSign == '-') x.direction = "out";
@@ -161,6 +170,10 @@ final class TransactionExtractor {
         String before = t.substring(Math.max(clauseStart, m.start - ParsingPolicy.ROLE_WINDOW_CHARS), m.start);
         String clause = t.substring(clauseStart, clauseEnd(t, m.end));
         if (EQUIVALENT_BEFORE.matcher(before).find() || EQUIVALENT_AFTER.matcher(t.substring(m.end)).find()) return Role.EQUIVALENT;
+        if (EQUIVALENT_PAREN.matcher(before).find()) return Role.PAREN;
+        // An amount in a future or request clause ("a fee of EGP 5 will apply") belongs to no completed event.
+        if (FUTURE.matcher(clause).find()) return Role.FUTURE;
+        if (lastMatchWithoutMarker(TOTAL.matcher(before), before)) return Role.TOTAL;
         Matcher fee = FEE.matcher(before);
         if (lastMatchWithoutMarker(fee, before)) return FUTURE.matcher(clause).find() ? Role.FUTURE : Role.FEE;
         if (lastMatchWithoutMarker(LIMIT.matcher(before), before)) return Role.LIMIT;
@@ -242,7 +255,8 @@ final class TransactionExtractor {
         String value = t.substring(start, end).trim();
         String token = t.substring(start).split("\\s", 2)[0];
         if (value.isEmpty() || !value.matches("(?s).*\\p{L}.*") || value.matches("(?s).*[*#].*|(?s).*\\bx{2,}.*") ||
-                Character.isDigit(value.charAt(0)) || INSTAPAY.matcher(token).find() || GENERIC.matcher(value).find()) return null;
+                Character.isDigit(value.charAt(0)) || INSTAPAY.matcher(token).find() || GENERIC.matcher(value).find() ||
+                ATM_PHRASE.matcher(value).find()) return null;
         // "From HSBC:" is a sender header, not a counterparty.
         if (end < t.length() && t.charAt(end) == ':') return null;
         int lead = t.indexOf(value, start);
@@ -292,7 +306,7 @@ final class TransactionExtractor {
         LocalDate received = Instant.ofEpochMilli(receivedAtMs).atZone(ZoneOffset.UTC).toLocalDate();
         boolean ambiguous = false;
         try { while (d.find()) {
-            String before = t.substring(Math.max(0, d.start() - 15), d.start());
+            String before = t.substring(Math.max(0, d.start() - ParsingPolicy.EXPIRY_WINDOW_CHARS), d.start());
             LocalDate date;
             boolean expiry = EXPIRY.matcher(before).find();
             try {

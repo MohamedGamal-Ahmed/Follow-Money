@@ -6,7 +6,7 @@ package com.mohamedgamal.masareef;
  * The pipeline runs in shadow mode only: the legacy ExpenseParser path remains the sole ledger authority.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-22.1";
+    static final String POLICY_VERSION = "2026-10-22.2";
     static final String NORMALIZER_VERSION = "normalization-1";
     static final String CLASSIFIER_VERSION = "classification-1";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
@@ -75,7 +75,8 @@ final class ParsingPolicy {
             "(?:يرجي|برجاء) (?:دفع|سداد)|طلب سداد|في انتظار موافقتك|" +
             "\\bwill (?:be )?(?:debit|debited|charge|charged|deduct|deducted|processed|paid|transferred|apply)\\b|" +
             "\\bis due\\b|\\bdue (?:on|tomorrow|today|date|before|by)\\b|\\b(?:payment|amount|minimum) due\\b|please pay|" +
-            "\\bscheduled\\b|\\bpending\\b|payment request|accept or decline";
+            "\\bscheduled\\b|\\bpending\\b|payment request|accept or decline|" +
+            "(?<!\\p{L})مستحق(?:ه)? (?:غدا|اليوم|في|بتاريخ|خلال)|تاريخ الاستحقاق|(?<!\\p{L})يستحق";
     static final String UNSUCCESSFUL = "declined|\\bfailed\\b|unsuccessful|could not|insufficient funds|\\bcancel(?:l)?ed\\b|" +
             "تم رفض|رفضت|مرفوض|(?<!\\p{L})لم (?:يتم|تتم)|فشل|تعذر|غير ناجح|تم الغاء";
     /** Money returned to the user: a refund or reversal is a transaction even when it names a cancelled operation. */
@@ -83,7 +84,7 @@ final class ParsingPolicy {
     /** Completed money verbs. Arabic needs a standalone تم/تمت (not سيتم); English needs a past or completion form. */
     static final String COMPLETED_EVENT = "(?<!\\p{L})(?:تم|تمت) (?:الان )?(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|ايداع|اضافه|استلام|ارسال|شحن|عكس|اعاده|رد|استخدام)(?! (?:الاسعار|السعر))|" +
             "\\b(?:paid|purchased|debited|credited|charged|received|transferred|deposited|withdrawn|sent|refunded|reversed)\\b|" +
-            "\\bcash withdrawal\\b|\\bsuccessful(?:ly)?\\b|\\bcompleted\\b|" +
+            "\\bcash withdrawal\\b|\\bsuccessful(?:ly)?\\b|\\bcompleted\\b|\\bwas used (?:for|at)\\b|" +
             // Statement-style movement nouns name a completed transfer ("تحويل صادر 5,000 EGP").
             "تحويل (?:صادر|وارد)|حواله (?:صادره|وارده)|\\b(?:outgoing|incoming) (?:transfer|remittance)\\b";
     /** A completed verb inside a condition ("if you pay", "إذا دفعت") is not an event. */
@@ -93,8 +94,13 @@ final class ParsingPolicy {
     /** Amount followed by a merchant marker, plus a card mention: a terse card alert without a verb. */
     static final String CARD_CONTEXT = "\\bcard\\b|بطاقه|كارت";
     static final String MERCHANT_MARKER = "\\bat\\b|@|لدي|عند";
-    /** Clause boundaries for counting events: sentence punctuation (not decimals), Arabic comma, "and", و before تم. */
-    static final String CLAUSE_BOUNDARY = "(?<!\\d)[.](?!\\d)|[.](?=\\s)|[!?;؛،]|\\band\\b|(?<!\\p{L})و(?=تم)";
+    /** Clause boundaries for counting events: sentence punctuation (not decimals), Arabic comma, "and", و before تم or a number. */
+    static final String CLAUSE_BOUNDARY = "(?<!\\d)[.](?!\\d)|[.](?=\\s)|[!?;؛،]|\\band\\b|(?<!\\p{L})و(?=تم)|(?<!\\p{L})و(?=\\s*\\d)";
+    /**
+     * Safety rule: once a message has one completed event, another clause with its own amount and a merchant marker is a
+     * second event ("Paid EGP 60 at A and EGP 90 at B"), unless a balance/fee/limit/total word owns that amount.
+     */
+    static final String CLAUSE_AMOUNT_ROLE_WORD = "balance|available|رصيد|المتاح|\\bfees?\\b|رسوم|\\blimit\\b|\\btotal\\b|اجمالي|الاجمالي";
 
     // Extraction vocabulary, matched against length-preserving folded text (lower case; أإآٱ->ا, ؤ->و, ئ->ي, ى->ي, ة->ه).
     static final String EXTRACTOR_VERSION = "extraction-1";
@@ -105,6 +111,10 @@ final class ParsingPolicy {
     static final String ROLE_FEE = "\\bfees?\\b|رسوم|عموله|commission";
     static final String ROLE_EQUIVALENT_BEFORE = "ما يعادل|يعادل|equivalent (?:to|of)";
     static final String ROLE_EQUIVALENT_AFTER = "^\\s*\\)?\\s*equivalent";
+    /** An amount opening a parenthesis right after another amount in a different currency is that amount's equivalent. */
+    static final String ROLE_EQUIVALENT_PAREN = "\\(\\s*$";
+    /** A stated total (principal plus fee) is never the principal and never a balance. */
+    static final String ROLE_TOTAL = "\\btotal\\b|الاجمالي|اجمالي|المجموع";
     /** A principal marker after a role word means the amount is the principal ("شحن رصيد اتصالات بقيمة 50"). */
     static final String PRINCIPAL_MARKER = "بقيمه|بمبلغ|مبلغ|\\bof\\b";
     static final String CREDIT_CARD = "credit card|بطاقه الايتمان|بطاقه ايتمان|كارت ايتمان";
@@ -114,31 +124,39 @@ final class ParsingPolicy {
             "تحويل وارد|حواله وارده|\\bincoming (?:transfer|remittance)\\b";
     static final String DIRECTION_OUT = "(?<!\\p{L})(?:تم|تمت)\\s+(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|ارسال|شحن\\s+رصيد)|" +
             "\\b(?:paid|purchased|debited|charged|withdrawn|sent|transferred|outward)\\b|\\bcash withdrawal\\b|\\bpayment of\\b|\\btransfer of\\b|" +
-            "\\bpayment (?:completed|successful)\\b|تحويل صادر|حواله صادره|\\boutgoing (?:transfer|remittance)\\b";
+            "\\bpayment (?:completed|successful)\\b|تحويل صادر|حواله صادره|\\boutgoing (?:transfer|remittance)\\b|\\bwas used (?:for|at)\\b";
     /** Purchase wording where a merchant is expected; transfers, cash, installments, bills and refunds are excluded. */
-    static final String PURCHASE = "(?<!\\p{L})تم\\s+(?:دفع|شراء|خصم)|\\b(?:paid|purchased|charged)\\b";
+    static final String PURCHASE = "(?<!\\p{L})تم\\s+(?:دفع|شراء|خصم)|\\b(?:paid|purchased|charged)\\b|\\bwas used (?:for|at)\\b";
     static final String NOT_A_PURCHASE = "تحويل|transfer|سحب|withdraw|قسط|installment|فاتوره|\\bbill\\b|refund|reversal|عكس|اعاده|محفظه|wallet|instapay|ipn";
     static final String QUOTED_MERCHANT = "[\"“«]([^\"”»\\n]{1,60})[\"”»]";
     static final String MERCHANT_MARKER_STRONG = "\\bat\\b|@(?=\\s)|(?<!\\p{L})(?:لدي|عند)";
     static final String MERCHANT_MARKER_PARTY = "\\bfrom\\b|\\bto\\b|(?<!\\p{L})(?:من|الي)(?!\\p{L})|(?<!\\p{L})ل(?= )";
     /** Bill, recharge and subscription names: the billed service is the merchant. Adjectives after اشتراك are not names. */
-    static final String MERCHANT_BILL = "فاتوره (\\p{L}+)|\\bfor (\\p{L}+) (?:mobile |internet |landline |electricity )?bill\\b|شحن رصيد (\\p{L}+)|" +
+    static final String MERCHANT_BILL = "فاتوره (?:(?:ال)?(?:انترنت|موبايل|محمول|تليفون|هاتف|ارضي) (?!بمبلغ|بقيمه|مبلغ|قيمه)(\\p{L}+)|(\\p{L}+))|" +
+            "\\bfor (\\p{L}+) (?:mobile |internet |landline |electricity )?bill\\b|شحن رصيد (\\p{L}+)|" +
             "اشتراك (?!ال|شهري|سنوي|اسبوعي)(\\p{L}+)|\\bsubscription (?:to|for) (\\p{L}+)";
     /** Where a merchant run ends; includes "و" joined to a following action ("واعادة المبلغ", "وتم"). */
     static final String MERCHANT_STOP = "\\s+(?:on|with|for|using|via|ref|card|has|have|was|were|is|been|completed|تم|تمت|يوم|بتاريخ|في|فى|من|عبر|عن|رقم|بطاقه|باستخدام|المتاح|الرصيد|الساعه)(?!\\p{L})|" +
             "\\s+و(?=(?:تم|تمت|اعاده|استرداد|رد)(?!\\p{L}))|[.,;،؛:!?()\\n]|\\s+\\d|يوم(?=\\d)";
     static final String MERCHANT_GENERIC = "^(?:حساب|حسابك|حسابكم|بطاقه|بطاقتك|بطاقتكم|كارت|محفظه|محفظتك|رقم|ماكينه|account|card|wallet|your|the|you)(?!\\p{L})";
     static final int MERCHANT_MAX_CHARS = 40;
+    /** A bare ATM/cash-machine phrase is a place, not a merchant ("another bank's ATM"); a named terminal ("NBE ATM546") stays. */
+    static final String MERCHANT_ATM_PHRASE = "(?<![\\p{L}\\d])(?:atm|ماكينه|الصراف)(?![\\p{L}\\d])";
     /** Possibly between the user's own accounts: card/prepaid funding, wallet top-up, paying one's own card dues. */
     static final String INTERNAL_TRANSFER = "(?:الي|to) (?:كارت|بطاقه|credit card|prepaid)|تم\\s+شحن\\s+(?:ال)?محفظ|top.?up (?:your )?wallet|" +
-            "سداد (?:مستحقات |مديونيه )?(?:ال)?(?:بطاقه|بطاقتك|بطاقتكم|كارت)|\\bcard (?:bill |balance )?(?:payment|repayment) (?:received|made|of)\\b";
+            "سداد (?:مستحقات |مديونيه )?(?:ال)?(?:بطاقه|بطاقتك|بطاقتكم|كارت)|\\bcard (?:bill |balance )?(?:payment|repayment) (?:received|made|of)\\b|" +
+            // Self-account markers: the other side is the user's own account.
+            "(?:حساب|محفظه|بطاقه)\\p{L}*(?: ال\\p{L}+)? الخاص(?:ه)? بك(?:م)?|(?:حساب|حسابك|حسابكم) (?:ال)?(?:توفير|اخر)|حسابك(?:م)? الاخر|" +
+            "\\byour (?:own |other |savings )account\\b|\\bsavings account\\b|\\bbetween your (?:own )?accounts\\b";
     /** A phone-number counterparty after a direction word ("sent to 01012345678", "من رقم 010XXXXX123"). */
     static final String COUNTERPARTY_PHONE = "(?:من|الي|\\bto|\\bfrom)\\s+(?:رقم\\s+|number\\s+|mobile\\s+)?(\\+?[0-9][0-9x*]{9,14})(?![0-9])";
     /** A beneficiary name set off by dashes after an account mask ("حساب 1234XXXX5678 - محمد سعيد -"). */
     static final String COUNTERPARTY_NAME = "(?:حساب|account)\\s+[0-9x*#]{4,}\\s*[-–]\\s*(\\p{L}[\\p{L} .]{0,40}?)\\s*(?:[-–]|$)";
     /** Money returned to the user is an expense offset, never income (owner rule for الاسترداد and reversals). */
     static final String EXPENSE_OFFSET = "refund|reversal|reversed|credited back|عكس|اعاده المبلغ|استرداد|(?<!\\p{L})تم رد";
-    static final String EXPIRY = "صالح حتي|valid until|expires?(?: on)?|تنتهي في";
+    static final String EXPIRY = "صالح(?:ه)?(?: لل?استخدام)? حتي|valid (?:for use )?(?:until|till)|expires?(?: on)?|تنتهي في";
+    /** How far before a date an expiry phrase may sit. */
+    static final int EXPIRY_WINDOW_CHARS = 25;
 
     // Confidence (stage 4): additive evidence score 0..100, thresholds, review caps and hard failures.
     static final String CONFIDENCE_VERSION = "confidence-1";
@@ -156,7 +174,8 @@ final class ParsingPolicy {
     static final String[] HARD_FAILURES = {"MISSING_AMOUNT", "AMBIGUOUS_CURRENCY", "INVALID_SIGNED_AMOUNT", "AMBIGUOUS_NUMBER_FORMAT",
             "NON_POSITIVE_AMOUNT", "AMBIGUOUS_DIRECTION"};
     /** Any of these caps the decision at REVIEW: the user must confirm ownership, expiry, merchant or direction. */
-    static final String[] REVIEW_CAPS = {"POSSIBLE_INTERNAL_TRANSFER", "EXPIRING_CREDIT", "MISSING_MERCHANT", "INFERRED_OUTGOING_DIRECTION"};
+    static final String[] REVIEW_CAPS = {"POSSIBLE_INTERNAL_TRANSFER", "EXPIRING_CREDIT", "MISSING_MERCHANT", "INFERRED_OUTGOING_DIRECTION",
+            "UNASSIGNED_SECOND_AMOUNT"};
 
     // Later stages: defined by the approved corpus, not yet used by any implemented stage.
     /** Identity-less identical messages within this window become possible-duplicate review items. */
