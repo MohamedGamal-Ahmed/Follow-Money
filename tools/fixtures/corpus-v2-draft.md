@@ -1,7 +1,7 @@
 # Corpus v2 — unapproved draft, 21 October 2026
 
-**Ready for owner review; not approved. No production pipeline stage may start from this draft until the
-owner explicitly approves it.** The acceptance policy was revised on 21 October 2026 (see
+**Approved by the owner on 21 October 2026, conditional on the three amendments now applied (reversal
+`expense_offset`, Vodafone Cash counterparty token, dual-currency accounting amount).** The acceptance policy was revised on 21 October 2026 (see
 [README](README.md#corpus-v2-acceptance-policy-owner-decision-21-october-2026)): the corpus proves message-type
 coverage, not bank coverage, and labelled synthetic cases close missing types. The owner accepted
 the v1 file shape but rejected its contents. v1 remains an immutable historical comparison file;
@@ -47,7 +47,8 @@ All original TSV columns and escape rules remain. Additional optional columns de
 | `expected_expiry_date` | Restricted/expiring cashback evidence |
 | `expected_time_ambiguity`, `expected_year_origin` | Missing AM/PM, ambiguous partial date or inferred year remain explicit |
 | `context_group`, `expected_standalone_decision`, `expected_context_decision` | Isolated parsing versus a supplied pair/context, without contradictory oracles |
-| `expected_accounting_effect` | Pending internal-transfer ownership/reconciliation; not automatic spending/income |
+| `expected_accounting_effect` | Pending internal-transfer ownership/reconciliation (`pending`, `pending_internal`), or `expense_offset` for reversals; not automatic spending/income |
+| `expected_original_amount_minor`, `expected_original_currency` | Foreign amount shown on a dual-currency charge for information; the booked amount is the account-currency equivalent |
 | `source_evidence_id`, `base_case_id`, `variant`, `feature_tags` | Source and variant lineage; the source registry states what was changed and what is unverified |
 
 The draft introduces `verification` for the supplied secure-key request alongside the existing `otp` type;
@@ -98,7 +99,7 @@ The [generated audit report](corpus-v2-results.md) contains the final measured v
 | English message words | 187 / 369 = 50.68% | >=30% | PASS |
 | Mixed message words | 26 / 369 = 7.05% | <=30% | PASS |
 | Nonlinguistic empty notification | 1 / 369 | Counted in full denominator | Explicit |
-| EGP transactions | 216 / 258 = 83.72% | >=80% | PASS |
+| EGP transactions | 223 / 258 = 86.43% | >=80% | PASS |
 | REVIEW | 20 | 15..25 | PASS |
 | Message-type coverage | 11 / 11 types | each: base + >=2 variants | PASS |
 
@@ -110,10 +111,16 @@ old labels unchanged. Unresolved-currency transactions remain in the EGP-ratio d
 The eleven former "missing documented sample" blockers are now **message-type coverage** gates, each closed
 by labelled synthetic cases (per-type list in the [audit report](corpus-v2-results.md#message-type-coverage)).
 Decisions encoded in them: an explicit fee stays separate from the principal (AUTO, like `p134`); in a
-dual-currency charge the charged foreign amount is the principal and the EGP figure only an equivalent;
-reversals are incoming; installment counters are not amounts or dates; a wallet top-up from the user's own
+dual-currency charge the **accounting amount is the account-currency equivalent** (EGP 495.25, what left the
+account and budget) and the foreign USD 9.99 is kept as `original_amount/original_currency` for display;
+reversals are `expense_offset` (see below); installment counters are not amounts or dates; a wallet top-up from the user's own
 card is REVIEW/`pending_internal`; Fawry recharge wording (`شحن`) is an outgoing payment, not a top-up;
 card declines are IGNORE with no transaction; a direct InstaPay notification uses separate Android extras.
+
+**Reversal rule (owner, 21 October 2026).** All eleven reversal rows carry `expected_accounting_effect =
+expense_offset` and the `expense_offset` tag. A reversal is linked to its original purchase when one exists
+(same amount and same merchant within 14 days) and reduces it; otherwise it is recorded as a negative
+expense. It never appears in total income. The incoming direction describes the money movement only.
 
 Synthetic rows prove that the generic logic meets each type and writing shape. They are **not** observed
 messages and do not prove coverage of any bank; unseen banks rely on the generic design and the

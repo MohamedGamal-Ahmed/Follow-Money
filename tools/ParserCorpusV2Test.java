@@ -104,6 +104,15 @@ public final class ParserCorpusV2Test {
         expect(ids.get("u15-secure_key"),"expected_type","verification");expect(ids.get("u15-secure_key"),"expected_decision","IGNORE");
         expect(ids.get("pub-cib-charge"),"expected_balance_minor",null);expect(ids.get("pub-cib-charge"),"expected_credit_limit_minor","1000021");
         expect(ids.get("pub-cib-refund"),"expected_amount_minor","93");expect(ids.get("pub-cib-refund"),"expected_movement_kind","refund");
+        long reversals=ids.values().stream().filter(r->"reversal".equals(r.get("expected_movement_kind"))).count();
+        check(reversals==11,"All eleven reversal rows carry the expense_offset rule: "+reversals);
+        // Dual currency: the account-currency equivalent is the accounting amount; the foreign amount is display-only.
+        for(String id:ids.keySet())if(id.startsWith("syn-dual-")){
+            expect(ids.get(id),"expected_amount_minor","49525");expect(ids.get(id),"expected_currency","EGP");
+            expect(ids.get(id),"expected_original_amount_minor","999");expect(ids.get(id),"expected_original_currency","USD");
+            expect(ids.get(id),"expected_equivalent_minor",null);
+        }
+        for(String id:new String[]{"syn-vfcash-in","syn-vfcash-in-digits","syn-vfcash-in-spaces"})expect(ids.get(id),"expected_counterparty_token","010XXXXX123");
     }
 
     private static void contextRegressions(Map<String,ParserCorpusFixture.Row> ids){
@@ -166,8 +175,15 @@ public final class ParserCorpusV2Test {
             if(row.get("expected_currency")!=null)check(Set.of("EGP","USD","EUR","GBP","SAR","AED").contains(row.get("expected_currency")),"Invalid transaction currency "+id);
             check((row.get("expected_balance_minor")==null)==(row.get("expected_balance_currency")==null),"Balance currency pair "+id);
             if(row.get("expected_balance_minor")!=null)number(row.get("expected_balance_minor"));
-            for(String prefix:new String[]{"expected_fee","expected_equivalent","expected_credit_limit"}){
-                String amount=row.get(prefix+"_minor"),currency=row.get(prefix+"_currency");
+            // Owner decision: a reversal offsets an expense. It reduces the matched original purchase (same amount and
+            // merchant within 14 days) or else becomes a negative expense; it never counts as income.
+            if("reversal".equals(row.get("expected_movement_kind"))){
+                expect(row,"expected_accounting_effect","expense_offset");
+                check(List.of(row.get("feature_tags").split("\\|")).contains("expense_offset"),"Reversal without expense_offset tag "+id);
+            }
+            if("expense_offset".equals(row.get("expected_accounting_effect")))check("in".equals(row.get("expected_direction"))&&"reversal".equals(row.get("expected_movement_kind")),"expense_offset only for incoming reversals "+id);
+            for(String prefix:new String[]{"expected_fee","expected_equivalent","expected_credit_limit","expected_original_amount"}){
+                String amount=row.get(prefix+"_minor"),currency=row.get(prefix.replace("_amount","")+"_currency");
                 check((amount==null)==(currency==null),"Optional amount/currency pair "+id+" "+prefix);
                 if(amount!=null)check(number(amount)>=0,"Negative auxiliary amount "+id);
             }

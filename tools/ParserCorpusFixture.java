@@ -23,7 +23,8 @@ final class ParserCorpusFixture {
             "expected_movement_kind expected_direction_certainty expected_equivalent_minor expected_equivalent_currency " +
             "expected_credit_limit_minor expected_credit_limit_currency expected_expiry_date expected_time_ambiguity " +
             "expected_year_origin context_group expected_standalone_decision expected_context_decision " +
-            "source_evidence_id base_case_id variant feature_tags expected_accounting_effect").split(" ");
+            "source_evidence_id base_case_id variant feature_tags expected_accounting_effect " +
+            "expected_original_amount_minor expected_original_currency").split(" ");
 
     static final class Row {
         private final Map<String, String> values;

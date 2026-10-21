@@ -1,12 +1,12 @@
 # Corpus v2 draft audit
 
-Fixture integrity/oracle assertions: PASS (11522). Parser semantic evaluation: NOT RUN.
+Fixture integrity/oracle assertions: PASS (11963). Parser semantic evaluation: NOT RUN.
 Rows: 369; protected v1 rows unchanged: 66; rejected padding rows removed: 72.
-v2 SHA-256 (UTF-8/LF): `5616952d82c1dacc0d3d23da6c46548f3833cf23ab9beef085c3e41ad490ef46`.
+v2 SHA-256 (UTF-8/LF): `cc75ee3c643874316b03aa814510ab9980c766f37ef1aae368298f769a01cac4`.
 Provenance: 17 user-supplied base cases + one owner-specified descriptor expansion; 7 public base examples; 25 labelled synthetic base cases. Variants are not additional observed formats.
 Decisions: {AUTO=230, IGNORE=111, REVIEW=20, UNUNDERSTOOD=8}
 Evidence levels (rows): {generated_fixture_v1=168, public_developer_example=3, public_developer_fixture=15, public_user_report=3, synthetic=89, user_redacted=91}
-Transaction currencies: {AED=3, EGP=216, EUR=6, GBP=2, SAR=4, USD=23, null=4}
+Transaction currencies: {AED=3, EGP=223, EUR=6, GBP=2, SAR=4, USD=16, null=4}
 
 ## Message-type coverage
 
@@ -29,7 +29,7 @@ Transaction currencies: {AED=3, EGP=216, EUR=6, GBP=2, SAR=4, USD=23, null=4}
 | mixed | 26 | 7.05% |
 | neutral | 1 | 0.27% |
 
-EGP transactions: 216/258 (83.72%); unresolved-currency transactions stay in the denominator.
+EGP transactions: 223/258 (86.43%); unresolved-currency transactions stay in the denominator.
 
 ## Remaining approval blockers
 
@@ -58,7 +58,6 @@ Only base rows are counted. Generated variations, field-order permutations and p
 - SYNTHETIC_WALLET_TOPUP: 1 base-case profiles.
 - UNSPECIFIED_EGYPTIAN_BANK: 3 base-case profiles.
 - UNSPECIFIED_WALLET: 1 base-case profiles.
-
 ## Verification and boundary report — 21 October 2026 (synthetic-coverage revision)
 
 - Policy commit `e1c5051`: readiness redefined as message-type coverage; synthetic labelling enforced by builder and audit.
@@ -69,3 +68,10 @@ Only base rows are counted. Generated variations, field-order permutations and p
 - Strict v2 readiness command with `--require-ready`: **PASS, exit 0**, zero blockers.
 - Readiness means "ready for owner review", not approval. No parser semantic evaluation, Normalization stage, application code, schema or UI change was made.
 - Synthetic rows prove message-type/shape coverage only. They are not observed messages, not bank-format claims, and not evidence of coverage for unseen banks (that remains the generic design plus REVIEW/UNUNDERSTOOD).
+
+## Owner amendments — 21 October 2026 (approved contract)
+
+- Reversals (11 rows): `expected_accounting_effect = expense_offset`, tag `expense_offset`; audited so no reversal can be booked as income.
+- `syn-vfcash-in` and variants: `expected_counterparty_token = 010XXXXX123`.
+- Dual currency (`syn-dual-*`, 7 rows): accounting amount EGP 495.25; `expected_original_amount_minor/currency` = 999 USD for display.
+- `--require-ready`: PASS, zero blockers. Approved v2 SHA-256 is the one in this report's header.
