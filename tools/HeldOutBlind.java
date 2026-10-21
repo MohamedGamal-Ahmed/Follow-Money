@@ -111,7 +111,8 @@ public final class HeldOutBlind {
         out.add("| --- | --- | --- | --- | --- | --- | --- | --- | --- | :-: | --- | --- | --- |");
         out.addAll(table);
         String report = String.join("\n", out) + "\n";
-        if (args.length > 1 && args[0].equals("--write")) Files.writeString(Path.of(args[1]), report, StandardCharsets.UTF_8);
+        int writeArg = List.of(args).indexOf("--write");
+        if (writeArg >= 0) Files.writeString(Path.of(args[writeArg + 1]), report, StandardCharsets.UTF_8);
         System.out.println("Held-out blind set " + Path.of(file).getFileName() + ": " + hits + "/" + rows.size() + " messages fully correct; misses " + failures);
         if (List.of(args).contains("--require") && hits != rows.size()) throw new AssertionError("Held-out blind regressions: " + failures);
     }
