@@ -27,6 +27,8 @@ expected_year_origin context_group expected_standalone_decision expected_context
 source_evidence_id base_case_id variant feature_tags expected_accounting_effect
 expected_original_amount_minor expected_original_currency""".split()
 FROZEN = {"notification_fields", "dedupe_identity", "promotions", "other_and_failed"}
+# Protected-row cells the owner explicitly changed (21 Oct 2026); every other protected cell stays byte-identical to v1.
+OWNER_EXCEPTIONS = {("p011", "expected_card_last4")}
 BASE = int(datetime(2026, 10, 21, 20, tzinfo=timezone.utc).timestamp() * 1000)
 
 
@@ -76,6 +78,14 @@ for original in v1:
         row.update(expected_direction="out", expected_direction_certainty="likely", expected_decision="REVIEW", expected_capture="NEW",
                    required_reasons="CARD_MERCHANT_CONTEXT|INFERRED_OUTGOING_DIRECTION",
                    note="Owner-corrected v2 oracle: card plus merchant supports likely outgoing direction; absent explicit financial verb requires review.")
+    elif row["id"] in {"p011", "p146"}:
+        # Owner decision 21 Oct 2026 (explicit exception to v1 protection): an account mask is an account, not a card.
+        row.update(expected_account_last4=row["expected_card_last4"], expected_card_last4=None)
+        if row["id"] == "p146":  # p011 is a protected row: only its card cell is excepted, so its note stays as in v1.
+            row["note"] += " Owner-corrected v2 oracle: account mask moved from card_last4 to account_last4."
+    elif row["id"] == "p136":
+        row.update(expected_currency=None,
+                   note=row["note"] + " Owner-corrected v2 oracle: a two-event message has no amount and no currency, like p014/p135.")
     rows.append(row)
 
 
@@ -308,7 +318,7 @@ assert len({r["id"] for r in rows}) == len(rows)
 frozen_original = {r["id"]: r for r in v1 if r["group"] in FROZEN}
 for row in rows:
     if row["id"] in frozen_original:
-        assert all(row[col] == frozen_original[row["id"]][col] for col in ORIGINAL)
+        assert all(row[col] == frozen_original[row["id"]][col] for col in ORIGINAL if (row["id"], col) not in OWNER_EXCEPTIONS)
 
 dest = FIXTURES / "parser-corpus-v2-draft.tsv"
 dest.write_text("\t".join(COLUMNS) + "\n" + "\n".join("\t".join(encode(row.get(col)) for col in COLUMNS) for row in rows) + "\n", encoding="utf-8", newline="\n")

@@ -12,13 +12,8 @@ public final class TransactionExtractorTest {
     private static void check(boolean value, String why) { if (!value) throw new AssertionError(why); checks++; }
     private static void same(Object actual, Object expected, String why) { check(Objects.equals(actual, expected), why + ": <" + actual + "> != <" + expected + ">"); }
 
-    /**
-     * Fields where the extractor and the corpus disagree, left for the owner (the corpus is not edited to match):
-     * p011/p146 v1 rows store an account mask in card_last4 while v2 separates accounts from cards;
-     * p136 expects a currency on a multi-event message while p014/p135 (same shape) expect none.
-     */
-    static final Map<String, String> KNOWN_DISAGREEMENTS = Map.of(
-            "p011", "expected_card_last4", "p146", "expected_card_last4", "p136", "expected_currency");
+    /** Fields where the extractor and the corpus disagree, left for the owner; the corpus is never edited to match code. */
+    static final Map<String, String> KNOWN_DISAGREEMENTS = Map.of(); // p011, p146, p136 resolved by the owner on 21 Oct 2026.
 
     static final String[] FIELDS = {"expected_amount_minor", "expected_currency", "expected_direction", "expected_merchant_key",
             "expected_balance_minor", "expected_balance_currency", "expected_card_last4", "expected_datetime", "expected_time_precision"};

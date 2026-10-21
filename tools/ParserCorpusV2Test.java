@@ -19,6 +19,8 @@ import java.util.Set;
 public final class ParserCorpusV2Test {
     private static int checks;
     private static final Set<String> FROZEN = Set.of("notification_fields","dedupe_identity","promotions","other_and_failed");
+    /** Protected v1 cells the owner explicitly changed on 21 October 2026; all other protected cells stay byte-identical. */
+    private static final Set<String> OWNER_EXCEPTIONS = Set.of("p011|expected_card_last4");
     private static void check(boolean value,String why){if(!value)throw new AssertionError(why);checks++;}
     private static long number(String value){return Long.parseLong(value);}
     private static void expect(ParserCorpusFixture.Row row,String field,String value){check(Objects.equals(row.get(field),value),row.get("id")+" "+field+": "+row.get(field)+" != "+value);}
@@ -104,6 +106,10 @@ public final class ParserCorpusV2Test {
         expect(ids.get("u15-secure_key"),"expected_type","verification");expect(ids.get("u15-secure_key"),"expected_decision","IGNORE");
         expect(ids.get("pub-cib-charge"),"expected_balance_minor",null);expect(ids.get("pub-cib-charge"),"expected_credit_limit_minor","1000021");
         expect(ids.get("pub-cib-refund"),"expected_amount_minor","93");expect(ids.get("pub-cib-refund"),"expected_movement_kind","refund");
+        // Owner decisions: account masks are accounts, not cards; a two-event message has no currency.
+        for(String id:new String[]{"p011","p146"}){expect(ids.get(id),"expected_card_last4",null);check(ids.get(id).get("expected_account_last4")!=null,"Account moved "+id);}
+        expect(ids.get("p011"),"expected_account_last4","2222");expect(ids.get("p146"),"expected_account_last4","7733");
+        for(String id:new String[]{"p014","p135","p136"})expect(ids.get(id),"expected_currency",null);
         long reversals=ids.values().stream().filter(r->"reversal".equals(r.get("expected_movement_kind"))).count();
         check(reversals==11,"All eleven reversal rows carry the expense_offset rule: "+reversals);
         // Dual currency: the account-currency equivalent is the accounting amount; the foreign amount is display-only.
@@ -194,7 +200,7 @@ public final class ParserCorpusV2Test {
         int protectedRows=0,removed=0;
         for(ParserCorpusFixture.Row row:old){
             if(FROZEN.contains(row.get("group"))){protectedRows++;check(ids.containsKey(row.get("id")),"Protected fixture lost");
-                for(String col:ParserCorpusFixture.COLUMNS)check(Objects.equals(row.get(col),ids.get(row.get("id")).get(col)),"Protected field changed "+row.get("id")+" "+col);}
+                for(String col:ParserCorpusFixture.COLUMNS)if(!OWNER_EXCEPTIONS.contains(row.get("id")+"|"+col))check(Objects.equals(row.get(col),ids.get(row.get("id")).get(col)),"Protected field changed "+row.get("id")+" "+col);}
             if(row.get("group").equals("source_independence")){removed++;check(!ids.containsKey(row.get("id")),"Rejected padding ID remains");}
         }
         check(protectedRows==66&&removed==72,"Preservation/removal inventory");

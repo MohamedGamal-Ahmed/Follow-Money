@@ -83,3 +83,9 @@ MerchantNormalizerTest found four synthetic merchant keys written without the co
 variants (16 rows): `صيدليه النور`, `مخبز الامانه`, `متجر الهدي`, `سوبر ماركت الرحمه`. No other expectation changed.
 The implementation was not changed to fit them; the oracle contradicted the existing v1 normalization rows.
 `--require-ready`: PASS. Current v2 SHA-256: `6c8b865e47c8cb3535aa20974a2817ed12c7ab720c692e8a13e417a5d853778c`.
+
+## Owner decisions on extraction disagreements — 22 October 2026
+
+- p011, p146: the account mask moves from `expected_card_last4` to `expected_account_last4` (card `\N`). p011 is a protected v1 row; only this one cell is an explicit owner exception, recorded in the builder and the audit.
+- p136: `expected_currency = \N`, consistent with p014/p135 (a two-event message has no amount and no currency).
+- `--require-ready`: PASS. v2 SHA-256: `24b5d66318facd7278532bbb6aeaeaf89463008d09e9dc6bd32c502362817501`. `KNOWN_DISAGREEMENTS` is empty.
