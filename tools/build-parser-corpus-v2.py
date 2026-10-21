@@ -334,6 +334,37 @@ for identifier, text, minor, balance in [
                 note="Owner phone sample: the service provider confirms a top-up of the user's line without naming the paying account, so the same payment may already be recorded from the bank or wallet message (PAYER_UNKNOWN, REVIEW). The stated balance is the line's balance."))
 
 
+# Owner phone groups (21 October 2026): forms read as masked shapes on the phone (digits and names hidden). Text
+# rebuilt from the shape with invented values and names; the template words are the observed ones.
+SHAPE_NOTE = "Rebuilt from a masked shape read on the owner's phone; values and names invented, template words observed. "
+family(case("bm03", "BankMisr", "شكرا لاستخدامك بطاقة بنك مصر*1234 ، تم الخصم الان من رصيدك مبلغ EGP 175.88 علي CARREFOUR MAADI يوم 22/07/2026 ، الرصيد المتاح EGP 2000.12. لمزيد من المعلومات عن الحساب، تفضل بزيارة الرابط التالي https://bnkmsr.com/online",
+            amount=17588, direction="out", merchant="carrefour maadi", card="1234", balance=200012, movement="card_purchase", dt="2026-07-22", precision="date",
+            tags="card_purchase|debit_from_balance_wording|merchant_after_ala",
+            note=SHAPE_NOTE + "40 messages: a real card debit; 'من رصيدك' names where the money came from, not a balance message. No earlier message repeats the amount (no double count)."))
+family(case("bm04", "BankMisr", "تم تنفيذ تحويل لحظي من بطاقة رقم 1234 بمبلغ 2000 رقم مرجعي 123456789يوم 24/07/2026 الساعه 20:53 للمزيد اتصل علي 19888",
+            amount=200000, direction="out", card="1234", movement="instant_transfer_out", decision="REVIEW", reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_OUT|CURRENCY_INFERRED",
+            dt="2026-07-24T20:53", precision="minute", tags="instant_transfer_out|labelled_amount_without_currency|currency_inferred",
+            note=SHAPE_NOTE + "43 messages: the amount is labelled (بمبلغ) but carries no currency anywhere in the message; the account currency is inferred and the user confirms it (CURRENCY_INFERRED, learnable)."))
+family(case("bm05", "BankMisr", "شكرا لاستخدامك بطاقة بنك مصر ***1234 ، تم الخصم مبلغEGP 500.00 الة رقم 12345 BM ATM MAADI يوم 24/07/2026 ، الرصيد المتاحEGP 1500.00لمزيد من المعلومات اضغط هنا https://bnkmsr.com/x",
+            amount=50000, direction="out", card="1234", balance=150000, movement="cash_withdrawal", dt="2026-07-24", precision="date",
+            tags="cash_withdrawal|currency_glued_after_arabic_word|atm_machine_number",
+            note=SHAPE_NOTE + "10 messages: EGP glued to the Arabic word before the amount; آلة رقم is a cash machine."))
+family(case("bm06", "BankMisr", "شكرا لاستخدامكم بطاقة بنك مصر الائتمانية ***1234 تم ايداع EGP 8431.05 في CARD PAYMENT يوم 28/03/2025 متاح الان EGP 8617.83 للمزيد من المعلومات اتصل 19888",
+            amount=843105, direction="in", card="1234", dt="2025-03-28", precision="date", movement=None,
+            expected_credit_limit_minor=861783, expected_credit_limit_currency="EGP", tags="credit_card_deposit|available_now_is_limit",
+            note=SHAPE_NOTE + "11 messages: the deposit is the first amount; 'متاح الان' on a credit card is the available limit (legacy took it as the income)."))
+family(case("op01", "7030", "Dear Customer, You have successfully renewed 1 GB subscription - 1 month (Super Plan) from Orange and 39 Egyptian pound has been deducted from your line",
+            amount=3900, direction="out", merchant="orange", movement="service_charge", decision="REVIEW", reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_OUT|PREPAID_CREDIT",
+            tags="service_charge|prepaid_credit|egyptian_pound|operator_subscription",
+            note=SHAPE_NOTE + "65 messages: a subscription paid from the line's prepaid credit; recording it after the line top-up may double count, so it waits for the owner (PREPAID_CREDIT)."))
+for identifier, source, text in [
+    ("pc01", "Premiumcard", "لقد تم السداد للقسط الشهري الخاص ببريميوم كارد بقيمة 245.00 جنيه القيمة المستحقة علي حسابك الان هي 1200.00 جنيه"),
+    ("tru01", "TRU", "عميل ترو العزيز، تمت عملية الشراء من عند BTECH 12 بنجاح في 26/09/2026. اجمالي المبلغ الممول 6636.00، قسطك بقيمة 553.00 شهريا، لمدة 12 شهر."),
+]:
+    family(case(identifier, source, text, kind="other", decision="IGNORE", reasons="COMMITMENT_PATH", tags="installment_provider|commitment_path",
+                note=SHAPE_NOTE + "Owner decision: an installment message from the provider that names no debited account, card or wallet belongs to the commitments path, not the ledger."))
+
+
 def measured_language(row):
     text = row["body"] if row["channel"] == "sms" else "\n".join(row[col] or "" for col in ORIGINAL if col.startswith("android."))
     text = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))

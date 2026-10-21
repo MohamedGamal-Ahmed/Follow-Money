@@ -36,3 +36,10 @@ bm01	user_redacted	\N	Owner phone sample, 21 Oct 2026 (Bank Misr purchase)	Amoun
 bm02	user_redacted	\N	Owner phone sample, 21 Oct 2026 (Bank Misr contactless notice)	Refers to an earlier purchase; no new movement.
 we01	user_redacted	\N	Owner phone sample, 21 Oct 2026 (WE line top-up)	Provider confirmation; the paying account is not named.
 we02	user_redacted	\N	Owner phone sample, 21 Oct 2026 (WE landline internet top-up)	Provider confirmation; the paying account is not named.
+bm03	user_redacted	\N	Owner phone masked shape, 21 Oct 2026	Rebuilt from a masked shape (digits and names hidden on the phone); values and names invented.
+bm04	user_redacted	\N	Owner phone masked shape, 21 Oct 2026	Rebuilt from a masked shape (digits and names hidden on the phone); values and names invented.
+bm05	user_redacted	\N	Owner phone masked shape, 21 Oct 2026	Rebuilt from a masked shape (digits and names hidden on the phone); values and names invented.
+bm06	user_redacted	\N	Owner phone masked shape, 21 Oct 2026	Rebuilt from a masked shape (digits and names hidden on the phone); values and names invented.
+op01	user_redacted	\N	Owner phone masked shape, 21 Oct 2026	Rebuilt from a masked shape (digits and names hidden on the phone); values and names invented.
+pc01	user_redacted	\N	Owner phone masked shape, 21 Oct 2026	Rebuilt from a masked shape (digits and names hidden on the phone); values and names invented.
+tru01	user_redacted	\N	Owner phone masked shape, 21 Oct 2026	Rebuilt from a masked shape (digits and names hidden on the phone); values and names invented.

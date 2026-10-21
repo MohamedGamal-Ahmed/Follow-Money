@@ -15,6 +15,8 @@ final class AmountScanner {
         final int start, end;
         final String currency, rawNumber, unit;
         final boolean leadingMinus;
+        /** True when no currency was written and a labelled amount took ParsingPolicy.DEFAULT_CURRENCY. */
+        boolean inferredCurrency;
         final char trailingSign;
         /** Minor units, or -1 when the number format is ambiguous (single "1.250") or malformed. */
         final long minor;
@@ -36,14 +38,32 @@ final class AmountScanner {
         // A unit glued to a hyphen and digits ("EGP-1234") is an identifier, not an amount. A number ends at the first
         // character that is neither a digit nor a separator followed by a digit, so a glued word after it ("15.00عند",
         // "149.98EGP") is a separate word and the number is never cut back to fit ("149.98عند" is never 149).
-        MONEY = Pattern.compile("(?iu)(?<![\\p{L}])(" + unit + ")(?![\\p{L}])(?!-\\d)\\s{0,2}(" + NUMBER + ")(?![.,]?\\d)" +
+        // A unit may also follow a word of the other script ("مبلغegp 200", "EGPعند").
+        String start = "(?:(?<!\\p{L})|(?<=\\p{IsArabic})(?=[a-zA-Z£$€])|(?<=[a-zA-Z])(?=\\p{IsArabic}))";
+        MONEY = Pattern.compile("(?iu)" + start + "(" + unit + ")(?![\\p{L}])(?!-\\d)\\s{0,2}(" + NUMBER + ")(?![.,]?\\d)" +
                 // A number glued to a mask ("***-789", "x1234") is part of an account, not an amount before a unit.
                 // A unit ends where a word of another script starts: "44.95 EGPعند" is EGP + عند. A Latin unit still
                 // never ends inside a Latin word, nor an Arabic unit inside an Arabic one ("جنيهات" is not a glued word).
                 "|(?<![\\d.,*#xX-])(" + NUMBER + ")\\s{0,2}(" + unit + ")(?!(?<=[a-zA-Z])[a-zA-Z]|(?<=\\p{IsArabic})\\p{IsArabic})");
     }
 
+    /** "بمبلغ 500", "amount of 500": a labelled number, money only when the message writes no currency at all. */
+    private static final Pattern LABELLED = Pattern.compile("(?iu)(?:(?<!\\p{L})(?:ب)?(?:ال)?(?:مبلغ|قيمه)|\\bamount(?: of)?)\\s*:?\\s*(" + NUMBER + ")(?![.,]?\\d)(?!\\s*%)");
+
     static List<Money> scan(String text) {
+        List<Money> found = currencyTagged(text);
+        if (text == null || !found.isEmpty()) return found;
+        Matcher l = LABELLED.matcher(text);
+        while (l.find()) {
+            String digits = l.group(1).replace(" ", "").replaceAll("^[+-]|[+-]$", "");
+            Money money = new Money(l.start(1), l.end(1), ParsingPolicy.DEFAULT_CURRENCY, "", l.group(1).trim(), false, (char) 0, minor(digits));
+            money.inferredCurrency = true;
+            found.add(money);
+        }
+        return found;
+    }
+
+    private static List<Money> currencyTagged(String text) {
         List<Money> found = new ArrayList<>();
         if (text == null) return found;
         Matcher m = MONEY.matcher(text);

@@ -105,6 +105,7 @@ final class TransactionExtractor {
     private static final Pattern MOVEMENT_BILL = Pattern.compile(ParsingPolicy.MOVEMENT_BILL, FLAGS);
     private static final Pattern MOVEMENT_SERVICE_TOPUP = Pattern.compile(ParsingPolicy.MOVEMENT_SERVICE_TOPUP, FLAGS);
     private static final Pattern PAYER_NAMED = Pattern.compile(ParsingPolicy.PAYER_NAMED, FLAGS);
+    private static final Pattern PREPAID_SERVICE = Pattern.compile(ParsingPolicy.PREPAID_SERVICE, FLAGS);
     private static final Pattern MOVEMENT_CASH = Pattern.compile(ParsingPolicy.MOVEMENT_CASH, FLAGS);
     private static final Pattern MOVEMENT_SALARY = Pattern.compile(ParsingPolicy.MOVEMENT_SALARY, FLAGS);
     private static final Pattern MOVEMENT_REMITTANCE = Pattern.compile(ParsingPolicy.MOVEMENT_REMITTANCE, FLAGS);
@@ -244,6 +245,8 @@ final class TransactionExtractor {
         if (secondAmount) x.reasons.add("UNASSIGNED_SECOND_AMOUNT");
         x.currency = principal.currency;
         x.principalAt = principal.start;
+        // A labelled amount with no currency anywhere in the message took the account currency: the user confirms it.
+        if (principal.inferredCurrency) x.reasons.add("CURRENCY_INFERRED");
         if (principal.trailingSign == '+') x.direction = "in";
         if (principal.trailingSign == '-') x.direction = "out";
         if (principal.currency == null) { x.reasons.add("AMBIGUOUS_CURRENCY"); return; }
@@ -523,6 +526,8 @@ final class TransactionExtractor {
         x.movementKind = movement(t, x);
         // A provider's top-up confirmation that names no payer may repeat a payment already recorded from the bank or wallet.
         if ("service_topup".equals(x.movementKind)) x.reasons.add("PAYER_UNKNOWN");
+        // A subscription paid from the line's prepaid credit may repeat money recorded at the top-up.
+        if ("service_charge".equals(x.movementKind)) x.reasons.add("PREPAID_CREDIT");
         // Every review cap the policy names applies here too, so the provisional and scored decisions cannot disagree.
         for (String cap : ParsingPolicy.REVIEW_CAPS) review |= x.reasons.contains(cap);
         x.decision = review ? "REVIEW" : "AUTO";
@@ -538,6 +543,8 @@ final class TransactionExtractor {
         if (MOVEMENT_WALLET.matcher(t).find()) return out && x.merchantKey != null ? "wallet_payment" : in ? "wallet_transfer_in" : "wallet_transfer_out";
         if (out && MOVEMENT_SERVICE_TOPUP.matcher(t).find() && x.cardLast4 == null && x.accountLast4 == null && !PAYER_NAMED.matcher(t).find())
             return "service_topup";
+        if (out && PREPAID_SERVICE.matcher(t).find() && x.cardLast4 == null && x.accountLast4 == null && !PAYER_NAMED.matcher(t).find())
+            return "service_charge";
         if (out && MOVEMENT_BILL.matcher(t).find()) return "bill_payment";
         if (out && "installment".equals(x.selfKind)) return "installment_payment";
         if (out && MOVEMENT_CASH.matcher(t).find()) return "cash_withdrawal";
