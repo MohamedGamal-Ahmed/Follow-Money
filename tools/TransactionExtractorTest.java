@@ -62,7 +62,9 @@ public final class TransactionExtractorTest {
             {"تم سحب نقدي 1000 جنيه من ماكينة الصراف. الرصيد 3000 جنيه", "AUTO", "100000", "EGP", "out", null, null, null, "300000", null},
             {"Refund of USD 4.99 from APP STORE has been processed.", "AUTO", "499", "USD", "in", "app store", null, null, null, null},
             {"Paid EUR 1.250 at Cafe Nine", "UNUNDERSTOOD", null, "EUR", "out", "cafe nine", null, null, null, null},
-            {"تم دفع 300 جنيه", "REVIEW", "30000", "EGP", "out", null, null, null, null, null},
+            // Owner rule (24 Oct): a missing merchant needs review only on a card purchase.
+            {"تم دفع 300 جنيه ببطاقتك المنتهية بـ 1234", "REVIEW", "30000", "EGP", "out", null, "1234", null, null, null},
+            {"تم دفع 300 جنيه", "AUTO", "30000", "EGP", "out", null, null, null, null, null},
             {"Charged GBP 12.00 at TESCO STORES on 03/11/26 at 14:05. Available balance GBP 88.00", "AUTO", "1200", "GBP", "out", "tesco stores", null, null, "8800", "2026-11-03T14:05"},
             {"Transfer of EGP 750 to Mona completed.", "AUTO", "75000", "EGP", "out", "mona", null, null, null, null},
             {"EGP 45.50 credited to your account ****9911 from SALARY CO", "AUTO", "4550", "EGP", "in", "salary co", null, "9911", null, null},

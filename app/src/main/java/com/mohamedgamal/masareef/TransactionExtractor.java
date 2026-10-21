@@ -20,7 +20,11 @@ import java.util.regex.Pattern;
 final class TransactionExtractor {
     static final class Extraction {
         String decision, currency, direction, directionCertainty, merchantSurface, merchantKey;
-        Long amountMinor, balanceMinor, feeMinor, creditLimitMinor, originalMinor;
+        Long amountMinor, balanceMinor, feeMinor, creditLimitMinor, originalMinor, nominalMinor;
+        /** Self-describing kinds (bank_fee, interest, installment, investment, commitment); null otherwise. */
+        String movementKind;
+        /** Position of the principal in the folded text, or -1. */
+        int principalAt = -1;
         String balanceCurrency, feeCurrency, creditLimitCurrency, originalCurrency;
         String cardLast4, accountLast4, counterparty;
         String datetime, timePrecision = "unknown", timeAmbiguity, yearOrigin, expiryDate, accountingEffect;
@@ -57,7 +61,7 @@ final class TransactionExtractor {
         }
     }
 
-    private enum Role { PRINCIPAL, BALANCE, LIMIT, FEE, EQUIVALENT, PAREN, TOTAL, FUTURE }
+    private enum Role { PRINCIPAL, BALANCE, LIMIT, FEE, EQUIVALENT, PAREN, TOTAL, FUTURE, BOOKED, DEBITED, KNOWN }
 
     private static final int FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     private static final Pattern BALANCE = Pattern.compile(ParsingPolicy.ROLE_BALANCE, FLAGS);
@@ -68,6 +72,22 @@ final class TransactionExtractor {
     private static final Pattern EQUIVALENT_PAREN = Pattern.compile(ParsingPolicy.ROLE_EQUIVALENT_PAREN, FLAGS);
     private static final Pattern TOTAL = Pattern.compile(ParsingPolicy.ROLE_TOTAL, FLAGS);
     private static final Pattern ATM_PHRASE = Pattern.compile(ParsingPolicy.MERCHANT_ATM_PHRASE, FLAGS);
+    private static final Pattern BOOKED = Pattern.compile(ParsingPolicy.ROLE_BOOKED, FLAGS);
+    private static final Pattern DEBITED = Pattern.compile(ParsingPolicy.ROLE_DEBITED, FLAGS);
+    private static final Pattern KNOWN = Pattern.compile(ParsingPolicy.ROLE_KNOWN, FLAGS);
+    private static final Pattern ROLE_IN = Pattern.compile(ParsingPolicy.ROLE_IN, FLAGS);
+    private static final Pattern ROLE_OUT = Pattern.compile(ParsingPolicy.ROLE_OUT, FLAGS);
+    private static final Pattern KIND_FEE = Pattern.compile(ParsingPolicy.KIND_FEE, FLAGS);
+    private static final Pattern KIND_INTEREST = Pattern.compile(ParsingPolicy.KIND_INTEREST, FLAGS);
+    private static final Pattern KIND_INSTALLMENT = Pattern.compile(ParsingPolicy.KIND_INSTALLMENT, FLAGS);
+    private static final Pattern KIND_INVESTMENT = Pattern.compile(ParsingPolicy.KIND_INVESTMENT, FLAGS);
+    private static final Pattern EXPIRY_PHRASE = Pattern.compile(ParsingPolicy.EXPIRY_PHRASE, FLAGS);
+    private static final Pattern GLUED_LAM = Pattern.compile(ParsingPolicy.MERCHANT_GLUED_LAM, FLAGS);
+    private static final Pattern OWN_ACCOUNT = Pattern.compile(ParsingPolicy.OWN_ACCOUNT_MARKER, FLAGS);
+    private static final Pattern TRANSFER_VERB = Pattern.compile(ParsingPolicy.TRANSFER_VERB, FLAGS);
+    private static final Pattern COUNTERPARTY_REQUEST = Pattern.compile(ParsingPolicy.COUNTERPARTY_REQUEST, FLAGS);
+    private static final Pattern COUNTERPARTY_HOLDER = Pattern.compile(ParsingPolicy.COUNTERPARTY_ACCOUNT_HOLDER, FLAGS);
+    private static final Pattern CARD_CONTEXT = Pattern.compile(ParsingPolicy.CARD_CONTEXT, FLAGS);
     private static final Pattern PRINCIPAL_MARKER = Pattern.compile(ParsingPolicy.PRINCIPAL_MARKER, FLAGS);
     private static final Pattern CREDIT_CARD = Pattern.compile(ParsingPolicy.CREDIT_CARD, FLAGS);
     private static final Pattern FUTURE = Pattern.compile(ParsingPolicy.FUTURE_OR_REQUEST, FLAGS);
@@ -129,10 +149,13 @@ final class TransactionExtractor {
     private static void amounts(String t, Extraction x) {
         List<AmountScanner.Money> money = AmountScanner.scan(t);
         boolean creditCard = CREDIT_CARD.matcher(t).find();
-        AmountScanner.Money principal = null, equivalent = null;
+        AmountScanner.Money principal = null, equivalent = null, debited = null;
         List<AmountScanner.Money> unassigned = new ArrayList<>();
         for (AmountScanner.Money m : money) {
             Role role = role(t, m, creditCard);
+            if (role == Role.BOOKED) role = Role.EQUIVALENT; // the booked account-currency amount is the accounting amount
+            if (role == Role.DEBITED) { if (debited == null) debited = m; continue; }
+            if (role == Role.KNOWN || role == Role.TOTAL || role == Role.FUTURE) continue;
             // A parenthesized amount right after the principal is its equivalent only when the currency differs.
             if (role == Role.PAREN) role = principal != null && equivalent == null && !java.util.Objects.equals(m.currency, principal.currency) ? Role.EQUIVALENT : Role.PRINCIPAL;
             if (role == Role.BALANCE && x.balanceMinor == null && m.minor >= 0) {
@@ -151,10 +174,19 @@ final class TransactionExtractor {
         }
         if (x.feeMinor != null) x.reasons.add("EXPLICIT_FEE");
         if (principal == null) { x.reasons.add("MISSING_AMOUNT"); return; }
-        // Safety rule: a second amount in the principal's currency with no role is never silently dropped.
+        boolean secondAmount = false;
         for (AmountScanner.Money other : unassigned)
-            if (java.util.Objects.equals(other.currency, principal.currency)) { x.reasons.add("UNASSIGNED_SECOND_AMOUNT"); break; }
+            secondAmount |= java.util.Objects.equals(other.currency, principal.currency);
+        // An explicit amount actually taken replaces the nominal one, unless a stated fee or another amount explains the gap.
+        if (debited != null && x.feeMinor == null && !secondAmount && java.util.Objects.equals(debited.currency, principal.currency) &&
+                debited.minor >= 0 && debited.minor != principal.minor) {
+            x.nominalMinor = principal.minor >= 0 ? principal.minor : null;
+            principal = debited;
+        }
+        // Safety rule: a second amount in the principal's currency with no role is never silently dropped.
+        if (secondAmount) x.reasons.add("UNASSIGNED_SECOND_AMOUNT");
         x.currency = principal.currency;
+        x.principalAt = principal.start;
         if (principal.trailingSign == '+') x.direction = "in";
         if (principal.trailingSign == '-') x.direction = "out";
         if (principal.currency == null) { x.reasons.add("AMBIGUOUS_CURRENCY"); return; }
@@ -171,6 +203,9 @@ final class TransactionExtractor {
         String clause = t.substring(clauseStart, clauseEnd(t, m.end));
         if (EQUIVALENT_BEFORE.matcher(before).find() || EQUIVALENT_AFTER.matcher(t.substring(m.end)).find()) return Role.EQUIVALENT;
         if (EQUIVALENT_PAREN.matcher(before).find()) return Role.PAREN;
+        if (lastMatchWithoutMarker(BOOKED.matcher(before), before)) return Role.BOOKED;
+        if (lastMatchWithoutMarker(DEBITED.matcher(before), before)) return Role.DEBITED;
+        if (KNOWN.matcher(before).find()) return Role.KNOWN;
         // An amount in a future or request clause ("a fee of EGP 5 will apply") belongs to no completed event.
         if (FUTURE.matcher(clause).find()) return Role.FUTURE;
         if (lastMatchWithoutMarker(TOTAL.matcher(before), before)) return Role.TOTAL;
@@ -208,9 +243,16 @@ final class TransactionExtractor {
 
     // ---- Direction ---------------------------------------------------------------------------------------------
 
+    /**
+     * Trailing sign, then refund/reversal, then the role of the user's own account ("إلى حسابك" in, "من حسابك" out) which
+     * beats any verb, then the earliest verb. Both roles together are a move between own accounts: the verb decides,
+     * and without one the direction stays ambiguous.
+     */
     private static void direction(String t, Extraction x) {
         if (x.direction != null) { x.directionCertainty = "explicit"; return; }
         if (REFUND.matcher(t).find()) { x.direction = "in"; x.directionCertainty = "explicit"; return; }
+        boolean roleIn = ROLE_IN.matcher(t).find(), roleOut = ROLE_OUT.matcher(t).find();
+        if (roleIn != roleOut) { x.direction = roleIn ? "in" : "out"; x.directionCertainty = "explicit"; return; }
         int in = first(IN, t), out = first(OUT, t);
         if (in >= 0 || out >= 0) {
             x.direction = out < 0 || (in >= 0 && in < out) ? "in" : "out";
@@ -229,7 +271,7 @@ final class TransactionExtractor {
         if (header.find()) searchFrom = header.end();
         Matcher quoted = QUOTED.matcher(t);
         if (quoted.find(searchFrom)) { setMerchant(f, x, quoted.start(1), quoted.end(1)); return; }
-        for (Pattern marker : new Pattern[]{STRONG, null, PARTY}) {
+        for (Pattern marker : new Pattern[]{STRONG, GLUED_LAM, null, PARTY}) {
             if (marker == null) {
                 Matcher bill = BILL.matcher(t);
                 if (bill.find(searchFrom)) {
@@ -293,8 +335,10 @@ final class TransactionExtractor {
         if (instapay.find()) x.counterparty = f.display(instapay.start(), instapay.end());
         else if (phone.find()) x.counterparty = f.display(phone.start(1), phone.end(1));
         else {
-            Matcher name = COUNTERPARTY_NAME.matcher(t);
-            if (name.find()) x.counterparty = f.display(name.start(1), name.end(1)).trim();
+            Matcher request = COUNTERPARTY_REQUEST.matcher(t), holder = COUNTERPARTY_HOLDER.matcher(t), name = COUNTERPARTY_NAME.matcher(t);
+            if (request.find()) x.counterparty = f.display(request.start(1), request.end(1)).trim();
+            else if (holder.find()) x.counterparty = f.display(holder.start(1), holder.end(1)).trim();
+            else if (name.find()) x.counterparty = f.display(name.start(1), name.end(1)).trim();
             else if (digits.find()) x.counterparty = digits.group(1);
         }
     }
@@ -369,14 +413,34 @@ final class TransactionExtractor {
         x.reasons.add("COMPLETED_EVENT");
         x.reasons.add("DIRECTION_" + x.direction.toUpperCase(Locale.ROOT));
         boolean review = "likely".equals(x.directionCertainty);
-        if (INTERNAL.matcher(t).find()) { x.reasons.add("POSSIBLE_INTERNAL_TRANSFER"); review = true; }
-        if (x.expiryDate != null && "in".equals(x.direction)) {
+        x.movementKind = kind(t, x, classified);
+        if (x.movementKind != null && x.movementKind.equals("commitment")) { x.reasons.add("COMMITMENT_EVENT"); review = true; }
+        // Internal: a direct own-account movement, a self-account marker with a transfer verb, or both own-account roles.
+        boolean bothRoles = ROLE_IN.matcher(t).find() && ROLE_OUT.matcher(t).find();
+        if (INTERNAL.matcher(t).find() || (OWN_ACCOUNT.matcher(t).find() && TRANSFER_VERB.matcher(t).find()) || bothRoles) {
+            x.reasons.add("POSSIBLE_INTERNAL_TRANSFER"); review = true;
+        }
+        if ("in".equals(x.direction) && (x.expiryDate != null || EXPIRY_PHRASE.matcher(t).find())) {
             x.reasons.add("EXPIRING_CREDIT");
             if (classified.reasons.contains("PROMO_SIGNALS")) x.reasons.add("PROMO_SIGNALS");
             review = true;
         }
-        if (x.merchantKey == null && PURCHASE.matcher(t).find() && !NOT_A_PURCHASE.matcher(t).find()) { x.reasons.add("MISSING_MERCHANT"); review = true; }
+        // A merchant is expected only for a card purchase; fees, interest, installments and investments describe themselves.
+        if (x.merchantKey == null && x.movementKind == null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find() &&
+                !NOT_A_PURCHASE.matcher(t).find()) { x.reasons.add("MISSING_MERCHANT"); review = true; }
         x.decision = review ? "REVIEW" : "AUTO";
+    }
+
+    /** Self-describing movement kinds, most specific first. */
+    private static String kind(String t, Extraction x, MessageClassifier.Result classified) {
+        if (classified.reasons.contains("COMMITMENT_EVENT")) return "commitment";
+        if (KIND_INVESTMENT.matcher(t).find()) return "investment";
+        if ("in".equals(x.direction) && KIND_INTEREST.matcher(t).find()) return "interest";
+        if (KIND_INSTALLMENT.matcher(t).find()) return "installment";
+        // The principal itself is a fee when the fee word sits in its clause and no separate fee amount is stated.
+        if ("out".equals(x.direction) && x.feeMinor == null && x.principalAt >= 0 &&
+                KIND_FEE.matcher(t.substring(clauseStart(t, x.principalAt), clauseEnd(t, x.principalAt))).find()) return "bank_fee";
+        return null;
     }
 
     private TransactionExtractor() {}

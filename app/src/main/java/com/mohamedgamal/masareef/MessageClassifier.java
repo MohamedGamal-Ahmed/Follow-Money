@@ -43,6 +43,10 @@ final class MessageClassifier {
     private static final Pattern MERCHANT_MARKER = compile(ParsingPolicy.MERCHANT_MARKER);
     private static final Pattern CLAUSE = compile(ParsingPolicy.CLAUSE_BOUNDARY);
     private static final Pattern AMOUNT_ROLE_WORD = compile(ParsingPolicy.CLAUSE_AMOUNT_ROLE_WORD);
+    private static final Pattern PENDING = compile(ParsingPolicy.PENDING_EVENT);
+    private static final Pattern AMOUNT_STATEMENT = compile(ParsingPolicy.AMOUNT_STATEMENT);
+    private static final Pattern HOLD_RELEASED = compile(ParsingPolicy.HOLD_RELEASED);
+    private static final Pattern COMMITMENT = compile(ParsingPolicy.COMMITMENT);
 
     static Result classify(MessageNormalizer.Normalized message) {
         Set<String> reasons = new LinkedHashSet<>();
@@ -58,23 +62,31 @@ final class MessageClassifier {
         int events = 0;
         boolean signed = false, refund = REFUND.matcher(text).find();
         // One event per clause that pairs an amount with a completed verb, a refund, or a signed (+/-) amount.
-        int elided = 0;
+        int elided = 0, bareAmounts = 0;
+        boolean verbWithoutAmount = false;
         for (String clause : clauses(text)) {
             java.util.List<AmountScanner.Money> amounts = AmountScanner.scan(clause);
             // Conditional or future clauses ("will be charged next month") never describe a completed event.
-            if (amounts.isEmpty() || CONDITIONAL.matcher(clause).find() || FUTURE.matcher(clause).find()) continue;
+            if (CONDITIONAL.matcher(clause).find() || FUTURE.matcher(clause).find()) continue;
+            if (amounts.isEmpty()) { verbWithoutAmount |= COMPLETED.matcher(clause).find(); continue; }
             boolean clauseSigned = false;
             for (AmountScanner.Money money : amounts) clauseSigned |= money.trailingSign != 0;
             signed |= clauseSigned;
             if (clauseSigned || COMPLETED.matcher(clause).find() || REFUND.matcher(clause).find()) events++;
             else if (MERCHANT_MARKER.matcher(clause).find() && !AMOUNT_ROLE_WORD.matcher(clause).find()) elided++;
+            else if (!AMOUNT_ROLE_WORD.matcher(clause).find() && AMOUNT_STATEMENT.matcher(clause).find()) bareAmounts++;
         }
+        // A completion stated in one sentence and its amount in the next ("تم دفع طلب X بنجاح. المبلغ 725 جنيه") is one event.
+        if (events == 0 && verbWithoutAmount && bareAmounts > 0) events = 1;
         // Safety rule: after one completed event, a further "amount at merchant" clause is a second event, never ignored.
         if (events > 0) events += elided;
         boolean completed = events > 0 || COMPLETED_WITHOUT_AMOUNT.matcher(text).find();
         boolean promo = PROMOTION.matcher(text).find();
         if (promo && !completed) return result(Type.PROMO, reasons, 0, "PROMOTIONAL_MESSAGE");
         if (FUTURE.matcher(text).find() && !completed) return result(Type.REMINDER, reasons, 0, "FUTURE_ONLY");
+        // A released hold or a not-yet-executed operation moved no money; neither is a failure.
+        if (HOLD_RELEASED.matcher(text).find() && !refund) return result(Type.OTHER, reasons, 0, "HOLD_RELEASED");
+        if (PENDING.matcher(text).find() && !completed) return result(Type.OTHER, reasons, 0, "PENDING_EVENT");
         if (UNSUCCESSFUL.matcher(text).find() && !refund) return result(Type.OTHER, reasons, events, "UNSUCCESSFUL_EVENT");
         if (!completed && anyAmount && CARD.matcher(text).find() && MERCHANT_MARKER.matcher(text).find()) {
             reasons.add("CARD_MERCHANT_CONTEXT");
@@ -85,6 +97,7 @@ final class MessageClassifier {
             if (refund) reasons.add("REFUND_OR_REVERSAL");
             if (signed) reasons.add("SIGNED_AMOUNT");
             if (message.groupSummary) reasons.add("GROUP_SUMMARY");
+            if (COMMITMENT.matcher(text).find()) reasons.add("COMMITMENT_EVENT");
             if (events > 1) { reasons.add("MULTIPLE_EVENTS"); return new Result(Type.TRANSACTION, Decision.UNUNDERSTOOD, reasons, events); }
             reasons.add("COMPLETED_EVENT");
             return new Result(Type.TRANSACTION, Decision.EXTRACT, reasons, events);

@@ -246,7 +246,7 @@ public final class ShadowComparison {
         return out;
     }
 
-    static final String[] HELD_OUT_SETS = {"tools/fixtures/held-out-blind.tsv", "tools/fixtures/held-out-blind-2.tsv"};
+    static final String[] HELD_OUT_SETS = {"tools/fixtures/held-out-blind.tsv", "tools/fixtures/held-out-blind-2.tsv", "tools/fixtures/held-out-blind-3.tsv"};
 
     static ConfidenceScorer.Confidence confidence(MessageNormalizer.Raw raw, long receivedAt, TransactionExtractor.Extraction[] phase3) {
         MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);
@@ -314,7 +314,7 @@ public final class ShadowComparison {
                 ConfidenceScorer.Confidence c = confidence(raw, blindReceived, x);
                 hExpected.merge(h.get("expected_decision"), 1, Integer::sum); hP3.merge(x[0].decision, 1, Integer::sum);
                 hP4.merge(c.decision, 1, Integer::sum); hBuckets.merge(bucket(c), 1, Integer::sum);
-                if (c.decision.equals(h.get("expected_decision"))) heldRight++;
+                if (HeldOutBlind.equal("decision", c.decision, h.get("expected_decision"))) heldRight++;
                 if (!c.decision.equals(x[0].decision)) heldChanges.add("| " + h.get("id") + " | " + x[0].decision + " | " + c.decision + " | " + c.score + " | " + cell(String.join(",", c.reasons)) + " |");
             }
             heldSections.add("### Decision distribution, " + Path.of(file).getFileName() + " (" + held.size() + " messages)");

@@ -64,6 +64,32 @@ public final class MessageClassifierTest {
             same(result.type.name() + "/" + result.decision, probe[1] + "/" + probe[2], "Held-out: " + probe[0] + " " + result.reasons);
         }
 
+        // Generated completion combinations (owner rule, 24 Oct): marker x optional middle word x financial noun x article.
+        int generated = 0;
+        String[] nouns = {"شراء", "تحويل", "دفع", "سداد", "خصم", "تنفيذ", "إضافة", "إيداع", "رد"};
+        for (String marker : new String[]{"تم", "تمت"})
+            for (String middle : new String[]{"", "عملية ", "تنفيذ "})
+                for (String noun : nouns)
+                    for (String article : new String[]{"", "ال"}) {
+                        String text = marker + " " + middle + article + noun + " بمبلغ 250.00 جنيه لدى متجر النور";
+                        MessageClassifier.Result r = classify(text);
+                        same(r.type + "/" + r.decision, "TRANSACTION/EXTRACT", "Generated completion: " + text);
+                        generated++;
+                    }
+        for (String english : new String[]{"approved", "completed", "successful", "posted"}) {
+            MessageClassifier.Result r = classify("Purchase " + english + ": EGP 250.00 at NILE STORE.");
+            same(r.type + "/" + r.decision, "TRANSACTION/EXTRACT", "Generated English completion " + english);
+            generated++;
+        }
+        same(classify("تم الدفع بنجاح. المبلغ 250.00 جنيه").decision, MessageClassifier.Decision.EXTRACT, "Completion and amount in two sentences");
+        // Registration, creation, issuance, request confirmation, refusal, cancellation and suspension are not completions.
+        for (String word : new String[]{"تسجيل", "إنشاء", "إصدار"}) {
+            MessageClassifier.Result r = classify("تم " + word + " تحويل بمبلغ 250.00 جنيه");
+            check(r.decision != MessageClassifier.Decision.EXTRACT, "Not a completion: " + word + " " + r.type);
+            generated++;
+        }
+        same(classify("تم إضافة مزايا جديدة. السعر الجديد 49 جنيه").decision, MessageClassifier.Decision.IGNORE, "A price is not an event amount");
+
         // Clause splitting keeps abbreviation dots and protects decimals.
         same(MessageClassifier.clauses("تم دفع 15 ج.م. في متجر").size(), 2, "Unit dot may end the sentence, inner dot never");
         same(AmountScanner.scan("from 123-456***-789 egp 12,345.67+ x").get(0).trailingSign, '+', "Masked digits do not steal the unit");
@@ -78,6 +104,6 @@ public final class MessageClassifierTest {
         same(AmountScanner.scan("Paid $12.50").get(0).currency, "USD", "Bare dollar sign is USD (owner decision)");
 
         System.out.println("Message classifier checks passed: " + checks + " (" + rows.size() + " corpus rows, " + disagreements +
-                " listed disagreements, " + heldOut.length + " held-out messages).");
+                " listed disagreements, " + heldOut.length + " held-out messages, " + generated + " generated completion combinations).");
     }
 }

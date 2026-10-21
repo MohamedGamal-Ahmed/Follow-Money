@@ -40,7 +40,8 @@ public final class LocalLearningTest {
                     MessageNormalizer.Raw.notification("held-out", 0, h.get("android.title"), h.get("android.text"), h.get("android.bigText"), h.get("android.textLines"), null, null);
             TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
             ConfidenceScorer.Confidence c = ShadowComparison.confidence(raw, received, x);
-            same(empty.apply("held-out", MessageNormalizer.normalize(raw).text, c, x[0]).decision, h.get("expected_decision"), "Empty model no-op " + h.get("id"));
+            String learned = empty.apply("held-out", MessageNormalizer.normalize(raw).text, c, x[0]).decision;
+            check(learned.equals(c.decision) && HeldOutBlind.equal("decision", learned, h.get("expected_decision")), "Empty model no-op " + h.get("id") + ": " + learned);
         }
 
         // Merchant rules the user set in the app: ignore new messages, or a category.
