@@ -353,6 +353,8 @@ final class ParsingPolicy {
     static final long INTERNAL_PAIRING_WINDOW_MS = 600_000L;
     /** A reversal offsets an original purchase with the same amount and merchant within this many days. */
     static final int EXPENSE_OFFSET_MATCH_DAYS = 14;
+    /** A same-amount return from the same source within this window after a charge offsets that charge (ShadowOffset). */
+    static final long FEE_REFUND_WINDOW_MS = 30 * 60_000L;
 
     private ParsingPolicy() {}
 }

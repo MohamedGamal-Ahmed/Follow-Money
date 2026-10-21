@@ -126,6 +126,14 @@ final class ShadowStoreTest {
             ShadowReport.Summary report = ShadowReport.build(new java.util.ArrayList<>(), scan.scanned, scan.skippedUnstored);
             check(report.scanned == scan.scanned, "Report built");
 
+            // 7b. A fee returned minutes after the same charge is an expense offset linked to that charge.
+            long feeAt = now + 3_600_000L;
+            db.captureSms("QABANK", "تم خصم 5.00 جنيه رسوم خدمة من حسابك", feeAt);
+            db.captureSms("QABANK", "تم اضافة 5.00 جنيه الى حسابك", feeAt + 5 * 60_000L);
+            List<ShadowStore.Stored> feeRows = ShadowStore.recent(sql, "live", 2);
+            check("expense_offset".equals(feeRows.get(0).values.get("accounting_effect")) && feeRows.get(0).reasons.contains("LINKED_EXPENSE_OFFSET") &&
+                    String.valueOf(feeRows.get(1).id).equals(feeRows.get(0).values.get("offset_of")), "Fee return linked to its charge: " + feeRows.get(0).reasons);
+
             // 8. The hidden debug screen renders every view over the stored rows (live, differences, ununderstood, re-scan report).
             android.content.Intent open = new android.content.Intent(target, ParserDebugActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
             ParserDebugActivity screen = (ParserDebugActivity) runner.startActivitySync(open);

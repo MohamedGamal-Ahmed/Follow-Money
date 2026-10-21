@@ -61,7 +61,7 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "ShadowDiff.java", "ShadowReport.java", "ShadowRescan.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "ShadowDiff.java", "ShadowOffset.java", "ShadowReport.java", "ShadowRescan.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();

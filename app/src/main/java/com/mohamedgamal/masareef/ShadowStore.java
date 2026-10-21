@@ -63,6 +63,14 @@ final class ShadowStore {
                        Long transactionId, String legacyReason, String legacyDecision, Long legacyAmount, String legacyCurrency,
                        String legacyDirection, String legacyMerchant, ParserShadow.Observation o) {
         if (o == null) return;
+        // Owner decision: a return of the same charge minutes later is an expense offset linked to it, never income.
+        String reasons = String.join(",", o.reasons);
+        long offsetOf = ShadowDiff.newRecords(o.decision) && !o.values.containsKey("accounting_effect") ? offsetOf(sql, origin, source, receivedAt, o) : -1;
+        if (offsetOf >= 0) {
+            o.values.put("accounting_effect", "expense_offset");
+            o.values.put("offset_of", String.valueOf(offsetOf));
+            reasons += ",LINKED_EXPENSE_OFFSET";
+        }
         org.json.JSONObject sealed = new org.json.JSONObject();
         try {
             for (java.util.Map.Entry<String, String> e : o.values.entrySet()) sealed.put(e.getKey(), e.getValue());
@@ -100,7 +108,7 @@ final class ShadowStore {
         row.put("decision", o.decision);
         row.put("score", o.score);
         row.put("movement_kind", o.movementKind);
-        row.put("reasons", String.join(",", o.reasons));
+        row.put("reasons", reasons);
         row.put("policy", o.policy);
         row.put("encrypted_body", EvidenceVault.encrypt(sealed.toString()));
         sql.insert("shadow_observations", null, row);
@@ -108,6 +116,32 @@ final class ShadowStore {
         if ("live".equals(origin)) sql.execSQL("DELETE FROM shadow_observations WHERE origin='live' AND id < " +
                 "(SELECT id FROM shadow_observations WHERE origin='live' ORDER BY id DESC LIMIT 1 OFFSET ?)", new Object[]{ParsingPolicy.SHADOW_STORE_MAX_ROWS - 1});
         if ("UNUNDERSTOOD".equals(o.decision) && raw != null) rememberUnunderstood(sql, raw, content, source, o);
+    }
+
+    /** The earlier recorded charge from the same source this return offsets (ShadowOffset), or -1. Opens only rows in the window. */
+    private static long offsetOf(SQLiteDatabase sql, String origin, String source, long receivedAt, ParserShadow.Observation o) {
+        Long amount;
+        try { amount = o.values.containsKey("amount_minor") ? Long.valueOf(o.values.get("amount_minor")) : null; } catch (NumberFormatException e) { return -1; }
+        boolean party = o.values.containsKey("merchant_key") || o.values.containsKey("counterparty");
+        ShadowOffset.Movement current = new ShadowOffset.Movement(-1, source, receivedAt, o.values.get("direction"), amount, o.values.get("currency"), true, party);
+        if (!"in".equals(current.direction) || party || amount == null) return -1;
+        List<ShadowOffset.Movement> earlier = new ArrayList<>();
+        java.util.Set<Long> claimed = new java.util.HashSet<>();
+        try (Cursor c = sql.rawQuery("SELECT id, received_at, decision, encrypted_body FROM shadow_observations WHERE origin=? AND source=? AND received_at BETWEEN ? AND ?",
+                new String[]{origin, source, Long.toString(receivedAt - ParsingPolicy.FEE_REFUND_WINDOW_MS), Long.toString(receivedAt)})) {
+            while (c.moveToNext()) {
+                String body = EvidenceVault.decrypt(c.getString(3));
+                if (body == null) continue;
+                try {
+                    org.json.JSONObject v = new org.json.JSONObject(body);
+                    if (v.has("offset_of")) claimed.add(Long.valueOf(v.getString("offset_of")));
+                    Long minor = v.has("amount_minor") ? Long.valueOf(v.getString("amount_minor")) : null;
+                    earlier.add(new ShadowOffset.Movement(c.getLong(0), source, c.getLong(1), v.optString("direction", null), minor, v.optString("currency", null),
+                            ShadowDiff.newRecords(c.getString(2)), v.has("merchant_key") || v.has("counterparty")));
+                } catch (org.json.JSONException | NumberFormatException malformed) { /* skip an unreadable row */ }
+            }
+        }
+        return ShadowOffset.match(current, earlier, claimed);
     }
 
     /** Earlier deliveries of the same origin that could matter: the same identity, or the same content near in time. */

@@ -63,6 +63,21 @@ public final class ShadowDedupeTest {
         same(MessageNormalizer.Raw.notificationIdentity("0|pkg|1|t|10000", 5L), "notification:0|pkg|1|t|10000@5", "Key plus original post time");
         same(MessageNormalizer.normalize(MessageNormalizer.Raw.sms("BANK", "x").withIdentity("sms:1")).text, "x", "Identity never reaches the text");
 
+        // Owner decision: a same-amount return from the same source minutes after a charge offsets it, never income.
+        long t0 = 1_000_000L, win = ParsingPolicy.FEE_REFUND_WINDOW_MS;
+        java.util.List<ShadowOffset.Movement> charges = java.util.List.of(
+                new ShadowOffset.Movement(1, "Banque Misr", t0, "out", 500L, "EGP", true, false),
+                new ShadowOffset.Movement(2, "Banque Misr", t0 + 60_000, "out", 500L, "EGP", true, true),
+                new ShadowOffset.Movement(3, "HSBC", t0, "out", 500L, "EGP", true, false));
+        java.util.Set<Long> none = java.util.Set.of();
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "EGP", true, false), charges, none), 2L, "Latest same-amount charge of the same source");
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "EGP", true, false), charges, java.util.Set.of(2L)), 1L, "A claimed charge is never offset twice");
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 60_000 + win + 1, "in", 500L, "EGP", true, false), charges, none), -1L, "Outside the window it is not a return");
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 600L, "EGP", true, false), charges, none), -1L, "Another amount is another movement");
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "EGP", true, true), charges, none), -1L, "A credit from a named party is not a return");
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "USD", true, false), charges, none), -1L, "Another currency is another movement");
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 - 1, "in", 500L, "EGP", true, false), charges, none), -1L, "A credit before the charge offsets nothing");
+
         System.out.println("Shadow dedupe checks passed: " + checks + " (" + contract + " corpus contract rows replayed in order).");
     }
 }
