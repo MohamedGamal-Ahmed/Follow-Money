@@ -61,7 +61,7 @@ final class TransactionExtractor {
         }
     }
 
-    private enum Role { PRINCIPAL, BALANCE, LIMIT, FEE, EQUIVALENT, PAREN, TOTAL, FUTURE, BOOKED, DEBITED, KNOWN }
+    private enum Role { PRINCIPAL, BALANCE, LIMIT, FEE, EQUIVALENT, PAREN, TOTAL, FUTURE, BOOKED, DEBITED, KNOWN, FINAL }
 
     private static final int FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     private static final Pattern BALANCE = Pattern.compile(ParsingPolicy.ROLE_BALANCE, FLAGS);
@@ -73,6 +73,21 @@ final class TransactionExtractor {
     private static final Pattern TOTAL = Pattern.compile(ParsingPolicy.ROLE_TOTAL, FLAGS);
     private static final Pattern ATM_PHRASE = Pattern.compile(ParsingPolicy.MERCHANT_ATM_PHRASE, FLAGS);
     private static final Pattern BOOKED = Pattern.compile(ParsingPolicy.ROLE_BOOKED, FLAGS);
+    private static final Pattern BOOKED_AFTER = Pattern.compile(ParsingPolicy.ROLE_BOOKED_AFTER, FLAGS);
+    private static final Pattern RATE_AFTER = Pattern.compile(ParsingPolicy.ROLE_RATE_AFTER, FLAGS);
+    private static final Pattern DEBITED_PASSIVE = Pattern.compile(ParsingPolicy.ROLE_DEBITED_PASSIVE, FLAGS);
+    private static final Pattern HOLD_OR_BOOK = Pattern.compile(ParsingPolicy.ROLE_HOLD_OR_BOOK, FLAGS);
+    private static final Pattern REFERENCE = Pattern.compile(ParsingPolicy.ROLE_REFERENCE, FLAGS);
+    private static final Pattern RULE = Pattern.compile(ParsingPolicy.ROLE_RULE, FLAGS);
+    private static final Pattern FUTURE_AMOUNT = Pattern.compile(ParsingPolicy.ROLE_FUTURE_AMOUNT, FLAGS);
+    private static final Pattern FINAL = Pattern.compile(ParsingPolicy.ROLE_FINAL, FLAGS);
+    private static final Pattern SUBJECT_FEE = Pattern.compile("^\\s*(?:\\p{L}+\\s+)?(?:" + ParsingPolicy.ROLE_FEE + ")", FLAGS);
+    private static final Pattern SUBJECT_BALANCE = Pattern.compile("^\\s*(?:\\p{L}+\\s+)?(?:" + ParsingPolicy.ROLE_BALANCE + ")", FLAGS);
+    private static final Pattern NEUTRAL_OUT = Pattern.compile(ParsingPolicy.DIRECTION_NEUTRAL_OUT, FLAGS);
+    private static final Pattern COMPLETION_WORD = Pattern.compile("(?<!\\p{L})(?:تم|تمت)(?!\\p{L})", FLAGS);
+    private static final Pattern RETAINED = Pattern.compile(ParsingPolicy.RETAINED_FEE, FLAGS);
+    private static final Pattern STATUS = Pattern.compile(ParsingPolicy.STATUS_WORDS, FLAGS);
+    private static final Pattern KIND_CHEQUE = Pattern.compile(ParsingPolicy.KIND_CHEQUE, FLAGS);
     private static final Pattern DEBITED = Pattern.compile(ParsingPolicy.ROLE_DEBITED, FLAGS);
     private static final Pattern KNOWN = Pattern.compile(ParsingPolicy.ROLE_KNOWN, FLAGS);
     private static final Pattern ROLE_IN = Pattern.compile(ParsingPolicy.ROLE_IN, FLAGS);
@@ -135,6 +150,7 @@ final class TransactionExtractor {
         }
         Folded f = new Folded(message.text);
         String t = f.text;
+        if (classified.reasons.contains("RETAINED_FEE")) { retainedFee(f, x); return x; }
         amounts(t, x);
         direction(t, x);
         merchant(f, x);
@@ -144,15 +160,36 @@ final class TransactionExtractor {
         return x;
     }
 
+    /** A failed operation whose fee was kept: the kept fee, in the clause that says so, is the only movement. */
+    private static void retainedFee(Folded f, Extraction x) {
+        String t = f.text;
+        for (AmountScanner.Money m : AmountScanner.scan(t)) {
+            String clause = t.substring(clauseStart(t, m.start), clauseEnd(t, m.end));
+            if (!RETAINED.matcher(clause).find() || m.currency == null || m.minor <= 0) continue;
+            x.amountMinor = m.minor; x.currency = m.currency; x.principalAt = m.start;
+            x.direction = "out"; x.directionCertainty = "explicit"; x.movementKind = "bank_fee";
+            x.reasons.add("AMOUNT_UNAMBIGUOUS"); x.reasons.add("COMPLETED_EVENT"); x.reasons.add("DIRECTION_OUT"); x.reasons.add("RETAINED_FEE");
+            identities(f, x);
+            x.decision = "REVIEW";
+            return;
+        }
+        x.reasons.add("MISSING_AMOUNT");
+        x.decision = "UNUNDERSTOOD";
+    }
+
     // ---- Amounts and their roles -------------------------------------------------------------------------------
 
     private static void amounts(String t, Extraction x) {
         List<AmountScanner.Money> money = AmountScanner.scan(t);
         boolean creditCard = CREDIT_CARD.matcher(t).find();
-        AmountScanner.Money principal = null, equivalent = null, debited = null;
+        AmountScanner.Money principal = null, equivalent = null, debited = null, finalAmount = null, feeMention = null;
         List<AmountScanner.Money> unassigned = new ArrayList<>();
+        int previousEnd = 0;
         for (AmountScanner.Money m : money) {
-            Role role = role(t, m, creditCard);
+            Role role = role(t, m, creditCard, previousEnd);
+            previousEnd = m.end;
+            if (role == Role.FINAL) { if (finalAmount == null) finalAmount = m; continue; }
+            if (role == Role.FEE && feeMention == null) feeMention = m;
             if (role == Role.BOOKED) role = Role.EQUIVALENT; // the booked account-currency amount is the accounting amount
             if (role == Role.DEBITED) { if (debited == null) debited = m; continue; }
             if (role == Role.KNOWN || role == Role.TOTAL || role == Role.FUTURE) continue;
@@ -167,10 +204,16 @@ final class TransactionExtractor {
             } else if (role == Role.EQUIVALENT && equivalent == null) equivalent = m;
             else if (role == Role.PRINCIPAL) { if (principal == null) principal = m; else unassigned.add(m); }
         }
+        // The final amount of an adjusted operation is the principal; earlier holds and differences are known roles.
+        if (finalAmount != null) principal = finalAmount;
         if (equivalent != null && principal != null && !java.util.Objects.equals(equivalent.currency, principal.currency)) {
             // Owner decision: the account-currency equivalent is what left the account; the foreign amount is shown only.
             x.originalMinor = principal.minor >= 0 ? principal.minor : null; x.originalCurrency = principal.currency;
             principal = equivalent;
+        }
+        // A message whose only amount is a fee ("fee of EGP 31.44 was debited") is that fee.
+        if (principal == null && feeMention != null && unassigned.isEmpty()) {
+            principal = feeMention; x.feeMinor = null; x.feeCurrency = null;
         }
         if (x.feeMinor != null) x.reasons.add("EXPLICIT_FEE");
         if (principal == null) { x.reasons.add("MISSING_AMOUNT"); return; }
@@ -197,22 +240,43 @@ final class TransactionExtractor {
         else x.reasons.add("AMOUNT_UNAMBIGUOUS");
     }
 
-    private static Role role(String t, AmountScanner.Money m, boolean creditCard) {
+    /**
+     * The role of one amount. Words after it ("credited at the rate", "/USD", "equivalent") decide first; then the role
+     * word nearest before it in its clause, never reaching back past the previous amount; then the clause's subject
+     * ("رصيدك …", "رسوم التحويل: …"). Balance and limit words yield to a principal marker ("شحن رصيد … بقيمة 50").
+     */
+    private static Role role(String t, AmountScanner.Money m, boolean creditCard, int previousEnd) {
         int clauseStart = clauseStart(t, m.start);
-        String before = t.substring(Math.max(clauseStart, m.start - ParsingPolicy.ROLE_WINDOW_CHARS), m.start);
+        String before = t.substring(Math.max(Math.max(clauseStart, previousEnd), m.start - ParsingPolicy.ROLE_WINDOW_CHARS), m.start);
+        String after = t.substring(m.end);
         String clause = t.substring(clauseStart, clauseEnd(t, m.end));
-        if (EQUIVALENT_BEFORE.matcher(before).find() || EQUIVALENT_AFTER.matcher(t.substring(m.end)).find()) return Role.EQUIVALENT;
-        if (EQUIVALENT_PAREN.matcher(before).find()) return Role.PAREN;
-        if (lastMatchWithoutMarker(BOOKED.matcher(before), before)) return Role.BOOKED;
-        if (lastMatchWithoutMarker(DEBITED.matcher(before), before)) return Role.DEBITED;
-        if (KNOWN.matcher(before).find()) return Role.KNOWN;
+        // "(EGP 495.25 equivalent)", "EGP 903.54 credited at the rate": a restatement of an earlier amount, never the first one.
+        if (previousEnd > 0 && (EQUIVALENT_AFTER.matcher(after).find() || BOOKED_AFTER.matcher(after).find())) return Role.BOOKED;
+        if (RATE_AFTER.matcher(after).find()) return Role.KNOWN;
         // An amount in a future or request clause ("a fee of EGP 5 will apply") belongs to no completed event.
         if (FUTURE.matcher(clause).find()) return Role.FUTURE;
-        if (lastMatchWithoutMarker(TOTAL.matcher(before), before)) return Role.TOTAL;
-        Matcher fee = FEE.matcher(before);
-        if (lastMatchWithoutMarker(fee, before)) return FUTURE.matcher(clause).find() ? Role.FUTURE : Role.FEE;
-        if (lastMatchWithoutMarker(LIMIT.matcher(before), before)) return Role.LIMIT;
-        if (lastMatchWithoutMarker(BALANCE.matcher(before), before)) return creditCard ? Role.LIMIT : Role.BALANCE;
+        if (DEBITED_PASSIVE.matcher(before).find()) return Role.DEBITED;
+        Role nearest = null;
+        int nearestEnd = -1;
+        Object[][] roles = {{EQUIVALENT_BEFORE, Role.BOOKED}, {BOOKED, Role.BOOKED}, {DEBITED, Role.DEBITED}, {KNOWN, Role.KNOWN},
+                {HOLD_OR_BOOK, Role.KNOWN}, {REFERENCE, Role.KNOWN}, {RULE, Role.KNOWN}, {FUTURE_AMOUNT, Role.FUTURE}, {FINAL, Role.FINAL},
+                {TOTAL, Role.TOTAL}, {FEE, Role.FEE}, {LIMIT, Role.LIMIT}, {BALANCE, creditCard ? Role.LIMIT : Role.BALANCE}};
+        for (Object[] entry : roles) {
+            Matcher matcher = ((Pattern) entry[0]).matcher(before);
+            int end = -1;
+            while (matcher.find()) end = matcher.end();
+            if (end < 0) continue;
+            boolean yields = (entry[0] == BALANCE || entry[0] == LIMIT) && PRINCIPAL_MARKER.matcher(before.substring(end)).find();
+            if (!yields && end > nearestEnd) { nearest = (Role) entry[1]; nearestEnd = end; }
+        }
+        if (nearest != null) return nearest;
+        if (EQUIVALENT_PAREN.matcher(before).find()) return Role.PAREN;
+        // The clause subject governs only amounts not introduced as a principal ("… تم عكس عملية خصم بمبلغ 250"); a
+        // parenthesised aside ("رسوم التحويل: … (تم خصم 50 جنيه)") still belongs to the subject.
+        if (!before.contains("(") && (PRINCIPAL_MARKER.matcher(before).find() || COMPLETION_WORD.matcher(before).find())) return Role.PRINCIPAL;
+        String subject = t.substring(clauseStart, Math.min(m.start, clauseStart + 24));
+        if (SUBJECT_FEE.matcher(subject).find()) return Role.FEE;
+        if (SUBJECT_BALANCE.matcher(subject).find()) return creditCard ? Role.LIMIT : Role.BALANCE;
         return Role.PRINCIPAL;
     }
 
@@ -251,13 +315,17 @@ final class TransactionExtractor {
     private static void direction(String t, Extraction x) {
         if (x.direction != null) { x.directionCertainty = "explicit"; return; }
         if (REFUND.matcher(t).find()) { x.direction = "in"; x.directionCertainty = "explicit"; return; }
-        boolean roleIn = ROLE_IN.matcher(t).find(), roleOut = ROLE_OUT.matcher(t).find();
-        if (roleIn != roleOut) { x.direction = roleIn ? "in" : "out"; x.directionCertainty = "explicit"; return; }
+        // Owner rule (25 Oct): receipt/addition and deduction words beat prepositions ("لبطاقتك" after a deduction is possession).
         int in = first(IN, t), out = first(OUT, t);
         if (in >= 0 || out >= 0) {
             x.direction = out < 0 || (in >= 0 && in < out) ? "in" : "out";
             x.directionCertainty = "explicit";
+            return;
         }
+        boolean roleIn = ROLE_IN.matcher(t).find(), roleOut = ROLE_OUT.matcher(t).find();
+        if (roleIn != roleOut) { x.direction = roleIn ? "in" : "out"; x.directionCertainty = "explicit"; return; }
+        // A neutral transfer word decides last; with both own-account roles it is a move between own accounts.
+        if (first(NEUTRAL_OUT, t) >= 0) { x.direction = "out"; x.directionCertainty = "explicit"; }
     }
 
     private static int first(Pattern p, String t) { Matcher m = p.matcher(t); return m.find() ? m.start() : -1; }
@@ -270,7 +338,14 @@ final class TransactionExtractor {
         Matcher header = HEADER.matcher(t);
         if (header.find()) searchFrom = header.end();
         Matcher quoted = QUOTED.matcher(t);
-        if (quoted.find(searchFrom)) { setMerchant(f, x, quoted.start(1), quoted.end(1)); return; }
+        int quoteFrom = searchFrom;
+        while (quoted.find(quoteFrom)) {
+            quoteFrom = quoted.end();
+            // «قيد التنفيذ», "completed": a quoted state is never a merchant.
+            if (STATUS.matcher(quoted.group(1).trim()).find()) continue;
+            setMerchant(f, x, quoted.start(1), quoted.end(1));
+            return;
+        }
         for (Pattern marker : new Pattern[]{STRONG, GLUED_LAM, null, PARTY}) {
             if (marker == null) {
                 Matcher bill = BILL.matcher(t);
@@ -332,15 +407,14 @@ final class TransactionExtractor {
         Matcher instapay = INSTAPAY.matcher(t);
         Matcher phone = COUNTERPARTY_PHONE.matcher(t);
         Matcher digits = COUNTERPARTY_DIGITS.matcher(t);
+        // Most specific first: an InstaPay address, a paid request, a dash-set beneficiary name, a phone, an account holder.
+        Matcher request = COUNTERPARTY_REQUEST.matcher(t), holder = COUNTERPARTY_HOLDER.matcher(t), name = COUNTERPARTY_NAME.matcher(t);
         if (instapay.find()) x.counterparty = f.display(instapay.start(), instapay.end());
+        else if (request.find()) x.counterparty = f.display(request.start(1), request.end(1)).trim();
+        else if (name.find()) x.counterparty = f.display(name.start(1), name.end(1)).trim();
         else if (phone.find()) x.counterparty = f.display(phone.start(1), phone.end(1));
-        else {
-            Matcher request = COUNTERPARTY_REQUEST.matcher(t), holder = COUNTERPARTY_HOLDER.matcher(t), name = COUNTERPARTY_NAME.matcher(t);
-            if (request.find()) x.counterparty = f.display(request.start(1), request.end(1)).trim();
-            else if (holder.find()) x.counterparty = f.display(holder.start(1), holder.end(1)).trim();
-            else if (name.find()) x.counterparty = f.display(name.start(1), name.end(1)).trim();
-            else if (digits.find()) x.counterparty = digits.group(1);
-        }
+        else if (holder.find()) x.counterparty = f.display(holder.start(1), holder.end(1)).trim();
+        else if (digits.find()) x.counterparty = digits.group(1);
     }
 
     // ---- Bank-supplied event time ------------------------------------------------------------------------------
@@ -428,6 +502,9 @@ final class TransactionExtractor {
         // A merchant is expected only for a card purchase; fees, interest, installments and investments describe themselves.
         if (x.merchantKey == null && x.movementKind == null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find() &&
                 !NOT_A_PURCHASE.matcher(t).find()) { x.reasons.add("MISSING_MERCHANT"); review = true; }
+        if (classified.reasons.contains("ADJUSTED_EVENT")) x.reasons.add("ADJUSTED_EVENT");
+        // Every review cap the policy names applies here too, so the provisional and scored decisions cannot disagree.
+        for (String cap : ParsingPolicy.REVIEW_CAPS) review |= x.reasons.contains(cap);
         x.decision = review ? "REVIEW" : "AUTO";
     }
 
@@ -437,9 +514,12 @@ final class TransactionExtractor {
         if (KIND_INVESTMENT.matcher(t).find()) return "investment";
         if ("in".equals(x.direction) && KIND_INTEREST.matcher(t).find()) return "interest";
         if (KIND_INSTALLMENT.matcher(t).find()) return "installment";
-        // The principal itself is a fee when the fee word sits in its clause and no separate fee amount is stated.
-        if ("out".equals(x.direction) && x.feeMinor == null && x.principalAt >= 0 &&
+        if (KIND_CHEQUE.matcher(t).find()) return "cheque";
+        // The principal itself is a fee (charge, penalty, tax) when the fee word sits in its clause, no separate fee
+        // amount is stated and no merchant was charged.
+        if ("out".equals(x.direction) && x.feeMinor == null && x.merchantKey == null && x.principalAt >= 0 &&
                 KIND_FEE.matcher(t.substring(clauseStart(t, x.principalAt), clauseEnd(t, x.principalAt))).find()) return "bank_fee";
+        if (x.merchantKey != null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find()) return "card_purchase";
         return null;
     }
 

@@ -45,9 +45,12 @@ public final class HeldOutBlind {
         MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);
         MessageClassifier.Result classified = MessageClassifier.classify(normalized);
         TransactionExtractor.Extraction x = TransactionExtractor.extract(normalized, classified, receivedAt);
+        // The pipeline's final decision: confidence, then local learning with no user data.
+        ConfidenceScorer.Confidence scored = ConfidenceScorer.score(classified, x);
+        String decision = new LocalLearning().apply("held-out", normalized.text, scored, x).decision;
         Map<String, String> got = new LinkedHashMap<>();
         got.put("type", classified.corpusType());
-        got.put("decision", x.decision);
+        got.put("decision", decision);
         got.put("amount", x.amountMinor == null ? null : String.valueOf(x.amountMinor));
         got.put("currency", x.currency);
         got.put("direction", x.direction);

@@ -44,6 +44,21 @@ final class MessageClassifier {
     private static final Pattern CLAUSE = compile(ParsingPolicy.CLAUSE_BOUNDARY);
     private static final Pattern AMOUNT_ROLE_WORD = compile(ParsingPolicy.CLAUSE_AMOUNT_ROLE_WORD);
     private static final Pattern PENDING = compile(ParsingPolicy.PENDING_EVENT);
+    private static final Pattern OTP_CODE = compile(ParsingPolicy.OTP_CODE);
+    private static final Pattern NO_NEW_MOVEMENT = compile(ParsingPolicy.NO_NEW_MOVEMENT);
+    private static final Pattern SUMMARY = compile(ParsingPolicy.SUMMARY);
+    private static final Pattern RETAINED = compile(ParsingPolicy.RETAINED_FEE);
+    private static final Pattern ADJUSTED = compile(ParsingPolicy.ADJUSTED);
+    private static final Pattern EQUIVALENCE = compile(ParsingPolicy.CLAUSE_EQUIVALENCE);
+    private static final Pattern LINE_PARTY = compile(ParsingPolicy.MERCHANT_MARKER + "|(?<!\\p{L})من(?!\\p{L})|\\bfrom\\b");
+
+    /** Lines that each carry an amount and a party ("شراء لدى NOLA: 185 جنيه"): two or more mean several events. */
+    private static int partyLines(String text) {
+        int lines = 0;
+        for (String line : MessageNormalizer.fold(text).split("\n"))
+            if (!AmountScanner.scan(line).isEmpty() && LINE_PARTY.matcher(line).find()) lines++;
+        return lines;
+    }
     private static final Pattern AMOUNT_STATEMENT = compile(ParsingPolicy.AMOUNT_STATEMENT);
     private static final Pattern HOLD_RELEASED = compile(ParsingPolicy.HOLD_RELEASED);
     private static final Pattern COMMITMENT = compile(ParsingPolicy.COMMITMENT);
@@ -56,8 +71,26 @@ final class MessageClassifier {
         if (!anyAmount) reasons.add("MISSING_AMOUNT");
         if (SECURITY_REQUEST.matcher(text).find() && !VERIFICATION.matcher(text).find())
             return result(Type.VERIFICATION, reasons, 0, "VERIFICATION_MESSAGE");
-        if (VERIFICATION.matcher(text).find()) return result(Type.OTP, reasons, 0, "VERIFICATION_MESSAGE");
+        // A code message needs a standalone code; "OTP" naming how a completed payment was authorised is not one.
+        if (VERIFICATION.matcher(text).find() && OTP_CODE.matcher(text).find()) return result(Type.OTP, reasons, 0, "VERIFICATION_MESSAGE");
         if (BALANCE_INQUIRY.matcher(text).find()) return result(Type.BALANCE_INQUIRY, reasons, 0, "BALANCE_ONLY");
+        // A status update about an earlier debit moves no new money.
+        if (NO_NEW_MOVEMENT.matcher(text).find()) return result(Type.OTHER, reasons, 0, "NO_NEW_MOVEMENT");
+        // A summary of several operations, or two lines each with an amount and a party, is several events.
+        if (anyAmount && (SUMMARY.matcher(text).find() && AmountScanner.scan(text).size() >= 2 || partyLines(message.text) >= 2)) {
+            reasons.add("MULTIPLE_EVENTS");
+            return new Result(Type.TRANSACTION, Decision.UNUNDERSTOOD, reasons, 2);
+        }
+        // A failed operation that kept its fee: the fee is the one movement.
+        if (UNSUCCESSFUL.matcher(text).find() && RETAINED.matcher(text).find() && anyAmount) {
+            reasons.add("RETAINED_FEE"); reasons.add("COMPLETED_EVENT");
+            return new Result(Type.TRANSACTION, Decision.EXTRACT, reasons, 1);
+        }
+        // An adjusted operation (final amount after a hold) is one event, for review, whatever else it mentions.
+        if (anyAmount && ADJUSTED.matcher(text).find()) {
+            reasons.add("ADJUSTED_EVENT"); reasons.add("COMPLETED_EVENT");
+            return new Result(Type.TRANSACTION, Decision.EXTRACT, reasons, 1);
+        }
 
         int events = 0;
         boolean signed = false, refund = REFUND.matcher(text).find();
@@ -72,7 +105,14 @@ final class MessageClassifier {
             boolean clauseSigned = false;
             for (AmountScanner.Money money : amounts) clauseSigned |= money.trailingSign != 0;
             signed |= clauseSigned;
-            if (clauseSigned || COMPLETED.matcher(clause).find() || REFUND.matcher(clause).find()) events++;
+            java.util.regex.Matcher verb = COMPLETED.matcher(clause), role = AMOUNT_ROLE_WORD.matcher(clause);
+            boolean completedHere = verb.find();
+            // "Total posted: EGP 1,281.84", "رسوم التحويل … (تم خصم 50)": a role word before the verb owns the amount.
+            boolean roleFirst = completedHere && role.find() && role.start() < verb.start();
+            // After the first event, an exchange-rate/equivalent restatement ("EGP 903.54 credited at the rate") is not another.
+            boolean restatement = events > 0 && EQUIVALENCE.matcher(clause).find();
+            if (roleFirst || restatement) continue;
+            if (clauseSigned || completedHere || REFUND.matcher(clause).find()) events++;
             else if (MERCHANT_MARKER.matcher(clause).find() && !AMOUNT_ROLE_WORD.matcher(clause).find()) elided++;
             else if (!AMOUNT_ROLE_WORD.matcher(clause).find() && AMOUNT_STATEMENT.matcher(clause).find()) bareAmounts++;
         }
