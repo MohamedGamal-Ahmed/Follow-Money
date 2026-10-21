@@ -77,6 +77,12 @@ public final class ShadowDedupeTest {
         same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "EGP", true, true), charges, none), -1L, "A credit from a named party is not a return");
         same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "USD", true, false), charges, none), -1L, "Another currency is another movement");
         same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 - 1, "in", 500L, "EGP", true, false), charges, none), -1L, "A credit before the charge offsets nothing");
+        // A refund or reversal may name the merchant; it then pairs only with a charge at the same merchant.
+        java.util.List<ShadowOffset.Movement> atShops = java.util.List.of(
+                new ShadowOffset.Movement(4, "Banque Misr", t0, "out", 500L, "EGP", true, true, "butlers"),
+                new ShadowOffset.Movement(5, "Banque Misr", t0 + 60_000, "out", 500L, "EGP", true, true, "seoudi"));
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "EGP", true, true, "butlers"), true, atShops, none), 4L, "Reversal pairs with the same merchant");
+        same(ShadowOffset.match(new ShadowOffset.Movement(9, "Banque Misr", t0 + 5 * 60_000, "in", 500L, "EGP", true, true, "butlers"), false, atShops, none), -1L, "A plain credit naming a party is never a return");
 
         System.out.println("Shadow dedupe checks passed: " + checks + " (" + contract + " corpus contract rows replayed in order).");
     }

@@ -106,6 +106,7 @@ final class TransactionExtractor {
     private static final Pattern MOVEMENT_SERVICE_TOPUP = Pattern.compile(ParsingPolicy.MOVEMENT_SERVICE_TOPUP, FLAGS);
     private static final Pattern PAYER_NAMED = Pattern.compile(ParsingPolicy.PAYER_NAMED, FLAGS);
     private static final Pattern PREPAID_SERVICE = Pattern.compile(ParsingPolicy.PREPAID_SERVICE, FLAGS);
+    private static final Pattern REQUESTED = Pattern.compile(ParsingPolicy.REQUESTED_TRANSFER, FLAGS);
     private static final Pattern MOVEMENT_CASH = Pattern.compile(ParsingPolicy.MOVEMENT_CASH, FLAGS);
     private static final Pattern MOVEMENT_SALARY = Pattern.compile(ParsingPolicy.MOVEMENT_SALARY, FLAGS);
     private static final Pattern MOVEMENT_REMITTANCE = Pattern.compile(ParsingPolicy.MOVEMENT_REMITTANCE, FLAGS);
@@ -528,6 +529,8 @@ final class TransactionExtractor {
         if ("service_topup".equals(x.movementKind)) x.reasons.add("PAYER_UNKNOWN");
         // A subscription paid from the line's prepaid credit may repeat money recorded at the top-up.
         if ("service_charge".equals(x.movementKind)) x.reasons.add("PREPAID_CREDIT");
+        // A transfer the user requested is not confirmed as executed: the user confirms it.
+        if (REQUESTED.matcher(t).find()) x.reasons.add("TRANSFER_REQUESTED");
         // Every review cap the policy names applies here too, so the provisional and scored decisions cannot disagree.
         for (String cap : ParsingPolicy.REVIEW_CAPS) review |= x.reasons.contains(cap);
         x.decision = review ? "REVIEW" : "AUTO";

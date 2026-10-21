@@ -385,6 +385,21 @@ family(case("bm08", "BankMisr", "Thank you for using card 1234 the amount EGP 59
             amount=5999, direction="out", merchant="amazon", balance=94001, dt="2025-04-14", precision="date", tags="card_purchase|deducted_in_merchant",
             note=SHAPE_NOTE + "A purchase legacy did not preview: 'deducted in <merchant>'."), count=2)
 
+family(case("qnb01", "QNB", "Your debit card ***5678 had a successful purchase of EGP 321.90 @SPINNEYS,Your available balance EGP 1200.00 for Lost/Stolen card call 19700",
+            amount=32190, direction="out", merchant="spinneys", card="5678", balance=120000, tags="card_purchase|had_a_successful|glued_at_merchant",
+            note=SHAPE_NOTE + "62 messages: a debit card that 'had a successful <operation> of' an amount is an outgoing card use; '@' glued to the name marks the merchant."))
+family(case("qnb02", "QNB", "Your debit card ***5678 had a successful withdrawal of EGP 500.00 @ATM -1234 MAADI ,Your available balance EGP 700.00 for Lost/Stolen card call 19700",
+            amount=50000, direction="out", card="5678", balance=70000, movement="cash_withdrawal", tags="cash_withdrawal|had_a_successful",
+            note=SHAPE_NOTE + "The same form at an ATM."), count=2)
+family(case("qnb03", "QNB", "You have requested a transfer of EGP 30000.00 to Ahmed by : 12345 ,Thanks to QNB transfer Mobile online banking",
+            amount=3000000, direction="out", movement="transfer_out", decision="REVIEW", reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_OUT|TRANSFER_REQUESTED",
+            tags="requested_transfer|not_confirmed",
+            note=SHAPE_NOTE + "5 messages: a transfer the user submitted; the bank does not confirm it was executed (TRANSFER_REQUESTED, review). 'Thanks to' is courtesy, not a party."), count=2)
+family(case("bm09", "BankMisr", "تم اعادة قيد معاملتك ل EGP 5.00 التي تمت علي البطاقة 1234*5678يوم 09/10/2026 عندFAWRY ، لمزيد من المعلومات. تفضل بالاتصال ب 19888",
+            amount=500, direction="in", merchant="fawry", card="5678", movement="reversal", expected_accounting_effect="expense_offset", dt="2026-10-09", precision="date",
+            reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_IN", tags="reversal|re_posting|expense_offset",
+            note=SHAPE_NOTE + "9 messages: 'إعادة قيد' re-posts (returns) an earlier card transaction; an expense offset, linked to the earlier 5.00 charge in capture (owner decision 2)."))
+
 
 def measured_language(row):
     text = row["body"] if row["channel"] == "sms" else "\n".join(row[col] or "" for col in ORIGINAL if col.startswith("android."))

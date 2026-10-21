@@ -111,7 +111,10 @@ public final class ParserCorpusV2Test {
         expect(ids.get("p011"),"expected_account_last4","2222");expect(ids.get("p146"),"expected_account_last4","7733");
         for(String id:new String[]{"p014","p135","p136"})expect(ids.get(id),"expected_currency",null);
         long reversals=ids.values().stream().filter(r->"reversal".equals(r.get("expected_movement_kind"))).count();
-        check(reversals==11,"All eleven reversal rows carry the expense_offset rule: "+reversals);
+        // Owner rule: every reversal is an expense offset (the original eleven, plus later observed forms).
+        check(reversals>=11,"The original eleven reversal rows are kept: "+reversals);
+        for(ParserCorpusFixture.Row r:ids.values())if("reversal".equals(r.get("expected_movement_kind")))
+            expect(r,"expected_accounting_effect","expense_offset");
         // Dual currency: the account-currency equivalent is the accounting amount; the foreign amount is display-only.
         for(String id:ids.keySet())if(id.startsWith("syn-dual-")){
             expect(ids.get(id),"expected_amount_minor","49525");expect(ids.get(id),"expected_currency","EGP");

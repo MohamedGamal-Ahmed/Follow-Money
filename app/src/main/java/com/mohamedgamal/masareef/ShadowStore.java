@@ -65,7 +65,8 @@ final class ShadowStore {
         if (o == null) return;
         // Owner decision: a return of the same charge minutes later is an expense offset linked to it, never income.
         String reasons = String.join(",", o.reasons);
-        long offsetOf = ShadowDiff.newRecords(o.decision) && !o.values.containsKey("accounting_effect") ? offsetOf(sql, origin, source, receivedAt, o) : -1;
+        String effect = o.values.get("accounting_effect");
+        long offsetOf = ShadowDiff.newRecords(o.decision) && (effect == null || effect.equals("expense_offset")) ? offsetOf(sql, origin, source, receivedAt, o) : -1;
         if (offsetOf >= 0) {
             o.values.put("accounting_effect", "expense_offset");
             o.values.put("offset_of", String.valueOf(offsetOf));
@@ -123,8 +124,10 @@ final class ShadowStore {
         Long amount;
         try { amount = o.values.containsKey("amount_minor") ? Long.valueOf(o.values.get("amount_minor")) : null; } catch (NumberFormatException e) { return -1; }
         boolean party = o.values.containsKey("merchant_key") || o.values.containsKey("counterparty");
-        ShadowOffset.Movement current = new ShadowOffset.Movement(-1, source, receivedAt, o.values.get("direction"), amount, o.values.get("currency"), true, party);
-        if (!"in".equals(current.direction) || party || amount == null) return -1;
+        boolean refund = "expense_offset".equals(o.values.get("accounting_effect"));
+        ShadowOffset.Movement current = new ShadowOffset.Movement(-1, source, receivedAt, o.values.get("direction"), amount, o.values.get("currency"), true, party,
+                o.values.get("merchant_key"));
+        if (!"in".equals(current.direction) || party && !refund || amount == null) return -1;
         List<ShadowOffset.Movement> earlier = new ArrayList<>();
         java.util.Set<Long> claimed = new java.util.HashSet<>();
         try (Cursor c = sql.rawQuery("SELECT id, received_at, decision, encrypted_body FROM shadow_observations WHERE origin=? AND source=? AND received_at BETWEEN ? AND ?",
@@ -137,11 +140,11 @@ final class ShadowStore {
                     if (v.has("offset_of")) claimed.add(Long.valueOf(v.getString("offset_of")));
                     Long minor = v.has("amount_minor") ? Long.valueOf(v.getString("amount_minor")) : null;
                     earlier.add(new ShadowOffset.Movement(c.getLong(0), source, c.getLong(1), v.optString("direction", null), minor, v.optString("currency", null),
-                            ShadowDiff.newRecords(c.getString(2)), v.has("merchant_key") || v.has("counterparty")));
+                            ShadowDiff.newRecords(c.getString(2)), v.has("merchant_key") || v.has("counterparty"), v.optString("merchant_key", null)));
                 } catch (org.json.JSONException | NumberFormatException malformed) { /* skip an unreadable row */ }
             }
         }
-        return ShadowOffset.match(current, earlier, claimed);
+        return ShadowOffset.match(current, refund, earlier, claimed);
     }
 
     /** Earlier deliveries of the same origin that could matter: the same identity, or the same content near in time. */
