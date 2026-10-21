@@ -46,6 +46,8 @@ final class MessageClassifier {
     private static final Pattern PENDING = compile(ParsingPolicy.PENDING_EVENT);
     private static final Pattern OTP_CODE = compile(ParsingPolicy.OTP_CODE);
     private static final Pattern NO_NEW_MOVEMENT = compile(ParsingPolicy.NO_NEW_MOVEMENT);
+    private static final Pattern PAST_REFERENCE = compile(ParsingPolicy.PAST_TRANSACTION_REFERENCE);
+    private static final Pattern NEW_MOVEMENT_VERB = compile(ParsingPolicy.NEW_MOVEMENT_VERB);
     private static final Pattern SUMMARY = compile(ParsingPolicy.SUMMARY);
     private static final Pattern RETAINED = compile(ParsingPolicy.RETAINED_FEE);
     private static final Pattern ADJUSTED = compile(ParsingPolicy.ADJUSTED);
@@ -76,6 +78,8 @@ final class MessageClassifier {
         if (BALANCE_INQUIRY.matcher(text).find()) return result(Type.BALANCE_INQUIRY, reasons, 0, "BALANCE_ONLY");
         // A status update about an earlier debit moves no new money.
         if (NO_NEW_MOVEMENT.matcher(text).find()) return result(Type.OTHER, reasons, 0, "NO_NEW_MOVEMENT");
+        // A reference to an earlier operation without a new movement verb of its own is not a new event.
+        if (PAST_REFERENCE.matcher(text).find() && !NEW_MOVEMENT_VERB.matcher(text).find()) return result(Type.OTHER, reasons, 0, "NO_NEW_MOVEMENT");
         // A summary of several operations, or two lines each with an amount and a party, is several events.
         if (anyAmount && (SUMMARY.matcher(text).find() && AmountScanner.scan(text).size() >= 2 || partyLines(message.text) >= 2)) {
             reasons.add("MULTIPLE_EVENTS");

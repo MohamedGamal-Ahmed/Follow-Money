@@ -28,13 +28,19 @@ final class MerchantNormalizer {
         if (!withoutBranch.isEmpty()) folded = withoutBranch;
         List<String> tokens = new ArrayList<>(Arrays.asList(folded.split(" ")));
         // Only from the end, and never the whole name: CAIRO BOOKS keeps CAIRO; a lone "EGYPT" stays.
-        while (tokens.size() > 1 && trailingLocation(tokens.get(tokens.size() - 1))) tokens.remove(tokens.size() - 1);
+        while (tokens.size() > 1 && listed(ParsingPolicy.TRAILING_LOCATIONS, tokens.get(tokens.size() - 1))) tokens.remove(tokens.size() - 1);
+        // A fixed-width terminal name cut one letter into the word after a company form ("BUTLERS & CO C"): the fragment
+        // and the form go together. A complete company form stays ("Butler's & Co" → butler s co).
+        int n = tokens.size();
+        if (n > 2 && tokens.get(n - 1).length() == 1 && listed(ParsingPolicy.TRAILING_LEGAL_FORMS, tokens.get(n - 2))) {
+            tokens.remove(n - 1); tokens.remove(n - 2);
+        }
         return String.join(" ", tokens);
     }
 
-    private static boolean trailingLocation(String token) {
-        for (String location : ParsingPolicy.TRAILING_LOCATIONS)
-            if (MessageNormalizer.fold(location).equals(token)) return true;
+    private static boolean listed(String[] words, String token) {
+        for (String word : words)
+            if (MessageNormalizer.fold(word).equals(token)) return true;
         return false;
     }
 

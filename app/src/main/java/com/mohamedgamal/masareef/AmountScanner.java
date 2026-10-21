@@ -33,8 +33,10 @@ final class AmountScanner {
         StringBuilder units = new StringBuilder();
         for (String[] unit : ParsingPolicy.CURRENCY_UNITS) units.append(units.length() == 0 ? "" : "|").append(unit[1]);
         String unit = "(?:" + units + ")";
-        // A unit glued to a hyphen and digits ("EGP-1234") is an identifier, not an amount.
-        MONEY = Pattern.compile("(?iu)(?<![\\p{L}])(" + unit + ")(?![\\p{L}])(?!-\\d)\\s{0,2}(" + NUMBER + ")(?![\\d\\p{L}])" +
+        // A unit glued to a hyphen and digits ("EGP-1234") is an identifier, not an amount. A number ends at the first
+        // character that is neither a digit nor a separator followed by a digit, so a glued word after it ("15.00عند",
+        // "149.98EGP") is a separate word and the number is never cut back to fit ("149.98عند" is never 149).
+        MONEY = Pattern.compile("(?iu)(?<![\\p{L}])(" + unit + ")(?![\\p{L}])(?!-\\d)\\s{0,2}(" + NUMBER + ")(?![.,]?\\d)" +
                 // A number glued to a mask ("***-789", "x1234") is part of an account, not an amount before a unit.
                 "|(?<![\\d.,*#xX-])(" + NUMBER + ")\\s{0,2}(" + unit + ")(?![\\p{L}])");
     }

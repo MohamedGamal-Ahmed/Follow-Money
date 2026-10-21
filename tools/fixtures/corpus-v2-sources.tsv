@@ -32,3 +32,7 @@ SYNTHETIC_FAWRY_BILL	synthetic	\N	Message type fawry_bill_payment	SYNTHETIC. Faw
 SYNTHETIC_CARD_DECLINE	synthetic	\N	Message type card_decline	SYNTHETIC. Declined card purchases (insufficient funds, daily limit); must never create a transaction. Attributed to no bank.
 SYNTHETIC_VODAFONE_CASH	synthetic	\N	Message type vodafone_cash	SYNTHETIC. Vodafone Cash payment, deposit and transfer-out messages in Arabic. Wording, numbers and balances are invented; not observed Vodafone Cash text.
 SYNTHETIC_INSTAPAY_DIRECT	synthetic	\N	Message type instapay_direct	SYNTHETIC. Direct InstaPay app notification represented as separate Android extras (title/text/bigText). Field placement is assumed, not observed; package key is a fixture placeholder.
+bm01	user_redacted	\N	Owner phone sample, 21 Oct 2026 (Bank Misr purchase)	Amounts, merchants and dates are the owner's examples; the glued عند is the observed form of all 96 Bank Misr purchases.
+bm02	user_redacted	\N	Owner phone sample, 21 Oct 2026 (Bank Misr contactless notice)	Refers to an earlier purchase; no new movement.
+we01	user_redacted	\N	Owner phone sample, 21 Oct 2026 (WE line top-up)	Provider confirmation; the paying account is not named.
+we02	user_redacted	\N	Owner phone sample, 21 Oct 2026 (WE landline internet top-up)	Provider confirmation; the paying account is not named.

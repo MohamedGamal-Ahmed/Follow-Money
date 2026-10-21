@@ -293,6 +293,45 @@ notification_family(synthetic("syn-instapay-en", "SYNTHETIC_INSTAPAY_DIRECT", No
                     "InstaPay", "You have received EGP 1,000.00 from sara.m@instapay")
 
 
+# Owner phone samples (21 October 2026, user_redacted). Appended last so earlier rows keep their receipt times.
+BM_PURCHASE = ("شكرًا لاستخدامك بطاقة بنك مصر ***4636، تم الآن خصم EGP 15.00عند KASHIER*BUTLERS & CO C يوم 20/10/2026 ، "
+               "الرصيد المتاح EGP 2139.44 لمزيد من المعلومات عن الحساب، تفضل بزيارة الرابط التالي https://bnkmsr.com/online")
+family(case("bm01", "BankMisr", BM_PURCHASE, amount=1500, direction="out", merchant="butlers", card="4636", balance=213944,
+            movement="card_purchase", dt="2026-10-20", precision="date", tags="card_purchase|glued_word_after_amount|processor_prefix|truncated_terminal_name",
+            note="Owner phone sample: the word عند is glued to the amount in every Bank Misr purchase (96 messages). Amount keeps its piasters; KASHIER* is a processor prefix; '& CO C' is a fixed-width terminal name cut off."))
+bm_base = next(r for r in rows if r["id"] == "bm01")
+for suffix, old, new, minor, key, movement in [
+    ("seoudi", "15.00عند KASHIER*BUTLERS & CO C", "44.95عند SEOUDI SODIC EAST", 4495, "seoudi sodic east", "card_purchase"),
+    ("zaher", "15.00عند KASHIER*BUTLERS & CO C", "1897.71عند ZAHER-AIN SHAMS 1", 189771, "zaher ain shams 1", "card_purchase"),
+    ("vodafone", "15.00عند KASHIER*BUTLERS & CO C", "490.00عند Bill Payment Vodafone", 49000, "vodafone", "bill_payment"),
+]:
+    clone = dict(bm_base); clone.update(id="bm01-" + suffix, source_message_id="masked-fixture-bm01-" + suffix, body=bm_base["body"].replace(old, new),
+        expected_amount_minor=minor, expected_merchant_key=key, expected_movement_kind=movement, variant="amount_merchant",
+        note="Owner-specified amount/merchant variant of bm01 (same Bank Misr form). ZAHER: the branch number 1 is kept, as for any branch number alone; Bill Payment is a descriptor before the biller.")
+    rows.append(clone)
+# Glued shapes (owner rule): a number ends at the first character that is neither a digit nor a separator before a digit.
+for suffix, old, new, minor in [
+    ("glued_integer", "EGP 15.00عند", "EGP 15عند", 1500),
+    ("currency_after_fraction", "EGP 15.00عند", "15.00EGP عند", 1500),
+    ("currency_before_glued", "EGP 15.00عند", "EGP15.00عند", 1500),
+    ("arabic_currency_after", "EGP 15.00عند", "15.00ج.م عند", 1500),
+]:
+    clone = dict(bm_base); clone.update(id="bm01-" + suffix, source_message_id="masked-fixture-bm01-" + suffix, body=bm_base["body"].replace(old, new),
+        expected_amount_minor=minor, variant=suffix, feature_tags="card_purchase|glued_amount|" + suffix,
+        note="Declared glued-amount variation of bm01 (owner rule: no fraction may be lost and a glued word or currency is a separate word); not another observed form.")
+    rows.append(clone)
+family(case("bm02", "BankMisr", "عميلنا العزيز الحركة التي تمت ببطاقتكم ***4636 بمبلغ EGP 15.00 لدى KASHIER*BUTLERS & CO C هي اخر حركة لا تلامسية ، يرجى استخدام حركة المشتريات القادمة باستخدام الرقم السري حتى يمكن إعادة استخدام خاصية اللا تلامسية مرة أخرى",
+            kind="other", decision="IGNORE", reasons="NO_NEW_MOVEMENT", tags="past_transaction_reference|instruction|no_new_movement",
+            note="Owner phone sample: refers to an earlier contactless purchase and gives instructions; no new money moves."))
+for identifier, text, minor, balance in [
+    ("we01", "تم شحن رصيدك على الرقم 0224994891 ب 136.80 ج.م. إجمالي رصيدك 120.00 ج.م.", 13680, 12000),
+    ("we02", "تم شحن الإنترنت الأرضي 0224994891 ب 450.30 ج م. رصيدك 400.01 ج م.", 45030, 40001),
+]:
+    family(case(identifier, "we-Landline", text, amount=minor, direction="out", balance=balance, movement="service_topup", decision="REVIEW",
+                reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_OUT|PAYER_UNKNOWN", tags="service_topup|provider_confirmation|payer_unknown|topup_word_not_balance",
+                note="Owner phone sample: the service provider confirms a top-up of the user's line without naming the paying account, so the same payment may already be recorded from the bank or wallet message (PAYER_UNKNOWN, REVIEW). The stated balance is the line's balance."))
+
+
 def measured_language(row):
     text = row["body"] if row["channel"] == "sms" else "\n".join(row[col] or "" for col in ORIGINAL if col.startswith("android."))
     text = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))

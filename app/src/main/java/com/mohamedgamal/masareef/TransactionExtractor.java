@@ -103,6 +103,8 @@ final class TransactionExtractor {
     private static final Pattern MOVEMENT_WALLET = Pattern.compile(ParsingPolicy.MOVEMENT_WALLET, FLAGS);
     private static final Pattern MOVEMENT_WALLET_TOPUP = Pattern.compile(ParsingPolicy.MOVEMENT_WALLET_TOPUP, FLAGS);
     private static final Pattern MOVEMENT_BILL = Pattern.compile(ParsingPolicy.MOVEMENT_BILL, FLAGS);
+    private static final Pattern MOVEMENT_SERVICE_TOPUP = Pattern.compile(ParsingPolicy.MOVEMENT_SERVICE_TOPUP, FLAGS);
+    private static final Pattern PAYER_NAMED = Pattern.compile(ParsingPolicy.PAYER_NAMED, FLAGS);
     private static final Pattern MOVEMENT_CASH = Pattern.compile(ParsingPolicy.MOVEMENT_CASH, FLAGS);
     private static final Pattern MOVEMENT_SALARY = Pattern.compile(ParsingPolicy.MOVEMENT_SALARY, FLAGS);
     private static final Pattern MOVEMENT_REMITTANCE = Pattern.compile(ParsingPolicy.MOVEMENT_REMITTANCE, FLAGS);
@@ -383,7 +385,9 @@ final class TransactionExtractor {
         end = Math.min(end, start + ParsingPolicy.MERCHANT_MAX_CHARS);
         String value = t.substring(start, end).trim();
         String token = t.substring(start).split("\\s", 2)[0];
-        if (value.isEmpty() || !value.matches("(?s).*\\p{L}.*") || value.matches("(?s).*[*#].*|(?s).*\\bx{2,}.*") ||
+        // A mask repeats */# or touches a digit ("***4636", "#1234"); one * between letters separates a processor
+        // from its merchant ("KASHIER*BUTLERS"), which MerchantNormalizer removes.
+        if (value.isEmpty() || !value.matches("(?s).*\\p{L}.*") || value.matches("(?s).*(?:[*#]{2}|[*#]\\d|\\d[*#]|^[*#]).*|(?s).*\\bx{2,}.*") ||
                 Character.isDigit(value.charAt(0)) || INSTAPAY.matcher(token).find() || GENERIC.matcher(value).find() ||
                 ATM_PHRASE.matcher(value).find()) return null;
         // "From HSBC:" is a sender header, not a counterparty.
@@ -516,10 +520,12 @@ final class TransactionExtractor {
         if (x.merchantKey == null && x.selfKind == null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find() &&
                 !NOT_A_PURCHASE.matcher(t).find()) { x.reasons.add("MISSING_MERCHANT"); review = true; }
         if (classified.reasons.contains("ADJUSTED_EVENT")) x.reasons.add("ADJUSTED_EVENT");
+        x.movementKind = movement(t, x);
+        // A provider's top-up confirmation that names no payer may repeat a payment already recorded from the bank or wallet.
+        if ("service_topup".equals(x.movementKind)) x.reasons.add("PAYER_UNKNOWN");
         // Every review cap the policy names applies here too, so the provisional and scored decisions cannot disagree.
         for (String cap : ParsingPolicy.REVIEW_CAPS) review |= x.reasons.contains(cap);
         x.decision = review ? "REVIEW" : "AUTO";
-        x.movementKind = movement(t, x);
     }
 
     /** The corpus movement kind, most specific first (ParsingPolicy.MOVEMENT_KINDS gives the order). */
@@ -530,6 +536,8 @@ final class TransactionExtractor {
         if (in && MOVEMENT_WALLET_TOPUP.matcher(t).find()) return "wallet_topup";
         if (x.reasons.contains("POSSIBLE_INTERNAL_TRANSFER")) return "possible_internal_transfer";
         if (MOVEMENT_WALLET.matcher(t).find()) return out && x.merchantKey != null ? "wallet_payment" : in ? "wallet_transfer_in" : "wallet_transfer_out";
+        if (out && MOVEMENT_SERVICE_TOPUP.matcher(t).find() && x.cardLast4 == null && x.accountLast4 == null && !PAYER_NAMED.matcher(t).find())
+            return "service_topup";
         if (out && MOVEMENT_BILL.matcher(t).find()) return "bill_payment";
         if (out && "installment".equals(x.selfKind)) return "installment_payment";
         if (out && MOVEMENT_CASH.matcher(t).find()) return "cash_withdrawal";
