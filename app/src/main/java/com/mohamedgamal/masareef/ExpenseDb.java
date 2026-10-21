@@ -1250,7 +1250,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 new String[]{Long.toString(id), kind});
     }
 
-    private void addSourceAlias(String identity, long sourceId) { accounts.addSourceAlias(identity,sourceId); }
+    void addSourceAlias(String identity, long sourceId) { accounts.addSourceAlias(identity,sourceId); }
 
     private static void mergeDuplicateAutomaticSources(SQLiteDatabase db) {
         java.util.Map<String, Long> primary = new java.util.HashMap<>();
@@ -1480,6 +1480,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public List<Transaction> transactions() { return transactionRows.transactions(); }
 
     public List<Transaction> recentTransactions(int limit) { return transactionRows.recentTransactions(limit); }
+    public List<Transaction> recentSourceTransactions(long sourceId) { return transactionRows.recentSourceTransactions(sourceId); }
 
     public List<Transaction> recurringCandidateTransactions() { return transactionRows.recurringCandidateTransactions(); }
 
@@ -1727,6 +1728,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     int updateSourceProfileRow(long id,String displayName,boolean archived,boolean reviewed) { return accounts.updateSourceProfileRow(id,displayName,archived,reviewed); }
 
     boolean hasSourceAlias(String identity) { return accounts.hasSourceAlias(identity); }
+    Long sourceAliasOwner(String identity) { return accounts.sourceAliasOwner(identity); }
+    int updateSourceBankRow(long id,String bank,String displayName) { return accounts.updateSourceBankRow(id,bank,displayName); }
 
     public List<PaymentSource> accountSources(boolean includeArchived) { return accounts.accountSources(includeArchived); }
 

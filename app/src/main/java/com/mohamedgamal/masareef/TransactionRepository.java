@@ -47,6 +47,18 @@ final class TransactionRepository {
         return result;
     }
 
+    List<Transaction> recentSourceTransactions(long sourceId) {
+        List<Transaction> result=new ArrayList<>();
+        try(Cursor cursor=db.getReadableDatabase().query("transactions",TRANSACTION_COLUMNS,
+                "payment_source_id=? OR (kind='transfer' AND destination_source_id=?)",new String[]{Long.toString(sourceId),Long.toString(sourceId)},
+                null,null,"occurred_at DESC,id DESC","3")) {
+            while(cursor.moveToNext())result.add(new Transaction(cursor.getLong(0),cursor.getLong(1),cursor.getLong(2),cursor.getString(3),cursor.getString(4),
+                    cursor.getString(5),cursor.getString(6),cursor.isNull(7)?null:cursor.getLong(7),cursor.getString(8),cursor.getString(9),
+                    cursor.isNull(10)?null:cursor.getLong(10),cursor.getString(11),cursor.getInt(12)!=0,cursor.getString(13)));
+        }
+        return result;
+    }
+
     /**
      * Expenses from the last year, newest first: recurring-payment suggestions only compare payments
      * about a month apart, so they never need the whole ledger.

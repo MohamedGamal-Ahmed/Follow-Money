@@ -96,7 +96,8 @@ final class SupportAidsUiTest {
                 Intent draft=interceptMail();
                 ok(draft!=null&&draft.getStringExtra(Intent.EXTRA_TEXT).contains("IllegalStateException")
                         &&draft.getStringExtra(Intent.EXTRA_TEXT).contains("Synthetic support QA"),"Mail draft omitted selected crash");
-                click("إلغاء");
+                runner.runOnMainSync(main::onBackPressed);idle();click("تجاهل التعديلات");
+                ok(!has("فتح مسودة إيميل"),"Discarding the report page returned to settings");
                 for(int i=0;i<4;i++){CrashLog.save(target,new NumberFormatException("SECRET SMS EGP 1250.00 card 1234567890"));android.os.SystemClock.sleep(5);}
                 File[] files=new File(target.getFilesDir(),"crashes").listFiles();ok(files!=null&&files.length==3,"Crash retention did not keep exactly three files");
                 String latest=CrashLog.latest(target);ok(!latest.contains("SECRET")&&!latest.contains("1250")&&!latest.contains("1234567890"),"Crash log contains a financial exception message");

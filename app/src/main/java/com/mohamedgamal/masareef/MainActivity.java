@@ -65,22 +65,11 @@ import java.util.Map;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
-    private int INK = 0xff0d1f1a;
-    private int MUTED = 0xff5e6b66;
-    private int BACKGROUND = 0xfff4f5f1;
-    private int ACCENT = 0xff0b3d2e;
-    private static final int BRAND = 0xff0b3d2e;
-    private static final int BRAND_SOFT = 0xff1c5443;
-    private static final int EMERALD = 0xff12a06e;
-    private static final int LIME = 0xffc8f25a;
-    private static final int INDIGO = 0xff3b4ba8;
-    private int CORAL = 0xffc23a3a;
-    private int INCOME = 0xff138a5c;
-    private static final int GOLD = 0xffd9a21b;
-    private int ACCENT_PALE = 0xffe3f1e9;
-    private int BORDER = 0xffe3e6df;
-    private int SURFACE = Color.WHITE;
-    private static final int ORANGE = 0xffc25e0b;
+    private int INK, MUTED, BACKGROUND, ACCENT, BRAND, BRAND_SOFT, EMERALD, LIME, INDIGO;
+    private int CORAL, INCOME, GOLD, ACCENT_PALE, BORDER, SURFACE, ORANGE;
+    private UiTheme uiTheme;
+    private UiComponents ui;
+    private UiPages formPages;
     private Typeface REGULAR = Typeface.DEFAULT;
     private Typeface BOLD = Typeface.DEFAULT_BOLD;
     private boolean dark;
@@ -150,11 +139,14 @@ public final class MainActivity extends Activity {
     private AppLock appLock;
     private WhatsNew.Section whatsNew;
     private boolean initialActionsPending, initialDirect, initialFresh, pendingIntentActions;
+    private Intent deferredIncomingIntent;
     private LinearLayout page;
     private LinearLayout settingsGroup;
     private LocalDate selectedMonth = LocalDate.now().withDayOfMonth(1);
     private int selectedTab = 0;
     private String settingsSection = "";
+    /** Row tag prefix a settings search hit scrolls to and highlights once; never runs the row's action. */
+    private String settingsFocus;
     private String insightsSection = "";
     private int transactionReturnTab = 6;
     /** Where Back goes from العمليات: التحليلات when a number was opened from there. */
@@ -192,12 +184,18 @@ public final class MainActivity extends Activity {
         dark = getPreferences(MODE_PRIVATE).getBoolean("dark_mode", false);
         if (dark) {
             setTheme(R.style.AppTheme_Dark);
-            INK = 0xffeef3ef; MUTED = 0xff9aaaa2; BACKGROUND = 0xff0d1a16; ACCENT = 0xff2bbf85;
-            ACCENT_PALE = 0xff1c3a2e; BORDER = 0xff2a3b33; SURFACE = 0xff16261f; CORAL = 0xfff07070; INCOME = 0xff3ccb8b;
         }
         super.onCreate(state);
+        uiTheme = new UiTheme(this, dark);
+        INK=uiTheme.ink; MUTED=uiTheme.muted; BACKGROUND=uiTheme.background; ACCENT=uiTheme.accent;
+        BRAND=uiTheme.brand; BRAND_SOFT=uiTheme.brandSoft; EMERALD=uiTheme.emerald; LIME=uiTheme.lime;
+        INDIGO=uiTheme.indigo; CORAL=uiTheme.danger; INCOME=uiTheme.income; GOLD=uiTheme.gold;
+        ACCENT_PALE=uiTheme.pale; BORDER=uiTheme.border; SURFACE=uiTheme.surface; ORANGE=uiTheme.orange;
         appLock = new AppLock(this, this::onAppUnlocked);
         loadFonts();
+        ui = new UiComponents(this, uiTheme, REGULAR);
+        formPages = new UiPages(this, uiTheme, REGULAR, this::render);
+        if (state != null) formPages.restore(state.getBundle("form_pages"), this::restoreFormPage);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(SURFACE);
         int systemBars = dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
@@ -277,9 +275,11 @@ public final class MainActivity extends Activity {
         if (db == null || isFinishing() || isDestroyed()) return;
         render();
         if (initialActionsPending) runInitialActions();
-        else if (pendingIntentActions) {
+        if (pendingIntentActions) {
             pendingIntentActions = false;
-            processIncomingIntent(getIntent());
+            Intent incoming = deferredIncomingIntent;
+            deferredIncomingIntent = null;
+            processIncomingIntent(incoming == null ? getIntent() : incoming);
         }
     }
 
@@ -319,12 +319,17 @@ public final class MainActivity extends Activity {
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        setIntent(intent);
-        if (appLock.guard()) { pendingIntentActions = true; return; }
+        if (appLock.guard()) { pendingIntentActions = true; deferredIncomingIntent = intent; return; }
         processIncomingIntent(intent);
     }
 
     private void processIncomingIntent(Intent intent) {
+        if (formPages != null && formPages.isOpen()) {
+            formPages.leaveAll(() -> processIncomingIntent(intent));
+            return;
+        }
+        // A declined navigation must not become this Activity's launch intent after recreation.
+        setIntent(intent);
         handleShare(intent);
         openTransactionFromIntent(intent);
         openCaptureEventFromIntent(intent);
@@ -334,6 +339,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onSaveInstanceState(Bundle out) {
+        if (formPages != null) out.putBundle("form_pages", formPages.snapshot());
         super.onSaveInstanceState(out);out.putBoolean("intro_visible",introVisible);out.putInt("intro_step",introStep);
         out.putString("intro_name",introName);out.putString("intro_daily",introDaily);out.putString("intro_salary",introSalary);
         out.putInt("intro_currency",introCurrency);out.putInt("intro_payday",introPayDay);out.putBoolean("intro_loaded",introDraftLoaded);
@@ -366,14 +372,14 @@ public final class MainActivity extends Activity {
         int confirmed=0,review=0;java.util.Set<String> banks=new java.util.HashSet<>();
         for(ExpenseDb.PaymentSource source:sources) {
             if(source.archived)continue;
-            banks.add(SourceIdentity.bank(source.name));
+            if(bankSource(source.kind)&&usableBank(source.name))banks.add(SourceIdentity.bank(source.name));
             if("حساب".equals(source.kind) || "محفظة".equals(source.kind)) {
                 if(source.reviewed)confirmed++;else review++;
             }
         }
         note(confirmed+" حسابات مؤكدة · "+review+" حسابات تحتاج مراجعة · "+banks.size()+" بنوك");
         note("الرصيد المحسوب = آخر رصيد + الوارد − الخارج. يظل تقديريًا حسب تغطية الرسائل؛ افتح الحساب لمراجعة الرصيد والكروت.");
-        if (sources.isEmpty()) empty("ضيف أول وسيلة دفع", "اكتب اسم الكارت وآخر 4 أرقام علشان نربط رسائله تلقائيًا");
+        if (sources.isEmpty()) empty("ضيف أول وسيلة دفع", "حدد نوع الوسيلة والبنك، وسمّيها باسم تعرفه. ربط الكارت بحسابه يحتاج تأكيدك.");
         String[] groups={"حساباتك", "بطاقات ائتمان", "كروت تحتاج ربط بالحساب", "مؤرشف — التاريخ محفوظ"};
         for(int group=0;group<groups.length;group++) {
             boolean heading=false;
@@ -389,6 +395,10 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams nameParams=new LinearLayout.LayoutParams(0,-2,1);nameParams.setMarginStart(dp(10));title.addView(name,nameParams);
             card.addView(title);
             card.addView(label(source.archived?"مؤرشف · يمكنك إعادة تفعيله":source.reviewed?"استخدام مؤكد منك":"مكتشف من الرسائل · يحتاج مراجعة",12,MUTED,false));
+            if(bankSource(source.kind)&&!usableBank(source.name)){
+                card.addView(label("البنك لسه مش محدد؛ ده ممكن يمنع ظهور الكارت والحساب لبعض",12,CORAL,false));
+                card.addView(ui.button("تحديد البنك",false,false,()->sourceBankPage(source)));
+            }
             boolean knownBalance=false;
             for(String currency:CURRENCIES) {
                 ExpenseDb.BalanceSnapshot balance = db.currentBalance(source.id, currency);
@@ -431,6 +441,7 @@ public final class MainActivity extends Activity {
         labels.add("سجل الأرصدة");actions.add(()->balanceHistoryDialog(source));
         labels.add("تحديث الرصيد الحالي");actions.add(()->manualBalanceDialog(source));
         labels.add("تسمية وتأكيد الاستخدام");actions.add(()->sourceProfileDialog(source));
+        if(bankSource(source.kind)){labels.add("تحديد البنك وتصحيح بياناته");actions.add(()->sourceBankPage(source));}
         if("بطاقة".equals(source.kind)) {
             labels.add("ربط الكارت بحسابه");actions.add(()->linkSourceDialog(source));
         } else if("حساب".equals(source.kind)) {
@@ -453,63 +464,114 @@ public final class MainActivity extends Activity {
     }
 
     private void sourceProfileDialog(ExpenseDb.PaymentSource source) {
-        LinearLayout content=form();content.addView(label(source.name+" · "+source.kind+UiKit.last4Suffix(source.last4),14,MUTED,false));
-        EditText name=input("اسم واضح ليك، مثل حساب المصروفات",content);name.setText(source.displayName==null?"":source.displayName);
-        android.widget.CheckBox reviewed=new android.widget.CheckBox(this);reviewed.setText("راجعت الوسيلة وأعرف أني بستخدمها");
-        reviewed.setTextColor(INK);reviewed.setChecked(source.reviewed);content.addView(reviewed);
-        new ChoiceDialogBuilder().setTitle("تسمية الوسيلة").setView(content).setPositiveButton("حفظ",(d,w)->{
-            db.updateSourceProfile(source.id,name.getText().toString(),source.archived,reviewed.isChecked());render();
-        }).setNegativeButton("إلغاء",null).show();
+        Bundle draft=new Bundle();draft.putLong("id",source.id);
+        draft.putString("name",source.displayName==null?"":source.displayName);draft.putBoolean("reviewed",source.reviewed);
+        savePageScroll();formPages.push(new SourceProfilePage(draft,draft));
+    }
+
+    private final class SourceProfilePage extends UiPages.Page {
+        private TextView error;
+        SourceProfilePage(Bundle draft,Bundle original){super("source_profile","تسمية الوسيلة",draft,original);}
+        @Override void build(LinearLayout body,UiComponents components){
+            ExpenseDb.PaymentSource source=db.paymentSource(draft.getLong("id"));
+            if(source==null){body.addView(components.label("الوسيلة دي لم تعد موجودة",UiTheme.BODY,CORAL));return;}
+            LinearLayout top=new LinearLayout(MainActivity.this);top.setGravity(Gravity.CENTER_VERTICAL);
+            top.addView(sourceBadge(source,40),new LinearLayout.LayoutParams(dp(40),dp(40)));
+            TextView identity=components.label(source.name+" · "+source.kind+UiKit.last4Suffix(source.last4),UiTheme.BODY,INK);
+            identity.setPadding(dp(10),0,dp(10),0);top.addView(identity,new LinearLayout.LayoutParams(0,-2,1));body.addView(top);
+            EditText name=components.field("اسم واضح ليك",body);name.setTag("source_profile_name");
+            name.setText(draft.getString("name",""));name.setHint("مثال: حساب المصروفات");
+            name.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}
+                public void onTextChanged(CharSequence s,int st,int before,int count){draft.putString("name",s.toString());}
+                public void afterTextChanged(Editable text){}});
+            components.caption("الاستخدام",body);
+            android.widget.CheckBox reviewed=new android.widget.CheckBox(MainActivity.this);reviewed.setText("راجعت الوسيلة وأعرف أني بستخدمها");
+            reviewed.setTag("source_profile_reviewed");reviewed.setTypeface(REGULAR);reviewed.setTextSize(UiTheme.BODY);reviewed.setTextColor(INK);
+            reviewed.setButtonTintList(ColorStateList.valueOf(ACCENT));reviewed.setMinHeight(dp(UiTheme.TOUCH));
+            reviewed.setChecked(draft.getBoolean("reviewed"));reviewed.setOnCheckedChangeListener((b,checked)->draft.putBoolean("reviewed",checked));
+            body.addView(reviewed);
+            error=components.label("",UiTheme.BODY,CORAL);error.setVisibility(View.GONE);error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(error);
+        }
+        @Override boolean save(){
+            ExpenseDb.PaymentSource source=db.paymentSource(draft.getLong("id"));
+            if(source==null){if(error!=null){error.setText("الوسيلة دي لم تعد موجودة؛ لم نحفظ أي تعديل");error.setVisibility(View.VISIBLE);}return false;}
+            db.updateSourceProfile(source.id,draft.getString("name",""),source.archived,draft.getBoolean("reviewed"));return true;
+        }
+        @Override boolean restoreAfterRecreation(){return true;}
     }
 
     private void linkSourceDialog(ExpenseDb.PaymentSource source) {
-        boolean card="بطاقة".equals(source.kind);List<ExpenseDb.PaymentSource> choices=new ArrayList<>();
-        for(ExpenseDb.PaymentSource option:db.selectableSources())
-            if(option.id!=source.id && SourceIdentity.bank(source.name).equals(SourceIdentity.bank(option.name)) &&
-                    (card?"حساب".equals(option.kind)&&option.parentSourceId==null:"بطاقة".equals(option.kind)))choices.add(option);
-        if(choices.isEmpty()){toast(card?"أضف حساب البنك أولًا":"مفيش كروت لهذا البنك متاحة للربط");return;}
-        String[] labels=new String[choices.size()];for(int i=0;i<choices.size();i++)labels[i]=db.sourceLabel(choices.get(i).id);
-        new ChoiceDialogBuilder().setTitle(card?"الكارت بيسحب من أي حساب؟":"اختار الكارت التابع للحساب")
-                .setItems(labels,(dialog,index)->{
-                    ExpenseDb.PaymentSource option=choices.get(index);
-                    new ChoiceDialogBuilder().setTitle("تأكيد علاقة الكارت بالحساب")
-                            .setMessage(db.sourceLabel(source.id)+"\n"+db.sourceLabel(option.id)+"\n\nأكد فقط لو الكارت بيسحب من الحساب ده فعلًا. الرسائل والعمليات تفضل بهويتها، والرصيد يجمع الحركات بعد آخر رصيد مرة واحدة.")
-                            .setPositiveButton("أيوه، اربط",(d,w)->{
-                                try{db.linkCardToAccount(card?source.id:option.id,card?option.id:source.id);render();}
-                                catch(IllegalArgumentException error){toast("راجع الحساب والكارت؛ لا نربط حسابات مختلفة أو بطاقة ائتمان");}
-                            }).setNegativeButton("إلغاء",null).show();
-                }).show();
+        Bundle draft=new Bundle();draft.putLong("source",source.id);draft.putLong("selected",-1);
+        savePageScroll();formPages.push(new SourceLinkPage(draft,draft));
     }
 
-    private void mergeSourceDialog(ExpenseDb.PaymentSource keep) {
-        if(new CardSettlements(db).sourceRelated(keep.id)){toast("فك ربط سداد البطاقة قبل دمج الحساب");return;}
-        List<ExpenseDb.PaymentSource> options = new ArrayList<>();
-        String bank = SourceIdentity.bank(keep.name);
-        for (ExpenseDb.PaymentSource source : db.paymentSources())
-            if (source.id != keep.id && bank != null && bank.equals(SourceIdentity.bank(source.name))&&!new CardSettlements(db).sourceRelated(source.id))
-                options.add(source);
-        if (options.isEmpty()) { toast("مفيش معرفات تانية لنفس البنك"); return; }
-        String[] labels = new String[options.size()];
-        boolean[] checked = new boolean[options.size()];
-        for (int i = 0; i < options.size(); i++)
-            labels[i] = options.get(i).name + "  •  " +
-                    (options.get(i).last4 == null ? "بدون رقم" : "•••• " + options.get(i).last4);
-        new ChoiceDialogBuilder().setTitle("اختار معرفات نفس الحساب")
-                .setMultiChoiceItems(labels, checked, (dialog, which, selected) -> checked[which] = selected)
-                .setPositiveButton("التالي", (dialog, which) -> {
-                    int count = 0;
-                    for (boolean selected : checked) if (selected) count++;
-                    if (count == 0) { toast("اختار معرف واحد على الأقل"); return; }
-                    int selectedCount = count;
-                    new ChoiceDialogBuilder().setTitle("دمج الحسابات؟")
-                            .setMessage("هتتجمع " + selectedCount + " معرفات تحت " + keep.name +
-                                    ". المعاملات والأرصدة هتفضل محفوظة، وآخر رصيد مؤكد زمنيًا هيبقى نقطة البداية.")
-                            .setPositiveButton("دمج", (confirm, button) -> {
-                                for (int i = 0; i < options.size(); i++)
-                                    if (checked[i]){try{db.mergeSources(keep.id, options.get(i).id);}catch(IllegalArgumentException error){toast("فك ربط البطاقات أو سدادها قبل دمج المعرفات");}}
-                                render();
-                            }).setNegativeButton("إلغاء", null).show();
-                }).setNegativeButton("إلغاء", null).show();
+    private final class SourceLinkPage extends UiPages.Page {
+        private TextView error;private AlertDialog confirm;
+        SourceLinkPage(Bundle draft,Bundle original){super("source_link","الكارت والحساب",draft,original);}
+        private String reason(ExpenseDb.PaymentSource source,ExpenseDb.PaymentSource option){
+            if(source.archived||option.archived)return "الوسيلة مؤرشفة؛ فعّلها من إدارة الحسابات أولًا";
+            if(!usableBank(source.name)||!usableBank(option.name))return "البنك مش محدد؛ حدده لكل وسيلة قبل الربط";
+            if(!java.util.Objects.equals(SourceIdentity.bank(source.name),SourceIdentity.bank(option.name)))return "البنك المسجل مختلف؛ راجع بيانات البنك لو مكتوبة غلط";
+            return "";
+        }
+        private void identify(LinearLayout body,ExpenseDb.PaymentSource source){
+            LinearLayout card=new LinearLayout(MainActivity.this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(14),dp(12),dp(14),dp(12));card.setBackground(ui.shape(SURFACE,BORDER,UiTheme.BUTTON_RADIUS));
+            LinearLayout top=new LinearLayout(MainActivity.this);top.setGravity(Gravity.CENTER_VERTICAL);top.addView(sourceBadge(source,40),new LinearLayout.LayoutParams(dp(40),dp(40)));
+            TextView title=ui.label(db.sourceLabel(source.id),UiTheme.BODY,INK);title.setPadding(dp(10),0,dp(10),0);top.addView(title,new LinearLayout.LayoutParams(0,-2,1));card.addView(top);
+            card.addView(ui.label(usableBank(source.name)?"البنك: "+source.name:"البنك غير محدد؛ الاسم السابق مش هو اسم البنك",UiTheme.CAPTION,usableBank(source.name)?MUTED:CORAL));
+            List<ExpenseDb.Transaction> recent=db.recentSourceTransactions(source.id);
+            card.addView(ui.label(recent.isEmpty()?"لسه مفيش عمليات مسجلة بالوسيلة دي":"آخر عمليات تساعدك تتعرف عليها",UiTheme.CAPTION,MUTED));
+            for(ExpenseDb.Transaction tx:recent)card.addView(ui.label(tx.merchant+" · "+money(tx.amountMinor,tx.currency)+"\n"+transactionTimeLabel(tx,true),UiTheme.CAPTION,INK));
+            if(source.parentSourceId!=null)card.addView(ui.label("مرتبط حاليًا بـ "+db.sourceLabel(source.parentSourceId),UiTheme.CAPTION,ACCENT));
+            Button edit=ui.button("تحديد البنك وتسمية الوسيلة",false,false,()->{ExpenseDb.PaymentSource current=db.paymentSource(source.id);if(current==null)toast("الوسيلة دي لم تعد موجودة");else sourceBankPage(current);});edit.setTag("source_edit_"+source.id);card.addView(edit);
+            card.setTag("source_identity_"+source.id);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(12);body.addView(card,lp);
+        }
+        @Override void build(LinearLayout body,UiComponents components){
+            ExpenseDb.PaymentSource source=db.paymentSource(draft.getLong("source"));
+            if(source==null){body.addView(components.label("الوسيلة دي لم تعد موجودة",UiTheme.BODY,CORAL));return;}
+            boolean card="بطاقة".equals(source.kind);
+            components.caption(card?"1 · اعرف الكارت اللي هتربطه":"1 · راجع الحساب اللي هتربط بيه الكارت",body);identify(body,source);
+            if(!card&&!"حساب".equals(source.kind)){body.addView(components.label("الربط هنا لكارت خصم وحسابه فقط. كارت الائتمان له رحلة سداد منفصلة.",UiTheme.BODY,MUTED));return;}
+            components.caption(card?"2 · اختار الحساب اللي الكارت بيسحب منه":"2 · اختار كارت الخصم التابع للحساب",body);
+            int count=0;
+            for(ExpenseDb.PaymentSource option:db.paymentSources()){
+                if(option.id==source.id||!(card?"حساب".equals(option.kind)&&option.parentSourceId==null:"بطاقة".equals(option.kind)))continue;
+                count++;identify(body,option);String blocked=reason(source,option);
+                if(blocked.isEmpty()){
+                    android.widget.RadioButton choose=new android.widget.RadioButton(MainActivity.this);choose.setText(draft.getLong("selected",-1)==option.id?"تم الاختيار":"اختيار الوسيلة دي");
+                    choose.setTypeface(REGULAR);choose.setTextSize(UiTheme.BODY);choose.setTextColor(INK);choose.setMinHeight(dp(UiTheme.TOUCH));choose.setButtonTintList(ColorStateList.valueOf(ACCENT));
+                    choose.setContentDescription("اختيار "+db.sourceLabel(option.id));choose.setChecked(draft.getLong("selected",-1)==option.id);
+                    choose.setTag("source_link_option_"+option.id);choose.setPadding(dp(14),dp(12),dp(14),dp(12));choose.setBackground(ui.interactive(choose.isChecked()?ACCENT_PALE:SURFACE,uiTheme.fieldOutline,UiTheme.BUTTON_RADIUS));
+                    choose.setOnClickListener(v->{draft.putLong("selected",option.id);rebuildSourceChoices();});body.addView(choose);
+                }else body.addView(components.label(blocked,UiTheme.CAPTION,CORAL));
+            }
+            if(count==0){body.addView(components.label(card?"لسه مفيش حساب بنكي مضاف. ضيف حساب وحدد نفس البنك؛ تقدر ترجع تربط بعدين.":"لسه مفيش كارت خصم مضاف. كارت الائتمان مش بيظهر في الربط ده.",UiTheme.BODY,MUTED));body.addView(components.button("إضافة وسيلة دفع",false,false,()->sourceBankPage(null)));}
+            components.caption("عرض العمليات للتعرّف على الوسيلة؛ مش دليل تلقائي على العلاقة بين الحساب والكارت.",body);
+            body.addView(components.button("لسه مش عارف · أرجع بعدين",false,false,()->formPages.finishThrough("source_link")));
+            error=components.label("",UiTheme.BODY,CORAL);error.setTag("source_link_error");error.setVisibility(View.GONE);error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(error);
+        }
+        private void rebuildSourceChoices(){formPages.rebuild();}
+        @Override String saveLabel(){return "مراجعة الربط";}
+        @Override boolean save(){
+            ExpenseDb.PaymentSource source=db.paymentSource(draft.getLong("source")),option=db.paymentSource(draft.getLong("selected",-1));
+            String blocked=source==null||option==null?"اختار الكارت والحساب الأول؛ لو البنك مش واضح صحح بياناته من نفس الصفحة":reason(source,option);
+            if(!blocked.isEmpty()){if(error!=null){error.setText(blocked);error.setVisibility(View.VISIBLE);error.post(()->error.requestRectangleOnScreen(new android.graphics.Rect(0,0,error.getWidth(),error.getHeight()),false));}return false;}
+            if(confirm!=null&&confirm.isShowing())return false;
+            boolean isCard="بطاقة".equals(source.kind);ExpenseDb.PaymentSource card=isCard?source:option,account=isCard?option:source;
+            AlertDialog dialog=confirm=new ChoiceDialogBuilder().setTitle("تأكيد علاقة الكارت بالحساب")
+                    .setMessage("الكارت: "+db.sourceLabel(card.id)+"\nبيسحب من الحساب: "+db.sourceLabel(account.id)+
+                            (card.parentSourceId!=null&&!card.parentSourceId.equals(account.id)?"\nهيتغير الربط السابق: "+db.sourceLabel(card.parentSourceId):"")+"\n\nأكد فقط لو متأكد من العلاقة. ده هيجمع حركة الكارت ضمن رصيد الحساب مرة واحدة؛ الرسائل والعمليات هتفضل محفوظة.")
+                    .setPositiveButton("أيوه، اربط",null).setNegativeButton("رجوع للاختيار",null).create();
+            dialog.setOnShowListener(ignored->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                try{
+                    ExpenseDb.PaymentSource current=db.paymentSource(card.id);
+                    if(current==null||!java.util.Objects.equals(current.parentSourceId,card.parentSourceId))throw new IllegalArgumentException("الربط اتغير؛ ارجع وراجعه من جديد");
+                    db.linkCardToAccount(card.id,account.id);dialog.dismiss();formPages.finishThrough("source_link");toast("اتربط الكارت بالحساب؛ تقدر تراجع العلاقة أو تفكها من إدارة الوسيلة");
+                }catch(RuntimeException exception){dialog.setMessage("لم نحفظ الربط. راجع الوسيلتين وحالة البنك والربط الحالي، ثم ارجع للاختيار.");}
+            }));dialog.show();return false;
+        }
+        @Override boolean restoreAfterRecreation(){return true;}
     }
 
     private void balanceHistoryDialog(ExpenseDb.PaymentSource source) {
@@ -527,18 +589,38 @@ public final class MainActivity extends Activity {
     }
 
     private void manualBalanceDialog(ExpenseDb.PaymentSource source) {
-        LinearLayout form = form();
-        EditText amount = input("الرصيد الحالي", form);
-        amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        Spinner currency = spinner("العملة", CURRENCIES, form);
-        new ChoiceDialogBuilder().setTitle("رصيد " + db.sourceLabel(db.accountId(source.id))).setView(form)
-                .setPositiveButton("حفظ", (dialog, which) -> {
-                    if (rejectMisreadAmount(amount)) return;
-                    long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-                    if (minor < 0) { toast("راجع مبلغ الرصيد"); return; }
-                    db.putManualBalance(db.accountId(source.id), currency.getSelectedItem().toString(), minor, System.currentTimeMillis());
-                    render();
-                }).setNegativeButton("إلغاء", null).show();
+        Bundle draft=new Bundle();draft.putLong("id",source.id);draft.putString("amount","");draft.putString("currency",CURRENCIES[0]);
+        savePageScroll();formPages.push(new ManualBalancePage(draft,draft));
+    }
+
+    private final class ManualBalancePage extends UiPages.Page {
+        private EditText amount;private TextView error;
+        ManualBalancePage(Bundle draft,Bundle original){super("manual_balance","تحديث الرصيد",draft,original);}
+        @Override void build(LinearLayout body,UiComponents components){
+            ExpenseDb.PaymentSource source=db.paymentSource(draft.getLong("id"));
+            if(source==null){body.addView(components.label("الوسيلة دي لم تعد موجودة",UiTheme.BODY,CORAL));return;}
+            body.addView(components.label(db.sourceLabel(db.accountId(source.id)),UiTheme.BODY,MUTED));
+            amount=components.amount(draft.getString("amount",""),body);amount.setTag("manual_balance_amount");amount.setHint("الرصيد الحالي");
+            amount.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}
+                public void onTextChanged(CharSequence s,int st,int before,int count){draft.putString("amount",s.toString());amount.setError(null);if(error!=null)error.setVisibility(View.GONE);}
+                public void afterTextChanged(Editable text){}});
+            components.caption("العملة",body);
+            components.choices(CURRENCIES,null,java.util.Arrays.asList(CURRENCIES).indexOf(draft.getString("currency")),i->draft.putString("currency",CURRENCIES[i]),body);
+            body.addView(components.label("الرصيد ده هيبقى نقطة البداية للحساب من دلوقتي؛ العمليات والرسائل القديمة مش هتتغير.",UiTheme.CAPTION,MUTED));
+            error=components.label("",UiTheme.BODY,CORAL);error.setTag("manual_balance_error");error.setVisibility(View.GONE);error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(error);
+        }
+        private boolean fail(String message){if(error!=null){error.setText(message);error.setVisibility(View.VISIBLE);}if(amount!=null){amount.setError(message);amount.requestFocus();}return false;}
+        @Override boolean save(){
+            ExpenseDb.PaymentSource source=db.paymentSource(draft.getLong("id"));
+            if(source==null)return fail("الوسيلة دي لم تعد موجودة؛ لم نحفظ الرصيد");
+            String raw=draft.getString("amount","");
+            if(ExpenseParser.manualAmountMisread(raw))return fail("راجع المبلغ");
+            long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(raw));
+            if(minor<0)return fail("راجع مبلغ الرصيد");
+            db.putManualBalance(db.accountId(source.id),draft.getString("currency",CURRENCIES[0]),minor,System.currentTimeMillis());
+            return true;
+        }
+        @Override boolean restoreAfterRecreation(){return true;}
     }
 
     private void settingsScreen() {
@@ -563,6 +645,7 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.setMarginStart(dp(12));identity.addView(copy,cp);
             profile.addView(identity);profile.setOnClickListener(v->{settingsSection="appearance";render();});
             settingsGroup=null;
+            settingsSearch();
             note("بياناتك المالية محفوظة محليًا. اختار المجموعة اللي محتاجها.");
             settingsCategory("الميزانية والويدجت","حد اليوم، العملة، ومقاسات الشاشة الرئيسية",R.drawable.ic_nav_budget,"budget");
             settingsCategory("التقاط العمليات","رسائل البنك، تطبيقات الدفع، والتصنيف",R.drawable.ic_message,"capture");
@@ -617,16 +700,7 @@ public final class MainActivity extends Activity {
                 setting("قواعد التجار والتصنيف",()->{selectedTab=7;render();});
                 break;
             case "appearance":
-        setting("اسم العرض على الرئيسية", () -> {
-            EditText name = new EditText(this);
-            name.setSingleLine(true);
-            name.setText(getPreferences(MODE_PRIVATE).getString("profile_name", ""));
-            new ChoiceDialogBuilder().setTitle("اسم العرض").setView(name)
-                    .setPositiveButton("حفظ", (dialog, which) -> {
-                        getPreferences(MODE_PRIVATE).edit().putString("profile_name", name.getText().toString().trim()).apply();
-                        render();
-                    }).setNegativeButton("إلغاء", null).show();
-        });
+        setting("اسم العرض على الرئيسية", this::displayNamePage);
         setting(getPreferences(MODE_PRIVATE).getBoolean("dark_mode", false) ? "الوضع: ليلي" : "الوضع: فاتح", () -> {
             boolean enabled = getPreferences(MODE_PRIVATE).getBoolean("dark_mode", false);
             getPreferences(MODE_PRIVATE).edit().putBoolean("dark_mode", !enabled).apply();
@@ -660,12 +734,24 @@ public final class MainActivity extends Activity {
                 break;
             case "data":
                 note("مصادر العمليات محفوظة مشفرة. CSV يحتوي على معاملاتك، ويحتاج مشاركة واعية منك.");
-                setting(appLock.enabled()?"قفل التطبيق: مفعل":"قفل التطبيق: متوقف",this::appLockSettingsDialog);
+                section("قفل التطبيق",null,null);
+                setting(appLock.enabled()?"قفل التطبيق: مفعل":"قفل التطبيق: متوقف",()->{
+                    if(appLock.enabled()){appLock.disable();render();}else appLock.enable(this::render);
+                });
+                String timeout=appLock.timeoutSeconds()==0?"فورًا":appLock.timeoutSeconds()==60?"دقيقة":"5 دقائق";
+                setting("القفل بعد: "+timeout,()->new ChoiceDialogBuilder().setTitle("اقفل التطبيق بعد")
+                        .setItems(new String[]{"فورًا","بعد دقيقة","بعد 5 دقائق"},(d,which)->{
+                            appLock.setTimeoutSeconds(new int[]{0,60,300}[which]);render();
+                        }).show());
+                setting("منع لقطات الشاشة: "+(appLock.securePreview()?"مفعّل":"متوقف"),()->{appLock.setSecurePreview(!appLock.securePreview());render();});
                 if (!appLock.deviceSecure()) {
-                    View lockRow=settingsGroup.getChildAt(settingsGroup.getChildCount()-1);
-                    lockRow.setEnabled(false);lockRow.setAlpha(0.5f);lockRow.setOnClickListener(null);
+                    for(int i=0;i<settingsGroup.getChildCount();i++){
+                        View lockRow=settingsGroup.getChildAt(i);if(!(lockRow.getTag() instanceof String))continue;
+                        lockRow.setEnabled(false);lockRow.setAlpha(0.5f);lockRow.setOnClickListener(null);
+                    }
                     note("فعّل قفل الشاشة في إعدادات الجهاز أولًا لاستخدام قفل التطبيق.");
                 }
+                section("الخصوصية والملفات",null,null);
                 setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("استيراد معاملات CSV",this::chooseCsvImport);
                 setting("تصدير معاملات "+selectedMonth.toString().substring(0,7)+" CSV",this::exportCsv);
@@ -676,8 +762,13 @@ public final class MainActivity extends Activity {
                 setting("نسخة احتياطية",this::backupDialog);
                 setting("استعادة نسخة",this::chooseRestore);
                 if(BuildConfig.DEBUG) {
-                    section("أدوات متقدمة",null,null);
-                    setting("أدوات المراجعة",this::reviewToolsDialog);
+                    section("أدوات المراجعة",null,null);
+                    setting("تصحيح البيانات: إعلانات وتكرار وتحويلات داخلية",()->runRepair(true));
+                    setting("فحص تغطية رسائل SMS",this::smsCoverageDialog);
+                    setting("تقرير تشخيص الأرقام",this::diagnosticsDialog);
+                    setting("مراجعة التحويلات بين حساباتك",this::repairTransfersDialog);
+                    setting("عينات رسائل البنوك",this::messageSamples);
+                    setting("عطل تجريبي",this::debugCrashDialog);
                 }
                 // Keep access to existing records without promoting unused financial modules.
                 if(!db.assets().isEmpty())setting("الأصول المسجلة",()->{selectedTab=8;render();});
@@ -720,6 +811,134 @@ public final class MainActivity extends Activity {
         row.setContentDescription(title+"، "+subtitle);row.setOnClickListener(v->{settingsSection=section;render();});settingsGroup.addView(row);
     }
 
+    private static final class SettingEntry {
+        final String title, keywords, section, tag;
+        SettingEntry(String title, String keywords, String section, String tag) {
+            this.title = title; this.keywords = keywords; this.section = section; this.tag = tag;
+        }
+    }
+
+    /** Every reachable row by title and Arabic/English keywords; visibility follows settingsScreen's own rules. */
+    private List<SettingEntry> settingsIndex() {
+        List<SettingEntry> all = new ArrayList<>();
+        all.add(new SettingEntry("الميزانية اليومية والراتب", "budget daily salary حد اليوم مرتب", "budget", "الميزانية اليومية"));
+        all.add(new SettingEntry("أضف ويدجت الشاشة الرئيسية", "widget home size حجم ويدجيت", "budget", "أضف ويدجت"));
+        all.add(new SettingEntry("عملة الويدجت والملخص", "widget currency summary عملة", "budget", "عملة الويدجت"));
+        all.add(new SettingEntry("تحديث منتصف الليل", "midnight refresh alarm exact منبه", "budget", "تحديث منتصف الليل"));
+        all.add(new SettingEntry("أرقام الويدجت", "widget hide amounts privacy إخفاء", "budget", "أرقام الويدجت"));
+        all.add(new SettingEntry("استيراد رسائل SMS القديمة", "sms import messages bank رسائل البنك", "capture", "استيراد رسائل SMS"));
+        all.add(new SettingEntry("تطبيقات الدفع والإشعارات", "payment apps notifications instapay", "capture", "تطبيقات الدفع"));
+        all.add(new SettingEntry("الوصول للإشعارات", "notification access listener إذن", "capture", hasNotificationAccess() ? "الوصول للإشعارات" : "تفعيل الوصول للإشعارات"));
+        all.add(new SettingEntry("حساباتك على إنستاباي", "instapay handles ipa تحويل", "capture", "حساباتك على إنستاباي"));
+        all.add(new SettingEntry("قواعد التجار والتصنيف", "merchant rules category تصنيف تاجر", "capture", "قواعد التجار"));
+        all.add(new SettingEntry("اسم العرض على الرئيسية", "name profile display اسم", "appearance", "اسم العرض"));
+        all.add(new SettingEntry("الوضع الليلي والفاتح", "dark mode theme night light ليلي", "appearance", "الوضع:"));
+        all.add(new SettingEntry("الصورة الشخصية", "photo avatar profile صورة", "appearance", "الصورة الشخصية"));
+        all.add(new SettingEntry("افتتاحية التطبيق", "opening intro video splash", "appearance", "الافتتاحية"));
+        all.add(new SettingEntry("إشعار فوري بكل عملية", "notification captured transaction إشعار", "alerts", "إشعار فوري"));
+        all.add(new SettingEntry("تذكير يومي بالمصاريف", "daily reminder تذكير", "alerts", "تذكير يومي"));
+        all.add(new SettingEntry("تنبيه ملخص الشهر", "monthly summary notification شهر", "alerts", "تنبيه ملخص الشهر"));
+        all.add(new SettingEntry("إعدادات إشعارات الجهاز", "system notification settings", "alerts", "إعدادات إشعارات الجهاز"));
+        all.add(new SettingEntry("قفل التطبيق", "app lock biometric fingerprint pin بصمة", "data", "قفل التطبيق"));
+        all.add(new SettingEntry("مدة القفل", "lock timeout minute فورًا", "data", "القفل بعد"));
+        all.add(new SettingEntry("منع لقطات الشاشة", "screenshot secure preview privacy", "data", "منع لقطات الشاشة"));
+        all.add(new SettingEntry("سياسة الخصوصية", "privacy policy", "data", "سياسة الخصوصية"));
+        all.add(new SettingEntry("استيراد معاملات CSV", "csv import", "data", "استيراد معاملات CSV"));
+        all.add(new SettingEntry("تصدير معاملات CSV", "csv export excel", "data", "تصدير معاملات"));
+        all.add(new SettingEntry("نسخة احتياطية", "backup encrypted", "data", "نسخة احتياطية"));
+        all.add(new SettingEntry("استعادة نسخة", "restore backup", "data", "استعادة نسخة"));
+        if (BuildConfig.DEBUG) {
+            all.add(new SettingEntry("تصحيح البيانات", "repair ads duplicates transfers أدوات المراجعة", "data", "تصحيح البيانات"));
+            all.add(new SettingEntry("فحص تغطية رسائل SMS", "sms coverage أدوات المراجعة", "data", "فحص تغطية"));
+            all.add(new SettingEntry("تقرير تشخيص الأرقام", "diagnostics numbers أدوات المراجعة", "data", "تقرير تشخيص"));
+            all.add(new SettingEntry("مراجعة التحويلات بين حساباتك", "transfers repair أدوات المراجعة", "data", "مراجعة التحويلات"));
+            all.add(new SettingEntry("عينات رسائل البنوك", "bank message samples sms عينة أدوات المراجعة", "data", "عينات رسائل"));
+            all.add(new SettingEntry("عطل تجريبي", "crash debug أدوات المراجعة", "data", "عطل تجريبي"));
+        }
+        if (!db.assets().isEmpty()) all.add(new SettingEntry("الأصول المسجلة", "assets", "data", "الأصول المسجلة"));
+        if (!db.debts().isEmpty()) all.add(new SettingEntry("الديون المسجلة", "debts", "data", "الديون المسجلة"));
+        all.add(new SettingEntry("حذف كل البيانات المحلية", "delete clear reset data مسح", "data", "حذف كل البيانات"));
+        all.add(new SettingEntry("ما الجديد", "whats new changelog version", "help", "ما الجديد"));
+        all.add(new SettingEntry("الإبلاغ عن مشكلة", "report bug problem support email", "help", "الإبلاغ عن مشكلة"));
+        all.add(new SettingEntry("اقتراح تحسين", "suggestion feature idea", "help", "اقتراح تحسين"));
+        all.add(new SettingEntry("نسخ بيانات التشخيص", "diagnostics copy support", "help", "نسخ بيانات التشخيص"));
+        all.add(new SettingEntry("متابعة على GitHub", "github issues developers", "help", "للمطورين"));
+        return all;
+    }
+
+    private static String settingsSectionTitle(String section) {
+        return "budget".equals(section) ? "الميزانية والويدجت" : "capture".equals(section) ? "التقاط العمليات" :
+                "appearance".equals(section) ? "المظهر والملف الشخصي" : "alerts".equals(section) ? "الإشعارات والتذكير" :
+                "data".equals(section) ? "البيانات والخصوصية" : "المساعدة وعن التطبيق";
+    }
+
+    /** Folds hamza/taa-marbuta/alef-maqsura and digits so «نسخه» and «اشعار» still match. */
+    private static String searchable(String value) {
+        return ExpenseParser.normalizeDigits(value).toLowerCase(Locale.ROOT)
+                .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').replace('ى', 'ي');
+    }
+
+    /** Results replace only their own container, so typing keeps the field, its focus and the keyboard. */
+    private void settingsSearch() {
+        EditText search = ui.field("ابحث في الإعدادات", page);
+        search.setTag("settings_search"); search.setHint("مثال: قفل، نسخة، رسائل البنك");
+        search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        LinearLayout results = new LinearLayout(this); results.setOrientation(LinearLayout.VERTICAL);
+        results.setTag("settings_search_results"); results.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        page.addView(results);
+        List<SettingEntry> index = settingsIndex();
+        search.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void afterTextChanged(Editable text) {}
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
+                results.removeAllViews();
+                String query = searchable(text.toString().trim());
+                if (query.isEmpty()) return;
+                LinearLayout previous = settingsGroup; settingsGroup = null;
+                int found = 0;
+                for (SettingEntry entry : index) {
+                    if (!searchable(entry.title + " " + entry.keywords + " " + settingsSectionTitle(entry.section)).contains(query)) continue;
+                    if (settingsGroup == null) settingsGroup = listCard(results); else divider(settingsGroup);
+                    LinearLayout row = new LinearLayout(MainActivity.this); row.setOrientation(LinearLayout.VERTICAL);
+                    row.setPadding(0, dp(10), 0, dp(10)); row.setMinimumHeight(dp(UiTheme.TOUCH));
+                    row.addView(label(entry.title, 14, INK, true)); row.addView(label(settingsSectionTitle(entry.section), 12, MUTED, false));
+                    row.setContentDescription(entry.title + "، في " + settingsSectionTitle(entry.section));
+                    row.setTag("settings_result:" + entry.tag);
+                    row.setOnClickListener(v -> { settingsSection = entry.section; settingsFocus = entry.tag; render(); });
+                    settingsGroup.addView(row); found++;
+                }
+                settingsGroup = previous;
+                if (found == 0) {
+                    TextView none = label("مفيش إعداد بالاسم ده. جرّب كلمة تانية زي «نسخة» أو «إشعار».", 13, MUTED, false);
+                    none.setPadding(0, dp(10), 0, dp(10)); results.addView(none);
+                }
+            }
+        });
+    }
+
+    /** Scroll the opened section to the searched row and flash it, without running its action. */
+    private void focusSettingRow(ScrollView scroll, String prefix) {
+        View row = null;
+        java.util.ArrayDeque<View> queue = new java.util.ArrayDeque<>(); queue.add(page);
+        while (!queue.isEmpty() && row == null) {
+            View view = queue.poll();
+            if (view.getTag() instanceof String && ((String) view.getTag()).startsWith("setting:" + prefix)) row = view;
+            else if (view instanceof android.view.ViewGroup)
+                for (int i = 0; i < ((android.view.ViewGroup) view).getChildCount(); i++) queue.add(((android.view.ViewGroup) view).getChildAt(i));
+        }
+        if (row == null) return;
+        int top = 0;
+        for (View view = row; view != null && view != page; view = (View) view.getParent()) top += view.getTop();
+        scroll.scrollTo(0, Math.max(0, top - dp(80)));
+        View target = row;
+        android.graphics.drawable.Drawable before = target.getBackground();
+        target.setBackground(rounded(ACCENT_PALE, 12));
+        target.setFocusable(true); target.requestFocus();
+        target.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_FOCUSED);
+        target.postDelayed(() -> target.setBackground(before), 1600);
+    }
+
+
     private void backFromSettings() {
         if(settingsSection.isEmpty())selectedTab=0;else settingsSection="";
         render();
@@ -729,79 +948,15 @@ public final class MainActivity extends Activity {
         supportDialog(false);
     }
 
-    private void appLockSettingsDialog() {
-        String timeout=appLock.timeoutSeconds()==0?"فورًا":appLock.timeoutSeconds()==60?"دقيقة":"5 دقائق";
-        String[] choices={appLock.enabled()?"إيقاف قفل التطبيق":"تشغيل قفل التطبيق",
-                "القفل بعد: "+timeout,
-                "منع لقطات الشاشة: "+(appLock.securePreview()?"مفعّل":"متوقف")};
-        new ChoiceDialogBuilder().setTitle("قفل التطبيق")
-                .setItems(choices,(dialog,index)->{
-                    if(index==0) {
-                        if(appLock.enabled()){appLock.disable();render();}
-                        else appLock.enable(this::render);
-                    } else if(index==1) {
-                        new ChoiceDialogBuilder().setTitle("اقفل التطبيق بعد")
-                                .setItems(new String[]{"فورًا","بعد دقيقة","بعد 5 دقائق"},(d,which)->{
-                                    appLock.setTimeoutSeconds(new int[]{0,60,300}[which]);render();
-                                }).show();
-                    } else {
-                        appLock.setSecurePreview(!appLock.securePreview());render();
-                    }
-                }).show();
-    }
-
     private void privacyPolicyDialog() {
         try (java.io.InputStream stream=getAssets().open("privacy-policy.txt")) {
             java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
             byte[] buffer=new byte[4096];int read;
             while((read=stream.read(buffer))!=-1)bytes.write(buffer,0,read);
-            LinearLayout policy=form();
-            TextView text=label(bytes.toString("UTF-8"),14,INK,false);
-            text.setTextIsSelectable(true);policy.addView(text);
-            new ChoiceDialogBuilder().setTitle("سياسة الخصوصية · Privacy Policy")
-                    .setView(scrollForm(policy)).setPositiveButton("إغلاق",null).show();
+            textPage("سياسة الخصوصية · Privacy Policy",bytes.toString("UTF-8"));
         } catch(java.io.IOException error) {
             toast("تعذر فتح السياسة؛ تواصل مع "+EmailSupport.ADDRESS);
         }
-    }
-
-    private void supportDialog(boolean suggestion) {
-        LinearLayout form=form();
-        form.addView(label("إلى: "+EmailSupport.ADDRESS,12,MUTED,false));
-        EditText description=input(suggestion?"وصف الاقتراح والفائدة منه":"إيه اللي حصل؟ وإيه اللي كنت متوقعه؟",form);
-        description.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        description.setSingleLine(false);description.setMinLines(3);description.setGravity(Gravity.TOP|Gravity.START);
-        description.getLayoutParams().height=android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
-        description.setPadding(dp(14),dp(10),dp(14),dp(10));
-        description.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(4000)});
-        form.addView(label("متكتبش أرقام حسابات أو كروت، ولا تلصق رسائل البنك الأصلية.",12,CORAL,false));
-        form.addView(label("بيانات النسخة والجهاز والنظام واللغة:",12,MUTED,false));
-        TextView metadata=label(GitHubSupport.details(this),12,INK,false);
-        metadata.setTextDirection(View.TEXT_DIRECTION_LTR);metadata.setTextIsSelectable(true);form.addView(metadata);
-        String lastCrash=suggestion?null:CrashLog.latest(this);
-        CheckBox attachCrash=new CheckBox(this);
-        if(lastCrash!=null) {
-            attachCrash.setText("إرفاق آخر عطل كنص في المسودة");attachCrash.setTypeface(REGULAR);form.addView(attachCrash);
-            TextView preview=label(lastCrash,11,INK,false);preview.setTextDirection(View.TEXT_DIRECTION_LTR);
-            preview.setTextIsSelectable(true);preview.setVisibility(View.GONE);form.addView(preview);
-            attachCrash.setOnCheckedChangeListener((button,checked)->preview.setVisibility(checked?View.VISIBLE:View.GONE));
-        }
-        java.util.function.Supplier<String> reviewed=()->description.getText().toString().trim()
-                +(attachCrash.isChecked()&&lastCrash!=null?"\n\nآخر عطل (محلي):\n"+lastCrash:"");
-        form.addView(label("هيفتح مسودة في تطبيق الإيميل؛ راجعها واضغط إرسال بنفسك. محتاج إيميل متظبط على الموبايل.",12,MUTED,false));
-        AlertDialog dialog=new ChoiceDialogBuilder().setTitle(suggestion?"اقتراح تحسين":"الإبلاغ عن مشكلة")
-                .setView(scrollForm(form)).setPositiveButton("فتح مسودة إيميل",null)
-                .setNeutralButton("نسخ الطلب",null).setNegativeButton("إلغاء",null).create();
-        dialog.setOnShowListener(ignored->{
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-                String text=description.getText().toString().trim();
-                if(text.isEmpty()){description.setError("اكتب وصف مختصر الأول");return;}
-                try {startActivity(EmailSupport.draft(this,suggestion,reviewed.get()));}
-                catch(android.content.ActivityNotFoundException error){copySupportRequest(suggestion,reviewed.get(),"مفيش تطبيق إيميل متاح؛ اتنسخ عنوان الدعم والطلب");}
-            });
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->copySupportRequest(suggestion,reviewed.get(),"اتنسخ عنوان الدعم والطلب"));
-        });
-        dialog.show();
     }
 
     private void copySupportRequest(boolean suggestion,String description,String message) {
@@ -833,39 +988,9 @@ public final class MainActivity extends Activity {
             card.setOnClickListener(v -> new ChoiceDialogBuilder().setTitle(rule.matchText)
                     .setItems(new String[]{"تعديل", "حذف"}, (dialog, which) -> {
                         if (which == 0) merchantRuleDialog(rule);
-                        else { db.deleteMerchantRule(rule.id); render(); }
+                        else confirmDelete(rule.matchText, () -> { db.deleteMerchantRule(rule.id); render(); });
                     }).show());
         }
-    }
-
-    private void merchantRuleDialog(ExpenseDb.MerchantRule existing) {
-        LinearLayout form = form();
-        EditText match = input("اسم التاجر كما يظهر في الرسالة", form);
-        Spinner category = spinner("التصنيف", CATEGORIES, form);
-        CheckBox ignored = new CheckBox(this);
-        ignored.setText("تجاهل عملياته الجديدة");
-        form.addView(ignored);
-        if (existing != null) {
-            match.setText(existing.matchText.startsWith("=")?existing.matchText.substring(1):existing.matchText);
-            ignored.setChecked(existing.ignored);
-            for (int i = 0; i < CATEGORIES.length; i++)
-                if (CATEGORIES[i].equals(existing.category)) category.setSelection(i);
-        }
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle("قاعدة تاجر").setView(form)
-                .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignoredDialog -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            if (match.getText().toString().trim().length() < 2) { toast("اكتب اسم تاجر مميز"); return; }
-            if(existing!=null && existing.matchText.startsWith("=") && !ignored.isChecked() &&
-                    !ExpenseDb.canRememberMerchant(match.getText().toString(),category.getSelectedItem().toString())) {
-                toast("اختار تصنيف مشتريات واسم تاجر مميز");return;
-            }
-            if (existing != null) db.deleteMerchantRule(existing.id);
-            if(existing!=null && existing.matchText.startsWith("=") && !ignored.isChecked())
-                db.rememberMerchantCategory(match.getText().toString(),category.getSelectedItem().toString());
-            else db.putMerchantRule(match.getText().toString(), category.getSelectedItem().toString(), ignored.isChecked());
-            dialog.dismiss(); render();
-        }));
-        dialog.show();
     }
 
     private void assetsScreen() {
@@ -901,35 +1026,9 @@ public final class MainActivity extends Activity {
             card.setOnClickListener(v -> new ChoiceDialogBuilder().setTitle(asset.name)
                     .setItems(new String[]{"تحديث القيمة", "حذف"}, (dialog, which) -> {
                         if (which == 0) assetDialog(asset);
-                        else { db.deleteAsset(asset.id); render(); }
+                        else confirmDelete(asset.name, () -> { db.deleteAsset(asset.id); render(); });
                     }).show());
         }
-    }
-
-    private void assetDialog(ExpenseDb.Asset existing) {
-        LinearLayout form = form();
-        EditText name = input("اسم الأصل", form);
-        Spinner kind = spinner("النوع", new String[]{"ذهب", "فضة", "أسهم", "عقار", "أخرى"}, form);
-        EditText value = input("القيمة الحالية يدويًا", form);
-        value.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        Spinner currency = spinner("العملة", CURRENCIES, form);
-        if (existing != null) {
-            name.setText(existing.name);
-            value.setText(String.format(Locale.ROOT, "%.2f", existing.valueMinor / 100.0));
-            for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(existing.currency)) currency.setSelection(i);
-            for (int i = 0; i < kind.getCount(); i++) if (kind.getItemAtPosition(i).equals(existing.kind)) kind.setSelection(i);
-        }
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle(existing == null ? "أصل جديد" : "تحديث الأصل").setView(form)
-                .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            if (rejectMisreadAmount(value)) return;
-            long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(value.getText().toString()));
-            if (minor < 0 || name.getText().toString().trim().isEmpty()) { toast("راجع اسم الأصل وقيمته"); return; }
-            db.putAsset(existing == null ? null : existing.id, name.getText().toString(),
-                    kind.getSelectedItem().toString(), minor, currency.getSelectedItem().toString());
-            dialog.dismiss(); render();
-        }));
-        dialog.show();
     }
 
     private void debtsScreen() {
@@ -947,70 +1046,256 @@ public final class MainActivity extends Activity {
             card.setOnClickListener(v -> new ChoiceDialogBuilder().setTitle(debt.name)
                     .setItems(new String[]{"تسجيل سداد", "حذف"}, (dialog, which) -> {
                         if (which == 0) debtPaymentDialog(debt);
-                        else { db.deleteDebt(debt.id); render(); }
+                        else confirmDelete(debt.name, () -> { db.deleteDebt(debt.id); render(); });
                     }).show());
         }
     }
 
+    /** Shared field bindings for small record forms: every value lives in the draft, errors stay on the page. */
+    private abstract class DraftFormPage extends UiPages.Page {
+        protected TextView error;
+        DraftFormPage(String route, String title, Bundle draft, Bundle original) { super(route, title, draft, original); }
+        protected String text(String key) { return draft.getString(key, ""); }
+        protected EditText textField(String title, String key, LinearLayout body) {
+            EditText field = ui.field(title, body); field.setTag(route + "_" + key); field.setText(text(key));
+            field.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    draft.putString(key, s.toString()); field.setError(null); if (error != null) error.setVisibility(View.GONE);
+                }
+                public void afterTextChanged(Editable s) {}
+            });
+            return field;
+        }
+        protected EditText amountField(String hint, String key, LinearLayout body) {
+            EditText field = ui.amount(text(key), body); field.setHint(hint);
+            field.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    draft.putString(key, s.toString()); field.setError(null); if (error != null) error.setVisibility(View.GONE);
+                }
+                public void afterTextChanged(Editable s) {}
+            });
+            field.setTag(route + "_" + key); return field;
+        }
+        protected void choiceField(String title, String key, String[] labels, String[] values, int[] icons, LinearLayout body) {
+            ui.caption(title, body);
+            ui.choices(labels, icons, java.util.Arrays.asList(values).indexOf(text(key)), i -> draft.putString(key, values[i]), body)
+                    .setTag(route + "_" + key);
+        }
+        protected EditText dateField(String title, String key, LinearLayout body) {
+            EditText date = dateInput(title, body, text(key).isEmpty() ? null : LocalDate.parse(text(key)));
+            date.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    LocalDate day = dateValue(date); draft.putString(key, day == null ? "" : day.toString());
+                }
+                public void afterTextChanged(Editable s) {}
+            });
+            return date;
+        }
+        protected CheckBox checkField(String title, String key, LinearLayout body) {
+            CheckBox box = new CheckBox(MainActivity.this); box.setText(title); box.setTag(route + "_" + key);
+            box.setTextColor(INK); box.setTypeface(REGULAR); box.setTextSize(UiTheme.BODY); box.setMinHeight(dp(UiTheme.TOUCH));
+            box.setButtonTintList(ColorStateList.valueOf(ACCENT)); box.setChecked(draft.getBoolean(key));
+            box.setOnCheckedChangeListener((v, checked) -> draft.putBoolean(key, checked)); body.addView(box);
+            return box;
+        }
+        protected void errorLabel(LinearLayout body) {
+            error = ui.label("", UiTheme.BODY, CORAL); error.setTag(route + "_error"); error.setVisibility(View.GONE);
+            error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); body.addView(error);
+        }
+        protected boolean fail(String message, String key) {
+            if (error != null) { error.setText(message); error.setVisibility(View.VISIBLE); }
+            View field = key == null ? null : findViewById(android.R.id.content).findViewWithTag(route + "_" + key);
+            if (field instanceof EditText) { ((EditText) field).setError(message); field.requestFocus(); }
+            else if (error != null) error.post(() -> error.requestRectangleOnScreen(new android.graphics.Rect(0, 0, error.getWidth(), error.getHeight()), false));
+            return false;
+        }
+        @Override boolean restoreAfterRecreation() { return true; }
+    }
+
+    private static String minorText(long minor) { return String.format(Locale.ROOT, "%.2f", minor / 100.0); }
+
+    private void merchantRuleDialog(ExpenseDb.MerchantRule existing) {
+        Bundle draft = new Bundle(); draft.putLong("id", existing == null ? -1 : existing.id);
+        draft.putString("match", existing == null ? "" : existing.matchText.startsWith("=") ? existing.matchText.substring(1) : existing.matchText);
+        draft.putString("category", existing != null && java.util.Arrays.asList(CATEGORIES).contains(existing.category) ? existing.category : CATEGORIES[0]);
+        draft.putBoolean("ignored", existing != null && existing.ignored);
+        draft.putBoolean("remembered", existing != null && existing.matchText.startsWith("="));
+        savePageScroll(); formPages.push(new MerchantRulePage(draft, draft));
+    }
+
+    private final class MerchantRulePage extends DraftFormPage {
+        MerchantRulePage(Bundle draft, Bundle original) { super("merchant_rule", "قاعدة تاجر", draft, original); }
+        @Override void build(LinearLayout body, UiComponents components) {
+            textField("اسم التاجر كما يظهر في الرسالة", "match", body);
+            int[] icons = new int[CATEGORIES.length];
+            for (int i = 0; i < CATEGORIES.length; i++) icons[i] = categoryStyle(CATEGORIES[i])[2];
+            choiceField("التصنيف", "category", CATEGORIES, CATEGORIES, icons, body);
+            checkField("تجاهل عملياته الجديدة", "ignored", body);
+            errorLabel(body);
+        }
+        @Override boolean save() {
+            String match = text("match"), category = text("category");
+            boolean ignored = draft.getBoolean("ignored"), remembered = draft.getBoolean("remembered");
+            if (match.trim().length() < 2) return fail("اكتب اسم تاجر مميز", "match");
+            if (remembered && !ignored && !ExpenseDb.canRememberMerchant(match, category)) return fail("اختار تصنيف مشتريات واسم تاجر مميز", null);
+            long id = draft.getLong("id", -1);
+            if (id >= 0) db.deleteMerchantRule(id);
+            if (remembered && !ignored) db.rememberMerchantCategory(match, category);
+            else db.putMerchantRule(match, category, ignored);
+            return true;
+        }
+    }
+
+    private void assetDialog(ExpenseDb.Asset existing) {
+        Bundle draft = new Bundle(); draft.putLong("id", existing == null ? -1 : existing.id);
+        draft.putString("name", existing == null ? "" : existing.name);
+        draft.putString("kind", existing == null ? "ذهب" : existing.kind);
+        draft.putString("value", existing == null ? "" : minorText(existing.valueMinor));
+        draft.putString("currency", existing == null ? CURRENCIES[0] : existing.currency);
+        savePageScroll(); formPages.push(new AssetPage(draft, draft));
+    }
+
+    private final class AssetPage extends DraftFormPage {
+        AssetPage(Bundle draft, Bundle original) { super("asset", draft.getLong("id", -1) < 0 ? "أصل جديد" : "تحديث الأصل", draft, original); }
+        @Override void build(LinearLayout body, UiComponents components) {
+            amountField("القيمة الحالية يدويًا", "value", body);
+            choiceField("العملة", "currency", CURRENCIES, CURRENCIES, null, body);
+            textField("اسم الأصل", "name", body);
+            String[] kinds = {"ذهب", "فضة", "أسهم", "عقار", "أخرى"};
+            choiceField("النوع", "kind", kinds, kinds, null, body);
+            errorLabel(body);
+        }
+        @Override boolean save() {
+            if (ExpenseParser.manualAmountMisread(text("value"))) return fail("راجع المبلغ", "value");
+            long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("value")));
+            if (minor < 0) return fail("راجع قيمة الأصل", "value");
+            if (text("name").trim().isEmpty()) return fail("اكتب اسم الأصل", "name");
+            long id = draft.getLong("id", -1);
+            db.putAsset(id < 0 ? null : id, text("name"), text("kind"), minor, text("currency"));
+            return true;
+        }
+    }
+
     private void debtDialog() {
-        LinearLayout form = form();
-        EditText name = input("الاسم أو الجهة", form);
-        Spinner direction = spinner("الاتجاه", new String[]{"لي عند غيري", "عليّ لغيري"}, form);
-        EditText amount = input("المبلغ", form);
-        amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        Spinner currency = spinner("العملة", CURRENCIES, form);
-        EditText due = dateInput("تاريخ الاستحقاق (اختياري)", form, null);
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle("دين جديد").setView(form)
-                .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            try {
-                if (rejectMisreadAmount(amount)) return;
-                long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-                String dueText = dateValue(due) == null ? "" : dateValue(due).toString();
-                if (minor <= 0 || name.getText().toString().trim().isEmpty()) throw new IllegalArgumentException();
-                db.addDebt(name.getText().toString(), direction.getSelectedItemPosition() == 0 ? "owed_to_me" : "i_owe",
-                        minor, currency.getSelectedItem().toString(), dueText.isEmpty() ? null : dueText);
-                dialog.dismiss(); render();
-            } catch (RuntimeException error) { toast("راجع الاسم والمبلغ والتاريخ"); }
-        }));
-        dialog.show();
+        Bundle draft = new Bundle(); draft.putString("name", ""); draft.putString("direction", "owed_to_me");
+        draft.putString("amount", ""); draft.putString("currency", CURRENCIES[0]); draft.putString("due", "");
+        savePageScroll(); formPages.push(new DebtPage(draft, draft));
+    }
+
+    private final class DebtPage extends DraftFormPage {
+        DebtPage(Bundle draft, Bundle original) { super("debt", "دين جديد", draft, original); }
+        @Override void build(LinearLayout body, UiComponents components) {
+            choiceField("الاتجاه", "direction", new String[]{"لي عند غيري", "عليّ لغيري"}, new String[]{"owed_to_me", "i_owe"}, null, body);
+            amountField("المبلغ", "amount", body);
+            choiceField("العملة", "currency", CURRENCIES, CURRENCIES, null, body);
+            textField("الاسم أو الجهة", "name", body);
+            dateField("تاريخ الاستحقاق (اختياري)", "due", body);
+            body.addView(components.label("المبالغ هنا لا تضاف تلقائيًا إلى معاملات البنك.", UiTheme.CAPTION, MUTED));
+            errorLabel(body);
+        }
+        @Override boolean save() {
+            if (ExpenseParser.manualAmountMisread(text("amount"))) return fail("راجع المبلغ", "amount");
+            long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
+            if (minor <= 0) return fail("راجع المبلغ", "amount");
+            if (text("name").trim().isEmpty()) return fail("اكتب الاسم أو الجهة", "name");
+            db.addDebt(text("name"), text("direction"), minor, text("currency"), text("due").isEmpty() ? null : text("due"));
+            return true;
+        }
     }
 
     private void debtPaymentDialog(ExpenseDb.Debt debt) {
-        LinearLayout form = form();
-        EditText amount = input("المبلغ المسدد", form);
-        amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        new ChoiceDialogBuilder().setTitle("سداد " + debt.name).setView(form)
-                .setPositiveButton("حفظ", (dialog, which) -> {
-                    if (rejectMisreadAmount(amount)) return;
-                    long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-                    if (minor <= 0) { toast("راجع المبلغ"); return; }
-                    db.payDebt(debt.id, minor); render();
-                }).setNegativeButton("إلغاء", null).show();
+        Bundle draft = new Bundle(); draft.putLong("id", debt.id); draft.putString("amount", "");
+        savePageScroll(); formPages.push(new DebtPaymentPage(draft, draft));
     }
 
-    private void paymentSourceDialog() {
-        LinearLayout form = form();
-        EditText name = input("اسم الوسيلة، مثال: فيزا البنك الأهلي", form);
-        Spinner kind = spinner("نوع الوسيلة", new String[]{"بطاقة", "بطاقة ائتمان", "حساب", "محفظة", "تطبيق دفع", "كاش"}, form);
-        EditText last4 = input("آخر 3 أو 4 أرقام للكارت أو الحساب (اختياري)", form);
-        last4.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle("وسيلة دفع جديدة").setView(form)
-                .setPositiveButton("إضافة", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                    String digits = ExpenseParser.normalizeDigits(last4.getText().toString().trim());
-                    if (name.getText().toString().trim().isEmpty() || (!digits.isEmpty() && !digits.matches("[0-9]{3,4}"))) {
-                        toast("اكتب الاسم وآخر 4 أرقام صحيحين"); return;
-                    }
-                    try {
-                        new SourceMutation(db).createReviewed(name.getText().toString(), kind.getSelectedItem().toString(), digits.isEmpty() ? null : digits);
-                    } catch(RuntimeException error) {
-                        toast("تعذر إضافة وسيلة الدفع؛ راجع البيانات وحاول مرة أخرى."); return;
-                    }
-                    dialog.dismiss();
-                    render();
-                }));
-        dialog.show();
+    private final class DebtPaymentPage extends DraftFormPage {
+        DebtPaymentPage(Bundle draft, Bundle original) { super("debt_payment", "تسجيل سداد", draft, original); }
+        private ExpenseDb.Debt debt() {
+            for (ExpenseDb.Debt debt : db.debts()) if (debt.id == draft.getLong("id")) return debt;
+            return null;
+        }
+        @Override void build(LinearLayout body, UiComponents components) {
+            ExpenseDb.Debt debt = debt();
+            if (debt == null) { body.addView(components.label("الدين ده لم يعد موجودًا", UiTheme.BODY, CORAL)); return; }
+            body.addView(components.label(debt.name + " · المتبقي " + money(debt.remainingMinor, debt.currency), UiTheme.BODY, MUTED));
+            amountField("المبلغ المسدد", "amount", body);
+            errorLabel(body);
+        }
+        @Override boolean save() {
+            if (debt() == null) return fail("الدين ده لم يعد موجودًا؛ لم نسجل السداد", null);
+            if (ExpenseParser.manualAmountMisread(text("amount"))) return fail("راجع المبلغ", "amount");
+            long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
+            if (minor <= 0) return fail("راجع المبلغ", "amount");
+            db.payDebt(draft.getLong("id"), minor);
+            return true;
+        }
+    }
+
+    private void paymentSourceDialog() { sourceBankPage(null); }
+
+    private static boolean bankSource(String kind){return "حساب".equals(kind)||"بطاقة".equals(kind)||"بطاقة ائتمان".equals(kind);}
+    private static boolean usableBank(String name){return name!=null&&name.matches(".*[\\p{L}].*");}
+    private void sourceBankPage(ExpenseDb.PaymentSource source) {
+        Bundle draft=new Bundle();draft.putLong("id",source==null?-1:source.id);
+        draft.putString("kind",source==null?"":source.kind);
+        draft.putString("bank",source==null||!usableBank(source.name)?"":source.name);
+        // A numeric old name was the user's only label; a real bank name must not be copied into the display name.
+        draft.putString("name",source==null?"":source.displayName!=null&&!source.displayName.isBlank()?source.displayName:usableBank(source.name)?"":source.name);
+        draft.putString("digits",source==null||source.last4==null?"":source.last4);
+        savePageScroll();formPages.push(new SourceFormPage(draft,draft));
+    }
+    private final class SourceFormPage extends UiPages.Page {
+        private EditText bank,name,digits;private TextView error,kindHint;private LinearLayout bankFields;
+        SourceFormPage(Bundle draft,Bundle original){super("source_form",draft.getLong("id",-1)<0?"وسيلة دفع جديدة":"تحديد البنك والوسيلة",draft,original);}
+        private EditText field(String title,String key,LinearLayout body){
+            EditText field=ui.field(title,body);field.setTag("source_"+key);field.setText(draft.getString(key,""));
+            field.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}
+                public void onTextChanged(CharSequence s,int st,int before,int count){draft.putString(key,s.toString());field.setError(null);if(error!=null)error.setVisibility(View.GONE);}
+                public void afterTextChanged(Editable text){} });return field;
+        }
+        @Override void build(LinearLayout body,UiComponents components){
+            String[] kinds={"بطاقة","بطاقة ائتمان","حساب","محفظة","تطبيق دفع","كاش"};
+            components.caption("نوع الوسيلة",body);
+            if(draft.getLong("id",-1)<0)components.choices(new String[]{"كارت خصم","كارت ائتمان","حساب بنكي","محفظة","تطبيق دفع","كاش"},null,
+                    java.util.Arrays.asList(kinds).indexOf(draft.getString("kind")),i->{draft.putString("kind",kinds[i]);updateKind();},body);
+            else body.addView(components.label(draft.getString("kind")+" · آخر الأرقام "+draft.getString("digits"),UiTheme.BODY,INK));
+            kindHint=components.label("",UiTheme.CAPTION,MUTED);body.addView(kindHint);
+            bankFields=new LinearLayout(MainActivity.this);bankFields.setOrientation(LinearLayout.VERTICAL);body.addView(bankFields);
+            bank=field("البنك", "bank",bankFields);
+            bankFields.addView(components.button("اختيار البنك",false,false,()->chooseValue("البنك",new String[]{"HSBC","بنك مصر","البنك الأهلي المصري","CIB","QNB","ALEXBANK","ADIB","FABMISR","BDC","SAIB","Bank ABC","BANKNXT","KFH Egypt","Credit Agricole"},draft.getString("bank"),value->bank.setText(value))));
+            bankFields.addView(components.label("اكتب البنك لو مش في القائمة. اسم الكارت أو أرقام الحساب ليهم خانات منفصلة تحت.",UiTheme.CAPTION,MUTED));
+            name=field("اسم يميّزها ليك","name",body);name.setHint("مثال: كارت المشتريات أو حساب المرتب");
+            body.addView(components.label("الاسم اختياري للحسابات والكروت، ومطلوب لباقي الوسائل.",UiTheme.CAPTION,MUTED));
+            digits=field("آخر 3 أو 4 أرقام (اختياري)","digits",body);digits.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            if(draft.getLong("id",-1)>=0){digits.setKeyListener(null);body.addView(components.label("تصحيح البنك يحافظ على آخر الأرقام والعمليات والرسائل. الربط يحتاج تأكيدًا منفصلًا.",UiTheme.CAPTION,MUTED));}
+            else body.addView(components.label("آخر الأرقام فقط، مش رقم الحساب أو الكارت كامل.",UiTheme.CAPTION,MUTED));
+            error=components.label("",UiTheme.BODY,CORAL);error.setTag("source_error");error.setVisibility(View.GONE);error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(error);updateKind();
+        }
+        private void updateKind(){if(bankFields!=null)bankFields.setVisibility(bankSource(draft.getString("kind"))?View.VISIBLE:View.GONE);
+            if(kindHint!=null)kindHint.setText("بطاقة".equals(draft.getString("kind"))?"كارت الخصم بيسحب من حساب بنكي، وتقدر تربطه بحسابه بعد الإضافة.":
+                    "بطاقة ائتمان".equals(draft.getString("kind"))?"كارت الائتمان له مديونية وسداد منفصل؛ مش بيتربط ككارت خصم بالحساب.":
+                    "حساب".equals(draft.getString("kind"))?"اختار البنك هنا؛ رقم الحساب واسمه الواضح في الخانات اللي تحت.":"اختار نوع الوسيلة عشان نوضح بياناتها.");}
+        private boolean fail(String message,EditText field){error.setText(message);error.setVisibility(View.VISIBLE);if(field!=null){field.setError(message);field.requestFocus();}else error.post(()->error.requestRectangleOnScreen(new android.graphics.Rect(0,0,error.getWidth(),error.getHeight()),false));return false;}
+        @Override String saveLabel(){return draft.getLong("id",-1)<0?"إضافة":"حفظ بيانات الوسيلة";}
+        @Override boolean save(){
+            String kind=draft.getString("kind",""),bankName=draft.getString("bank","").trim(),displayName=draft.getString("name","").trim();
+            String last=ExpenseParser.normalizeDigits(draft.getString("digits","").trim());
+            if(kind.isEmpty())return fail("اختار نوع الوسيلة",null);
+            if(bankSource(kind)&&!usableBank(bankName))return fail("اختار اسم البنك؛ الأرقام مكانها خانة آخر الأرقام",bank);
+            if(!bankSource(kind)&&displayName.isEmpty())return fail("اكتب اسم الوسيلة",name);
+            if(draft.getLong("id",-1)<0&&!last.isEmpty()&&!last.matches("[0-9]{3,4}"))return fail("اكتب آخر 3 أو 4 أرقام فقط",digits);
+            try {
+                long id=draft.getLong("id",-1);
+                if(id<0)new SourceMutation(db).createReviewed(bankSource(kind)?bankName:displayName,kind,last.isEmpty()?null:last,bankSource(kind)?displayName:"");
+                else if(!new SourceMutation(db).correctBank(id,bankName,displayName))return fail("الوسيلة دي لم تعد موجودة؛ لم نحفظ أي تعديل",null);
+                return true;
+            }catch(IllegalArgumentException exception){return fail(exception.getMessage(),null);}
+            catch(RuntimeException exception){return fail("تعذر حفظ الوسيلة؛ لم نحفظ بيانات جزئية. راجعها وحاول مرة أخرى.",null);}
+        }
+        @Override boolean restoreAfterRecreation(){return true;}
     }
 
     private void budgetDialog() {
@@ -1018,60 +1303,182 @@ public final class MainActivity extends Activity {
     }
 
     private void budgetPlanDialog(ExpenseDb.BudgetPlan existing) {
-        LinearLayout form = form();
-        EditText name = input("اسم الميزانية", form);
-        Spinner currency = spinner("العملة", CURRENCIES, form);
-        EditText amount = input("حد الإنفاق، مثال 5000", form);
-        amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        Spinner cycle = spinner("دورة التجديد", new String[]{"شهري", "أسبوعي", "مرة واحدة", "مخصص بالأيام"}, form);
-        EditText anchor = dateInput("تاريخ البداية", form, LocalDate.now());
-        EditText duration = input("عدد الأيام للمرة الواحدة أو المخصص", form);
-        duration.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        duration.setText("30");
-        List<String> chosen = new ArrayList<>();
-        TextView categories = label("حدد التصنيفات للتتبع  ⌄", 15, ACCENT, true);
-        categories.setPadding(dp(12), dp(16), dp(12), dp(16));
-        form.addView(categories);
-        categories.setOnClickListener(v -> {
-            boolean[] checked = new boolean[CATEGORIES.length];
-            for (int i = 0; i < CATEGORIES.length; i++) checked[i] = chosen.contains(CATEGORIES[i]);
-            new ChoiceDialogBuilder().setTitle("التصنيفات للتتبع")
-                    .setMultiChoiceItems(CATEGORIES, checked, (dialog, which, enabled) -> {
-                        if (enabled && !chosen.contains(CATEGORIES[which])) chosen.add(CATEGORIES[which]);
-                        else if (!enabled) chosen.remove(CATEGORIES[which]);
-                    }).setPositiveButton("تم", (dialog, which) ->
-                            categories.setText("التصنيفات: " + String.join("، ", chosen))).show();
-        });
-        if (existing != null) {
-            name.setText(existing.name);
-            for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(existing.currency)) currency.setSelection(i);
-            amount.setText(String.format(Locale.ROOT, "%.2f", existing.amountMinor / 100.0));
-            cycle.setSelection("weekly".equals(existing.cycle) ? 1 : "once".equals(existing.cycle) ? 2 :
-                    "custom".equals(existing.cycle) ? 3 : 0);
-            setDateValue(anchor, existing.anchor);
-            duration.setText(Integer.toString(existing.durationDays));
-            chosen.addAll(existing.categories);
-            categories.setText("التصنيفات: " + String.join("، ", chosen));
+        Bundle draft = new Bundle(); draft.putLong("id", existing == null ? -1 : existing.id);
+        draft.putString("name", existing == null ? "" : existing.name);
+        draft.putString("currency", existing == null ? CURRENCIES[0] : existing.currency);
+        draft.putString("amount", existing == null ? "" : minorText(existing.amountMinor));
+        draft.putString("cycle", existing == null ? "monthly" : existing.cycle);
+        draft.putString("anchor", (existing == null || existing.anchor == null ? LocalDate.now() : existing.anchor).toString());
+        draft.putString("days", existing == null ? "30" : Integer.toString(existing.durationDays));
+        draft.putStringArrayList("categories", existing == null ? new ArrayList<>() : new ArrayList<>(existing.categories));
+        savePageScroll(); formPages.push(new BudgetPlanPage(draft, draft));
+    }
+
+    private final class BudgetPlanPage extends DraftFormPage {
+        private EditText days; private LinearLayout categories;
+        BudgetPlanPage(Bundle draft, Bundle original) { super("budget", draft.getLong("id", -1) < 0 ? "ميزانية جديدة" : "تعديل الميزانية", draft, original); }
+        private ArrayList<String> chosen() {
+            ArrayList<String> list = draft.getStringArrayList("categories"); return list == null ? new ArrayList<>() : list;
         }
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(form);
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle(existing == null ? "ميزانية جديدة" : "تعديل الميزانية").setView(scroll)
-                .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                    try {
-                        if (rejectMisreadAmount(amount)) return;
-                        long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-                        LocalDate start = java.util.Objects.requireNonNull(dateValue(anchor));
-                        int days = Integer.parseInt(ExpenseParser.normalizeDigits(duration.getText().toString().trim()));
-                        if (minor <= 0 || days <= 0 || name.getText().toString().trim().isEmpty() || chosen.isEmpty())
-                            throw new IllegalArgumentException();
-                        String type = new String[]{"monthly", "weekly", "once", "custom"}[cycle.getSelectedItemPosition()];
-                        db.putBudgetPlan(existing == null ? null : existing.id, name.getText().toString(), minor,
-                                currency.getSelectedItem().toString(), type, start, days, chosen);
-                        dialog.dismiss(); render();
-                    } catch (RuntimeException error) { toast("راجع الاسم والمبلغ والتاريخ والتصنيفات"); }
-                }));
-        dialog.show();
+        @Override void build(LinearLayout body, UiComponents components) {
+            amountField("حد الإنفاق", "amount", body);
+            choiceField("العملة", "currency", CURRENCIES, CURRENCIES, null, body);
+            textField("اسم الميزانية", "name", body);
+            components.caption("دورة التجديد", body);
+            String[] cycles = {"monthly", "weekly", "once", "custom"};
+            components.choices(new String[]{"شهري", "أسبوعي", "مرة واحدة", "مخصص بالأيام"}, null, java.util.Arrays.asList(cycles).indexOf(text("cycle")),
+                    i -> { draft.putString("cycle", cycles[i]); updateCycle(); }, body).setTag("budget_cycle");
+            dateField("تاريخ البداية", "anchor", body);
+            days = textField("عدد الأيام", "days", body); days.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            categories = new LinearLayout(MainActivity.this); categories.setOrientation(LinearLayout.VERTICAL); body.addView(categories);
+            drawCategories(); errorLabel(body); updateCycle();
+        }
+        private void updateCycle() {
+            if (days == null) return;
+            int visible = "once".equals(text("cycle")) || "custom".equals(text("cycle")) ? View.VISIBLE : View.GONE;
+            days.setVisibility(visible);
+            android.view.ViewGroup parent = (android.view.ViewGroup) days.getParent();
+            int at = parent.indexOfChild(days); if (at > 0) parent.getChildAt(at - 1).setVisibility(visible);
+        }
+        private void drawCategories() {
+            categories.removeAllViews();
+            List<String> chosen = chosen();
+            ui.choiceCard("التصنيفات للتتبع", chosen.isEmpty() ? "اختار تصنيف واحد على الأقل" : String.join("، ", chosen), null, () -> {
+                boolean[] checked = new boolean[CATEGORIES.length];
+                for (int i = 0; i < CATEGORIES.length; i++) checked[i] = chosen().contains(CATEGORIES[i]);
+                new ChoiceDialogBuilder().setTitle("التصنيفات للتتبع")
+                        .setMultiChoiceItems(CATEGORIES, checked, (dialog, which, enabled) -> checked[which] = enabled)
+                        .setPositiveButton("تم", (dialog, which) -> {
+                            ArrayList<String> picked = new ArrayList<>();
+                            for (int i = 0; i < CATEGORIES.length; i++) if (checked[i]) picked.add(CATEGORIES[i]);
+                            draft.putStringArrayList("categories", picked); if (error != null) error.setVisibility(View.GONE); drawCategories();
+                        }).setNegativeButton("إلغاء", null).show();
+            }, categories).setTag("budget_categories");
+        }
+        @Override boolean save() {
+            if (ExpenseParser.manualAmountMisread(text("amount"))) return fail("راجع المبلغ", "amount");
+            long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
+            if (minor <= 0) return fail("اكتب حد الإنفاق", "amount");
+            if (text("name").trim().isEmpty()) return fail("اكتب اسم الميزانية", "name");
+            int span;
+            try { span = Integer.parseInt(ExpenseParser.normalizeDigits(text("days").trim())); } catch (NumberFormatException invalid) { span = 0; }
+            if (span <= 0) return fail("اكتب عدد أيام صحيح", "days");
+            if (chosen().isEmpty()) return fail("اختار تصنيف واحد على الأقل للتتبع", null);
+            if (text("anchor").isEmpty()) return fail("اختار تاريخ البداية", null);
+            long id = draft.getLong("id", -1);
+            try {
+                db.putBudgetPlan(id < 0 ? null : id, text("name"), minor, text("currency"), text("cycle"), LocalDate.parse(text("anchor")), span, chosen());
+            } catch (RuntimeException failed) { return fail("لم نحفظ الميزانية؛ راجع البيانات وحاول مرة أخرى", null); }
+            return true;
+        }
+    }
+
+    /** Password pages: secrets live only in their fields, never in the draft, saved state or a restorable stack. */
+    private abstract class SecretPage extends DraftFormPage {
+        protected final List<EditText> secrets = new ArrayList<>();
+        SecretPage(String route, String title) { super(route, title, new Bundle(), new Bundle()); }
+        protected EditText secret(String title, String key, LinearLayout body) {
+            EditText field = passwordInput(title, body); field.setTag(route + "_" + key); secrets.add(field);
+            field.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                public void onTextChanged(CharSequence s, int start, int before, int count) { field.setError(null); if (error != null) error.setVisibility(View.GONE); }
+                public void afterTextChanged(Editable s) {}
+            });
+            return field;
+        }
+        @Override boolean dirty() { for (EditText field : secrets) if (field.length() > 0) return true; return false; }
+        @Override boolean restoreAfterRecreation() { return false; }
+    }
+
+    private void backupDialog() { savePageScroll(); formPages.push(new BackupPage()); }
+
+    private final class BackupPage extends SecretPage {
+        private EditText first, second;
+        BackupPage() { super("backup", "نسخة احتياطية"); }
+        @Override void build(LinearLayout body, UiComponents components) {
+            body.addView(components.label("ملف واحد مشفر بكلمة سر إنت اللي تختارها (8 أحرف على الأقل). فيه عملياتك ونصوص رسائل البنك المحفوظة وإعداداتك. لو نسيت كلمة السر مفيش طريقة نفتح النسخة.", UiTheme.BODY, MUTED));
+            first = secret("كلمة السر", "password", body); second = secret("تأكيد كلمة السر", "confirm", body);
+            errorLabel(body);
+        }
+        @Override String saveLabel() { return "اختار مكان الحفظ"; }
+        @Override boolean save() {
+            char[] password = chars(first), confirm = chars(second);
+            boolean same = java.util.Arrays.equals(password, confirm);
+            BackupVault.wipe(confirm);
+            if (password.length < BackupVault.MIN_PASSWORD) { BackupVault.wipe(password); return fail("كلمة السر لازم تكون 8 أحرف على الأقل", "password"); }
+            if (!same) { BackupVault.wipe(password); return fail("كلمتا السر مش متطابقتين", "confirm"); }
+            BackupVault.wipe(pendingBackupPassword); pendingBackupPassword = password;
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/octet-stream");
+            intent.putExtra(Intent.EXTRA_TITLE, BackupVault.fileName(LocalDate.now()));
+            startActivityForResult(intent, BACKUP_CREATE_REQUEST);
+            return true;
+        }
+    }
+
+    private void restorePasswordDialog(Uri uri) { savePageScroll(); formPages.push(new RestorePage(uri)); }
+
+    private final class RestorePage extends SecretPage {
+        private final Uri uri; private EditText password;
+        RestorePage(Uri uri) { super("restore", "استعادة نسخة"); this.uri = uri; }
+        @Override void build(LinearLayout body, UiComponents components) {
+            body.addView(components.label("اكتب كلمة سر النسخة. هنعرض لك ملخصها قبل ما نستبدل أي حاجة.", UiTheme.BODY, MUTED));
+            password = secret("كلمة السر", "password", body); errorLabel(body);
+        }
+        @Override String saveLabel() { return "افتح النسخة"; }
+        @Override boolean save() {
+            if (password.length() == 0) return fail("اكتب كلمة سر النسخة", "password");
+            prepareRestore(uri, chars(password)); return true;
+        }
+    }
+
+    private void supportDialog(boolean suggestion) {
+        Bundle draft = new Bundle(); draft.putBoolean("suggestion", suggestion); draft.putString("description", "");
+        draft.putBoolean("crash", false);
+        savePageScroll(); formPages.push(new SupportPage(draft, draft));
+    }
+
+    private final class SupportPage extends DraftFormPage {
+        private final String lastCrash;
+        SupportPage(Bundle draft, Bundle original) {
+            super("support", draft.getBoolean("suggestion") ? "اقتراح تحسين" : "الإبلاغ عن مشكلة", draft, original);
+            lastCrash = draft.getBoolean("suggestion") ? null : CrashLog.latest(MainActivity.this);
+        }
+        private String reviewed() {
+            return text("description").trim() + (draft.getBoolean("crash") && lastCrash != null ? "\n\nآخر عطل (محلي):\n" + lastCrash : "");
+        }
+        @Override void build(LinearLayout body, UiComponents components) {
+            boolean suggestion = draft.getBoolean("suggestion");
+            body.addView(components.label("إلى: " + EmailSupport.ADDRESS, UiTheme.CAPTION, MUTED));
+            EditText description = textField(suggestion ? "وصف الاقتراح والفائدة منه" : "إيه اللي حصل؟ وإيه اللي كنت متوقعه؟", "description", body);
+            description.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+            description.setSingleLine(false); description.setMinLines(3); description.setGravity(Gravity.TOP | Gravity.START);
+            description.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(4000)});
+            body.addView(components.label("متكتبش أرقام حسابات أو كروت، ولا تلصق رسائل البنك الأصلية.", UiTheme.CAPTION, CORAL));
+            components.caption("بيانات النسخة والجهاز والنظام واللغة", body);
+            TextView metadata = components.label(GitHubSupport.details(MainActivity.this), UiTheme.CAPTION, INK);
+            metadata.setTextDirection(View.TEXT_DIRECTION_LTR); metadata.setTextIsSelectable(true); body.addView(metadata);
+            if (lastCrash != null) {
+                CheckBox attach = checkField("إرفاق آخر عطل كنص في المسودة", "crash", body);
+                TextView preview = components.label(lastCrash, UiTheme.CAPTION, INK); preview.setTextDirection(View.TEXT_DIRECTION_LTR);
+                preview.setTextIsSelectable(true); preview.setVisibility(attach.isChecked() ? View.VISIBLE : View.GONE); body.addView(preview);
+                attach.setOnCheckedChangeListener((button, checked) -> { draft.putBoolean("crash", checked); preview.setVisibility(checked ? View.VISIBLE : View.GONE); });
+            }
+            body.addView(components.label("هيفتح مسودة في تطبيق الإيميل؛ راجعها واضغط إرسال بنفسك. محتاج إيميل متظبط على الموبايل.", UiTheme.CAPTION, MUTED));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(12);
+            body.addView(components.button("نسخ الطلب", false, false, () -> copySupportRequest(suggestion, reviewed(), "اتنسخ عنوان الدعم والطلب")), lp);
+            errorLabel(body);
+        }
+        @Override String saveLabel() { return "فتح مسودة إيميل"; }
+        /** Opening the mail app is not «saved»: the page stays so the user can come back and copy or retry. */
+        @Override boolean save() {
+            boolean suggestion = draft.getBoolean("suggestion");
+            if (text("description").trim().isEmpty()) return fail("اكتب وصف مختصر الأول", "description");
+            try { startActivity(EmailSupport.draft(MainActivity.this, suggestion, reviewed())); }
+            catch (android.content.ActivityNotFoundException error) { copySupportRequest(suggestion, reviewed(), "مفيش تطبيق إيميل متاح؛ اتنسخ عنوان الدعم والطلب"); }
+            return false;
+        }
     }
 
     private void exportCsv() {
@@ -1104,27 +1511,6 @@ public final class MainActivity extends Activity {
         field.getText().getChars(0, length, out, 0); return out;
     }
 
-    private void backupDialog() {
-        LinearLayout form = form();
-        form.addView(label("ملف واحد مشفر بكلمة سر إنت اللي تختارها (8 أحرف على الأقل). فيه عملياتك ونصوص رسائل البنك المحفوظة وإعداداتك. لو نسيت كلمة السر مفيش طريقة نفتح النسخة.", 13, MUTED, false));
-        EditText first = passwordInput("كلمة السر", form);
-        EditText second = passwordInput("تأكيد كلمة السر", form);
-        new ChoiceDialogBuilder().setTitle("نسخة احتياطية").setView(form)
-                .setPositiveButton("اختار مكان الحفظ", (dialog, which) -> {
-                    char[] password = chars(first), confirm = chars(second);
-                    boolean same = java.util.Arrays.equals(password, confirm);
-                    BackupVault.wipe(confirm);
-                    if (password.length < BackupVault.MIN_PASSWORD) { BackupVault.wipe(password); toast("كلمة السر لازم تكون 8 أحرف على الأقل"); return; }
-                    if (!same) { BackupVault.wipe(password); toast("كلمتا السر مش متطابقتين"); return; }
-                    BackupVault.wipe(pendingBackupPassword); pendingBackupPassword = password;
-                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("application/octet-stream");
-                    intent.putExtra(Intent.EXTRA_TITLE, BackupVault.fileName(LocalDate.now()));
-                    startActivityForResult(intent, BACKUP_CREATE_REQUEST);
-                }).setNegativeButton("إلغاء", null).show();
-    }
-
     /** Builds the file on the capture worker (the database is read there) and streams it to the chosen document. */
     private void writeBackup(Uri uri, char[] password) {
         toast("بنجهز النسخة...");
@@ -1152,15 +1538,6 @@ public final class MainActivity extends Activity {
         intent.setType("*/*");
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivityForResult(intent, BACKUP_OPEN_REQUEST);
-    }
-
-    private void restorePasswordDialog(Uri uri) {
-        LinearLayout form = form();
-        form.addView(label("اكتب كلمة سر النسخة. هنعرض لك ملخصها قبل ما نستبدل أي حاجة.", 13, MUTED, false));
-        EditText password = passwordInput("كلمة السر", form);
-        new ChoiceDialogBuilder().setTitle("استعادة نسخة").setView(form)
-                .setPositiveButton("افتح النسخة", (dialog, which) -> prepareRestore(uri, chars(password)))
-                .setNegativeButton("إلغاء", null).show();
     }
 
     /** Reads and decrypts off the main thread; a refusal is one clear sentence and the current data is untouched. */
@@ -1275,10 +1652,22 @@ public final class MainActivity extends Activity {
     private void whatsNewDialog() {
         String text = WhatsNew.readable(readAsset("whats-new.txt"));
         if (text.isEmpty()) { toast("لا توجد ملاحظات للنسخة دي"); return; }
-        LinearLayout notes = form();
-        TextView body = label(text, 14, INK, false);
-        body.setTextIsSelectable(true); notes.addView(body);
-        new ChoiceDialogBuilder().setTitle("ما الجديد").setView(scrollForm(notes)).setPositiveButton("إغلاق", null).show();
+        textPage("ما الجديد", text);
+    }
+
+    /** Long reading surfaces are pages, not sheets; nothing to save, so back and «إغلاق» just return. */
+    private void textPage(String title, String text) {
+        savePageScroll();
+        formPages.push(new UiPages.Page("text", title, new Bundle(), new Bundle()) {
+            @Override void build(LinearLayout body, UiComponents components) {
+                TextView copy = components.label(text, UiTheme.BODY, INK); copy.setTextIsSelectable(true);
+                copy.setLineSpacing(0, 1.25f);
+                body.addView(copy);
+            }
+            @Override boolean save() { return true; }
+            @Override String saveLabel() { return "إغلاق"; }
+            @Override boolean readOnly() { return true; }
+        });
     }
 
     private void backupReminderCard() {
@@ -1516,78 +1905,7 @@ public final class MainActivity extends Activity {
 
     private void editTransactionDialog(ExpenseDb.Transaction item) {
         if(new CardSettlements(db).related(item.id)){toast("فك توزيع سداد البطاقة قبل تعديل العملية أو رسومها");return;}
-        LinearLayout form = form();
-        Spinner kind = spinner("نوع العملية", new String[]{"مصروف", "دخل", "تحويل"}, form);
-        kind.setSelection("income".equals(item.kind) ? 1 : "transfer".equals(item.kind) ? 2 : 0);
-        EditText merchant = input("الجهة", form);
-        merchant.setText(item.merchant);
-        EditText amount = input("المبلغ", form);
-        amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        amount.setText(String.format(Locale.ROOT, "%.2f", item.amountMinor / 100.0));
-        Spinner currency = spinner("العملة", CURRENCIES, form);
-        for (int i = 0; i < CURRENCIES.length; i++)
-            if (CURRENCIES[i].equals(item.currency)) currency.setSelection(i);
-        Spinner category = spinner("التصنيف", CATEGORIES, form);
-        for (int i = 0; i < CATEGORIES.length; i++)
-            if (CATEGORIES[i].equals(item.category)) category.setSelection(i);
-        List<ExpenseDb.PaymentSource> sources = paymentOptions(item.paymentSourceId,item.destinationSourceId);
-        Spinner payment = spinner("وسيلة الدفع", sourceNames(sources), form);
-        Spinner destination = spinner("التحويل إلى", sourceNames(sources), form);
-        for (int i = 0; i < sources.size(); i++)
-            if (item.paymentSourceId != null && item.paymentSourceId == sources.get(i).id) payment.setSelection(i + 1);
-        for (int i = 0; i < sources.size(); i++)
-            if (item.destinationSourceId != null && item.destinationSourceId == sources.get(i).id) destination.setSelection(i + 1);
-        EditText date = dateInput("التاريخ", form, Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate());
-        EditText note = input("وصف أو ملاحظة", form);
-        if (item.note != null) note.setText(item.note);
-        CheckBox remember=new CheckBox(this);remember.setText("افتكر التصنيف للتاجر ده في العمليات الجديدة");
-        remember.setTextColor(INK);remember.setTypeface(REGULAR);remember.setChecked(false);
-        remember.setVisibility("expense".equals(item.kind) && ExpenseDb.canRememberMerchant(item.merchant,"أخرى") ? View.VISIBLE : View.GONE);
-        form.addView(remember);
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle("تعديل المعاملة")
-                .setView(scrollForm(form)).setPositiveButton("حفظ", null)
-                .setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignored -> {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                if (rejectMisreadAmount(amount)) return;
-                long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-                if (minor <= 0 || merchant.getText().toString().trim().isEmpty()) {
-                    toast("راجع الجهة والمبلغ");
-                    return;
-                }
-                String type = new String[]{"expense", "income", "transfer"}[kind.getSelectedItemPosition()];
-                Long from = selectedSource(payment, sources);
-                Long to = selectedSource(destination, sources);
-                if ("transfer".equals(type) && (from == null || to == null || from.equals(to))) {
-                    toast("اختار حساب المصدر والوجهة للتحويل"); return;
-                }
-                try {
-                    LocalDate day = java.util.Objects.requireNonNull(dateValue(date));
-                    boolean learn=remember.isChecked() && "expense".equals(type);
-                    if(learn && !ExpenseDb.canRememberMerchant(merchant.getText().toString(),category.getSelectedItem().toString())) {
-                        toast("حفظ التصنيف متاح للمشتريات، مش التحويلات أو الأقساط");return;
-                    }
-                    MutationResult result=new TransactionMutation(db).update(item.id, minor, currency.getSelectedItem().toString(),
-                            merchant.getText().toString(), "income".equals(type) ? "دخل" :
-                                    "transfer".equals(type) ? "تحويلات" : category.getSelectedItem().toString(),
-                            from, type, "transfer".equals(type) ? to : null, note.getText().toString(),
-                            day.atTime(Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalTime())
-                                    .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),learn);
-                    if(!result.changed()){
-                        toast(result.outcome==MutationResult.Outcome.NOT_FOUND
-                                ? "العملية دي لم تعد موجودة؛ لم نحفظ تعديل أو قاعدة تاجر."
-                                : "لم يتم تطبيق التعديل؛ راجع العملية وحاول مرة أخرى.");
-                        return;
-                    }
-                } catch (RuntimeException error) { toast("تعذر الحفظ؛ راجع التاريخ والبيانات"); return; }
-                dialog.dismiss();
-                if (selectedTab == 10) selectedTransaction=db.transactionById(item.id);
-                render();
-                toast("اتحفظ تعديل العملية");
-                if(remember.isChecked() && "expense".equals(type)) offerPastMerchantCategory(merchant.getText().toString(),category.getSelectedItem().toString());
-            });
-        });
-        dialog.show();
+        openTransactionPage(item, null);
     }
 
     private void refreshMerchantCatalog() {
@@ -1640,58 +1958,186 @@ public final class MainActivity extends Activity {
 
     private void manualDialog() { manualDialog(null); }
 
-    private void manualDialog(String spoken) {
-        LinearLayout form = form();
-        Spinner kind = spinner("نوع العملية", new String[]{"مصروف", "دخل", "تحويل"}, form);
-        EditText merchant = input("الجهة أو وصف العملية", form);
-        EditText amount = input("المبلغ، مثال 250.00", form);
-        amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        Spinner currency = spinner("العملة", CURRENCIES, form);
-        Spinner category = spinner("التصنيف", CATEGORIES, form);
-        List<ExpenseDb.PaymentSource> sources = db.selectableSources();
-        Spinner payment = spinner("وسيلة الدفع", sourceNames(sources), form);
-        Spinner destination = spinner("التحويل إلى", sourceNames(sources), form);
-        EditText date = dateInput("التاريخ", form, LocalDate.now());
-        EditText note = input("وصف أو ملاحظة", form);
+    private void manualDialog(String spoken) { openTransactionPage(null, spoken); }
+
+    private void openTransactionPage(ExpenseDb.Transaction item, String spoken) {
+        Bundle draft = new Bundle();
+        draft.putLong("id", item == null ? -1 : item.id);
+        draft.putLong("when", item == null ? 0 : item.when);
+        draft.putString("precision", item == null || item.timePrecision == null ? "" : item.timePrecision);
+        draft.putString("kind", item == null ? "expense" : item.kind);
+        draft.putString("merchant", item == null ? "" : item.merchant);
+        draft.putString("amount", item == null ? "" : String.format(Locale.ROOT,"%.2f",item.amountMinor/100.0));
+        draft.putString("currency", item == null ? CURRENCIES[0] : item.currency);
+        // Income/transfer categories are derived on save; switching to expense must not inherit «دخل».
+        draft.putString("category", item == null || !"expense".equals(item.kind) ? CATEGORIES[0] : item.category);
+        draft.putLong("from", item == null || item.paymentSourceId == null ? -1 : item.paymentSourceId);
+        draft.putLong("to", item == null || item.destinationSourceId == null ? -1 : item.destinationSourceId);
+        draft.putString("day", (item == null ? LocalDate.now() : Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate()).toString());
+        draft.putString("note", item == null || item.note == null ? "" : item.note);
+        draft.putBoolean("remember",false);
+        draft.putString("time","");
+        // A spoken draft differs from its blank original, so back asks before discarding it.
+        Bundle original = new Bundle(draft);
         if (spoken != null) {
             String normalized = ExpenseParser.normalizeDigits(spoken);
             java.util.regex.Matcher number = java.util.regex.Pattern.compile("[0-9]+(?:[.,][0-9]{1,2})?").matcher(normalized);
             if (number.find()) {
-                amount.setText(number.group());
-                String description = (normalized.substring(0, number.start()) + " " + normalized.substring(number.end()))
-                        .replaceAll("(?i)(جنيه|جنيهات|EGP|صرفت|دفعت|اشتريت|من|في)", " ").trim();
-                merchant.setText(description.isEmpty() ? "عملية بالصوت" : description);
-            } else merchant.setText(spoken);
-            note.setText("مراجعة نص الصوت: " + spoken);
+                draft.putString("amount",number.group());
+                String description = (normalized.substring(0,number.start())+" "+normalized.substring(number.end()))
+                        .replaceAll("(?i)(جنيه|جنيهات|EGP|صرفت|دفعت|اشتريت|من|في)"," ").trim();
+                draft.putString("merchant",description.isEmpty()?"عملية بالصوت":description);
+            } else draft.putString("merchant",spoken);
+            draft.putString("note","مراجعة نص الصوت: "+spoken);
         }
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle("عملية جديدة").setView(scrollForm(form))
-                .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            if (rejectMisreadAmount(amount)) return;
-            long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-            String name = merchant.getText().toString().trim();
-            if (minor <= 0 || name.isEmpty()) {
-                toast("اكتب الجهة والمبلغ بشكل صحيح");
-                return;
+        savePageScroll(); formPages.push(new TransactionFormPage(draft,original));
+    }
+
+    /** Add/edit share one draft and one presentation; existing DB mutation rules remain authoritative. */
+    private final class TransactionFormPage extends UiPages.Page {
+        private EditText amount, merchant;
+        private LinearLayout categories, destination;
+        private CheckBox remember;
+        private TextView error;
+        TransactionFormPage(Bundle draft, Bundle original) {
+            super("transaction",draft.getLong("id",-1)<0?"عملية جديدة":"تعديل المعاملة",draft,original);
+        }
+        private String text(String key) { return draft.getString(key,""); }
+        private Long source(String key) { long id=draft.getLong(key,-1); return id<0?null:id; }
+        private void bind(EditText field,String key) {
+            field.setTag("transaction_"+key); field.setText(text(key));
+            field.addTextChangedListener(new TextWatcher(){
+                public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+                public void onTextChanged(CharSequence s,int start,int before,int count){draft.putString(key,s.toString());field.setError(null);clearError();if("merchant".equals(key))updateKind();}
+                public void afterTextChanged(Editable s){}
+            });
+        }
+        @Override void build(LinearLayout body,UiComponents components) {
+            components.caption("نوع العملية",body);
+            components.choices(new String[]{"مصروف","دخل","تحويل"},null,
+                    "income".equals(text("kind"))?1:"transfer".equals(text("kind"))?2:0,
+                    i->{draft.putString("kind",new String[]{"expense","income","transfer"}[i]);updateKind();},body).setTag("transaction_kind");
+            amount=components.amount(text("amount"),body);bind(amount,"amount");
+            Button currency=components.button(text("currency"),false,false,()->{});currency.setTag("transaction_currency");
+            currency.setContentDescription("العملة، "+text("currency"));
+            currency.setOnClickListener(v->chooseValue("العملة",CURRENCIES,text("currency"),value->{draft.putString("currency",value);
+                currency.setText(value);currency.setContentDescription("العملة، "+value);}));
+            LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-2,-2);cp.gravity=Gravity.CENTER_HORIZONTAL;cp.topMargin=dp(8);body.addView(currency,cp);
+            categories=new LinearLayout(MainActivity.this);categories.setOrientation(LinearLayout.VERTICAL);body.addView(categories);
+            drawCategories();
+            merchant=components.field("الجهة أو وصف العملية",body);bind(merchant,"merchant");
+            LinearLayout accounts=new LinearLayout(MainActivity.this);accounts.setOrientation(LinearLayout.VERTICAL);body.addView(accounts);
+            drawAccount(accounts,"from","الحساب أو وسيلة الدفع");
+            destination=new LinearLayout(MainActivity.this);destination.setOrientation(LinearLayout.VERTICAL);destination.setTag("transaction_destination");
+            body.addView(destination);drawAccount(destination,"to","التحويل إلى");
+            EditText date=dateInput("التاريخ",body,LocalDate.parse(text("day")));
+            // Keep LocalDate in the native date field tag; the page model stores only its ISO value.
+            date.addTextChangedListener(new TextWatcher(){
+                public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+                public void onTextChanged(CharSequence s,int start,int before,int count){LocalDate day=dateValue(date);if(day!=null)draft.putString("day",day.toString());}
+                public void afterTextChanged(Editable s){}
+            });
+            if("date_only".equals(text("precision")))body.addView(components.label("تاريخ فقط · المصدر لا يحدد وقت العملية",UiTheme.CAPTION,MUTED));
+            else {
+                Button time=components.button(timeLabel(),false,false,()->{});time.setTag("transaction_time");
+                time.setOnClickListener(v->{LocalTime shown=chosenTime();
+                    android.app.TimePickerDialog picker=new android.app.TimePickerDialog(MainActivity.this,(view,hour,minute)->{
+                        draft.putString("time",LocalTime.of(hour,minute).toString());time.setText(timeLabel());clearError();
+                    },shown.getHour(),shown.getMinute(),false);
+                    UiSheets.prepare(MainActivity.this,picker,uiTheme,REGULAR).show();});
+                LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(-1,-2);tp.topMargin=dp(8);body.addView(time,tp);
             }
-            String type = new String[]{"expense", "income", "transfer"}[kind.getSelectedItemPosition()];
-            Long from = selectedSource(payment, sources);
-            Long to = selectedSource(destination, sources);
-            if ("transfer".equals(type) && (from == null || to == null || from.equals(to))) {
-                toast("اختار حساب المصدر والوجهة للتحويل"); return;
-            }
+            EditText note=components.field("وصف أو ملاحظة",body);bind(note,"note");note.setSingleLine(false);note.setMinLines(2);
+            remember=new CheckBox(MainActivity.this);remember.setText("افتكر التصنيف للتاجر ده في العمليات الجديدة");
+            remember.setTextColor(INK);remember.setTypeface(REGULAR);remember.setTextSize(UiTheme.BODY);remember.setMinHeight(dp(UiTheme.TOUCH));
+            remember.setButtonTintList(ColorStateList.valueOf(ACCENT));remember.setChecked(draft.getBoolean("remember"));
+            remember.setOnCheckedChangeListener((v,checked)->draft.putBoolean("remember",checked));body.addView(remember);
+            error=components.label("",UiTheme.BODY,CORAL);error.setTag("transaction_error");error.setVisibility(View.GONE);
+            error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(error);
+            updateKind();
+        }
+        private void updateKind() {
+            clearError();
+            if(categories!=null)categories.setVisibility("expense".equals(text("kind"))?View.VISIBLE:View.GONE);
+            if(destination!=null)destination.setVisibility("transfer".equals(text("kind"))?View.VISIBLE:View.GONE);
+            if(remember!=null)remember.setVisibility(draft.getLong("id",-1)>=0&&"expense".equals(text("kind"))&&(draft.getBoolean("remember")||ExpenseDb.canRememberMerchant(text("merchant"),"أخرى"))?View.VISIBLE:View.GONE);
+        }
+        private void drawCategories() {
+            categories.removeAllViews();ui.caption("التصنيف",categories);
+            String[] names=transactionCategories(text("category"));int[] icons=new int[names.length];
+            for(int i=0;i<names.length;i++)icons[i]=categoryStyle(names[i])[2];
+            ui.choices(names,icons,java.util.Arrays.asList(names).indexOf(text("category")),i->draft.putString("category",names[i]),categories);
+            categories.addView(ui.button("كل التصنيفات",false,false,()->chooseValue("التصنيف",names,text("category"),value->{draft.putString("category",value);drawCategories();})));
+        }
+        private void drawAccount(LinearLayout container,String key,String title) {
+            container.removeAllViews();List<ExpenseDb.PaymentSource> sources=paymentOptions(source("from"),source("to"));
+            ExpenseDb.PaymentSource selected=null;for(ExpenseDb.PaymentSource candidate:sources)if(java.util.Objects.equals(candidate.id,source(key)))selected=candidate;
+            String value=selected==null?"بدون وسيلة محددة":db.sourceLabel(selected.id)+(selected.archived?" · مؤرشف":selected.reviewed?"":" · يحتاج مراجعة");
+            ui.choiceCard(title,value,selected==null?null:sourceBadge(selected,40),()->{
+                String[] names=sourceNames(sources);int at=0;for(int i=0;i<sources.size();i++)if(java.util.Objects.equals(sources.get(i).id,source(key)))at=i+1;
+                new ChoiceDialogBuilder().setTitle(title).setSingleChoiceItems(names,at,(d,i)->{
+                    draft.putLong(key,i<=0?-1:sources.get(i-1).id);d.dismiss();clearError();drawAccount(container,key,title);
+                }).setNegativeButton("إلغاء",null).show();
+            },container).setTag("transaction_"+key);
+        }
+        private boolean fail(String message,EditText field) {
+            error.setText(message);error.setVisibility(View.VISIBLE);
+            if(field!=null){field.setError(message);field.requestFocus();}else error.post(()->error.requestRectangleOnScreen(new android.graphics.Rect(0,0,error.getWidth(),error.getHeight()),false));
+            return false;
+        }
+        private void clearError(){if(error!=null)error.setVisibility(View.GONE);}
+        /** Empty means «unchanged»: now for a new entry, the stored time for an edit. */
+        private LocalTime chosenTime(){
+            if(!text("time").isEmpty())return LocalTime.parse(text("time"));
+            return draft.getLong("id",-1)<0?LocalTime.now():Instant.ofEpochMilli(draft.getLong("when")).atZone(ZoneId.systemDefault()).toLocalTime();
+        }
+        private String timeLabel(){
+            if(text("time").isEmpty()&&draft.getLong("id",-1)<0)return "الوقت: وقت الحفظ";
+            return "الوقت: "+chosenTime().format(DateTimeFormatter.ofPattern("h:mm a",new Locale("ar")));
+        }
+        @Override boolean save() {
+            if(ExpenseParser.manualAmountMisread(text("amount")))return fail("راجع المبلغ",amount);
+            long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
+            if(minor<=0)return fail("اكتب المبلغ بشكل صحيح",amount);
+            if(text("merchant").trim().isEmpty())return fail("اكتب الجهة أو وصف العملية",merchant);
+            String type=text("kind");Long from=source("from"),to=source("to");
+            if("transfer".equals(type)&&(from==null||to==null||from.equals(to)))return fail("اختار حساب المصدر والوجهة للتحويل، ولازم يكونوا مختلفين",null);
+            boolean learn=draft.getBoolean("remember")&&"expense".equals(type);
+            if(learn&&!ExpenseDb.canRememberMerchant(text("merchant"),text("category")))return fail("حفظ التصنيف متاح للمشتريات، مش التحويلات أو الأقساط",null);
+            long id=draft.getLong("id",-1);
             try {
-                LocalDate day = java.util.Objects.requireNonNull(dateValue(date));
-                boolean added = db.addManualEntry(day.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-                        minor, currency.getSelectedItem().toString(), name,
-                        "income".equals(type) ? "دخل" : "transfer".equals(type) ? "تحويلات" : category.getSelectedItem().toString(),
-                        from, type, "transfer".equals(type) ? to : null, note.getText().toString());
-                if (!added) { toast("لم تُحفظ العملية؛ راجع البيانات وقواعد التجار"); return; }
-            } catch (RuntimeException error) { toast("اختار التاريخ من الكالندر"); return; }
-            dialog.dismiss();
-            render();
-        }));
-        dialog.show();
+                if(id>=0&&new CardSettlements(db).related(id))return fail("فك توزيع سداد البطاقة قبل تعديل العملية أو رسومها",null);
+                LocalDate day=LocalDate.parse(text("day"));
+                String category="income".equals(type)?"دخل":"transfer".equals(type)?"تحويلات":text("category");
+                if(id<0) {
+                    boolean added=db.addManualEntry(day.atTime(chosenTime()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),minor,text("currency"),
+                            text("merchant").trim(),category,from,type,"transfer".equals(type)?to:null,text("note"));
+                    if(!added)return fail("لم تُحفظ العملية؛ راجع البيانات وقواعد التجار",null);
+                } else {
+                    MutationResult result=new TransactionMutation(db).update(id,minor,text("currency"),text("merchant"),category,from,type,
+                            "transfer".equals(type)?to:null,text("note"),day.atTime(chosenTime())
+                            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),learn);
+                    if(!result.changed())return fail(result.outcome==MutationResult.Outcome.NOT_FOUND?"العملية دي لم تعد موجودة؛ لم نحفظ تعديل أو قاعدة تاجر.":"لم يتم تطبيق التعديل؛ راجع العملية وحاول مرة أخرى.",null);
+                    if(selectedTab==10)selectedTransaction=db.transactionById(id);
+                }
+            } catch(RuntimeException exception){return fail("تعذر الحفظ؛ راجع التاريخ والبيانات",null);}
+            return true;
+        }
+        @Override void onSaved() {
+            if(draft.getLong("id",-1)>=0){toast("اتحفظ تعديل العملية");if(draft.getBoolean("remember")&&"expense".equals(text("kind")))offerPastMerchantCategory(text("merchant"),text("category"));}
+        }
+        @Override boolean restoreAfterRecreation(){return true;}
+    }
+
+    private String[] transactionCategories(String selected) {
+        if(selected==null||selected.isEmpty()||java.util.Arrays.asList(CATEGORIES).contains(selected))return CATEGORIES;
+        String[] result=java.util.Arrays.copyOf(CATEGORIES,CATEGORIES.length+1);result[CATEGORIES.length]=selected;return result;
+    }
+
+    private void chooseValue(String title,String[] values,String selected,java.util.function.Consumer<String> chosen) {
+        new ChoiceDialogBuilder().setTitle(title).setSingleChoiceItems(values,java.util.Arrays.asList(values).indexOf(selected),(d,i)->{
+            d.dismiss();chosen.accept(values[i]);
+        }).setNegativeButton("إلغاء",null).show();
     }
 
     private void splitBillDialog() {
@@ -1938,13 +2384,54 @@ public final class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_REQUEST);
     }
 
-    /**
-     * Fill for a selected choice or a filled call-to-action with white text. The forest brand color almost
-     * disappears on the dark surface, so dark mode uses the accent, like the dialog primary button.
-     * Lime-on-forest brand elements (navigation, intro, hero cards) intentionally keep BRAND.
-     */
+    private void displayNamePage() {
+        Bundle draft = new Bundle(); draft.putString("name", getPreferences(MODE_PRIVATE).getString("profile_name", ""));
+        savePageScroll();
+        formPages.push(restoreFormPage("display_name", draft, draft));
+    }
+
+    private UiPages.Page restoreFormPage(String route, Bundle draft, Bundle original) {
+        if ("source_form".equals(route)) return new SourceFormPage(draft,original);
+        if ("source_link".equals(route)) return new SourceLinkPage(draft,original);
+        if ("source_profile".equals(route)) return new SourceProfilePage(draft,original);
+        if ("manual_balance".equals(route)) return new ManualBalancePage(draft,original);
+        if ("merchant_rule".equals(route)) return new MerchantRulePage(draft,original);
+        if ("asset".equals(route)) return new AssetPage(draft,original);
+        if ("debt".equals(route)) return new DebtPage(draft,original);
+        if ("debt_payment".equals(route)) return new DebtPaymentPage(draft,original);
+        if ("budget".equals(route)) return new BudgetPlanPage(draft,original);
+        if ("support".equals(route)) return new SupportPage(draft,original);
+        if ("transaction".equals(route)) return new TransactionFormPage(draft,original);
+        if ("transaction_filters".equals(route)) return new TransactionFilterPage(draft,original);
+        if ("transaction_bulk_category".equals(route)) return new BulkCategoryPage(draft,original);
+        if (!"display_name".equals(route)) return null;
+        return new UiPages.Page(route, "اسم العرض", draft, original) {
+            @Override void build(LinearLayout body, UiComponents components) {
+                UiPages.Page model = this;
+                EditText name = components.field("اسم العرض", body);
+                name.setTag("display_name_input"); name.setText(this.draft.getString("name", ""));
+                name.addTextChangedListener(new TextWatcher() {
+                    public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                    public void onTextChanged(CharSequence s, int start, int before, int count) { model.draft.putString("name", s.toString()); }
+                    public void afterTextChanged(Editable text) {}
+                });
+            }
+            @Override boolean save() {
+                getPreferences(MODE_PRIVATE).edit().putString("profile_name", this.draft.getString("name", "").trim()).apply();
+                return true;
+            }
+            @Override boolean restoreAfterRecreation() { return true; }
+        };
+    }
+
+    private void confirmDelete(String name, Runnable action) {
+        new ChoiceDialogBuilder().setTitle("حذف " + name + "؟")
+                .setPositiveButton("حذف", (dialog, which) -> action.run()).setNegativeButton("إلغاء", null).show();
+    }
+
+    /** Brand controls retain forest; selected choices use accent with the matching onPrimary ink in dark mode. */
     private int primaryFill() { return dark ? ACCENT : BRAND; }
-    private int onPrimary() { return dark ? 0xff0d1a16 : Color.WHITE; }
+    private int onPrimary() { return uiTheme.onPrimary; }
 
     private GradientDrawable rounded(int color, int radius) {
         GradientDrawable shape = new GradientDrawable();
@@ -2099,15 +2586,29 @@ public final class MainActivity extends Activity {
     /** A date field that opens the calendar instead of the keyboard. The chosen date lives in the tag; the text is for reading. */
     private EditText dateInput(String hint, LinearLayout parent, LocalDate initial) {
         EditText field = input(hint, parent);
-        field.setFocusable(false); field.setCursorVisible(false); field.setLongClickable(false);
+        field.setShowSoftInputOnFocus(false); field.setCursorVisible(false); field.setLongClickable(false);
+        field.setKeyListener(null); field.setFocusable(true);
+        field.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info); info.setClassName(Button.class.getName());
+            }
+        });
         field.setCompoundDrawablePadding(dp(8));
         android.graphics.drawable.Drawable icon = getDrawable(R.drawable.ic_calendar);
         if (icon != null) { icon = icon.mutate(); icon.setTint(ACCENT); icon.setBounds(0, 0, dp(20), dp(20)); field.setCompoundDrawablesRelative(icon, null, null, null); }
         setDateValue(field, initial);
         field.setOnClickListener(v -> {
             LocalDate shown = dateValue(field) == null ? LocalDate.now() : dateValue(field);
-            new android.app.DatePickerDialog(this, (picker, year, month, day) -> setDateValue(field, LocalDate.of(year, month + 1, day)),
-                    shown.getYear(), shown.getMonthValue() - 1, shown.getDayOfMonth()).show();
+            android.app.DatePickerDialog picker = new android.app.DatePickerDialog(this,
+                    (view, year, month, day) -> setDateValue(field, LocalDate.of(year, month + 1, day)),
+                    shown.getYear(), shown.getMonthValue() - 1, shown.getDayOfMonth());
+            UiSheets.prepare(this, picker, uiTheme, REGULAR).show();
+        });
+        field.setOnKeyListener((v, key, event) -> {
+            if (key != android.view.KeyEvent.KEYCODE_ENTER && key != android.view.KeyEvent.KEYCODE_DPAD_CENTER
+                    && key != android.view.KeyEvent.KEYCODE_SPACE) return false;
+            if (event.getAction() == android.view.KeyEvent.ACTION_UP) field.performClick();
+            return true;
         });
         return field;
     }
@@ -2124,20 +2625,7 @@ public final class MainActivity extends Activity {
     }
 
     private EditText input(String hint, LinearLayout parent) {
-        EditText edit = new EditText(this);
-        edit.setHint(hint);
-        edit.setSingleLine(true);
-        edit.setTextColor(INK);
-        edit.setHintTextColor(MUTED);
-        edit.setTextSize(15);
-        edit.setTypeface(REGULAR);
-        edit.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        edit.setPadding(dp(14), 0, dp(14), 0);
-        edit.setBackground(outlined(SURFACE, BORDER, 12));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(50));
-        lp.topMargin = dp(10);
-        parent.addView(edit, lp);
-        return edit;
+        return ui.field(hint, parent);
     }
 
     private Spinner spinner(String label, String[] choices, LinearLayout parent) {
@@ -2146,9 +2634,11 @@ public final class MainActivity extends Activity {
         cp.topMargin = dp(10);
         parent.addView(caption, cp);
         Spinner spinner = new AppChoiceSpinner(label, choices);
+        spinner.setId(View.generateViewId()); caption.setLabelFor(spinner.getId());
+        spinner.setMinimumHeight(dp(UiTheme.TOUCH));
         spinner.setPadding(dp(12), 0, dp(12), 0);
-        spinner.setBackground(outlined(SURFACE, BORDER, 12));
-        parent.addView(spinner, new LinearLayout.LayoutParams(-1, dp(48)));
+        spinner.setBackground(ui.interactive(SURFACE, uiTheme.fieldOutline, UiTheme.FIELD_RADIUS));
+        parent.addView(spinner, new LinearLayout.LayoutParams(-1, -2));
         return spinner;
     }
 
@@ -2162,9 +2652,8 @@ public final class MainActivity extends Activity {
             setAdapter(new ArrayAdapter<String>(MainActivity.this, android.R.layout.simple_spinner_item, values) {
                 @Override public View getView(int position, View recycled, android.view.ViewGroup parent) {
                     TextView value = label(getItem(position), 15, INK, false);
-                    value.setSingleLine(true);
-                    value.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                    value.setPadding(dp(12), 0, dp(12), 0);
+                    value.setSingleLine(false);
+                    value.setPadding(dp(12), dp(12), dp(12), dp(12));
                     android.graphics.drawable.Drawable arrow = getDrawable(R.drawable.ic_chevron_down).mutate();
                     arrow.setTint(MUTED); arrow.setBounds(0, 0, dp(18), dp(18));
                     value.setCompoundDrawablesRelative(null, null, arrow, null);
@@ -2213,17 +2702,21 @@ public final class MainActivity extends Activity {
             entries = items; checked = states == null ? new boolean[items.length] : states; toggled = listener; return this;
         }
         @Override public AlertDialog create() {
-            if (entries == null) return super.create();
+            if (entries == null) {
+                if (suppliedView != null && !(suppliedView instanceof ScrollView)) {
+                    ScrollView scroll = new ScrollView(MainActivity.this); scroll.addView(suppliedView);
+                    super.setView(scroll);
+                }
+                return UiSheets.prepare(MainActivity.this, super.create(), uiTheme, REGULAR);
+            }
             LinearLayout content = form(); content.setTag("app_choice_menu");
             content.setPadding(dp(18), dp(16), dp(18), dp(12));
             LinearLayout header = new LinearLayout(MainActivity.this); header.setGravity(Gravity.CENTER_VERTICAL);
             TextView title = label(heading == null ? "اختار الإجراء" : heading.toString(), 19, INK, true);
             header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-            ImageView close = new ImageView(MainActivity.this); close.setImageResource(R.drawable.ic_close); close.setColorFilter(MUTED);
-            close.setPadding(dp(12), dp(12), dp(12), dp(12)); close.setContentDescription("إغلاق القائمة");
+            ImageView close = ui.icon(R.drawable.ic_close, "إغلاق القائمة", () -> {});
             header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48))); content.addView(header);
-            // Some multi-select menus also contain an input form (e.g. InstaPay handles).
-            if (suppliedView != null) content.addView(suppliedView);
+            // Keep search and actions visible; a mixed form/list body must scroll as one at large font sizes.
             EditText search = entries.length >= 8 ? input("بحث في الخيارات", content) : null;
             if (search != null) { search.setTag("app_choice_search"); search.setContentDescription("بحث في الخيارات"); }
             int limit = Math.max(dp(150), Math.min(dp(420), getResources().getDisplayMetrics().heightPixels * 45 / 100));
@@ -2233,11 +2726,14 @@ public final class MainActivity extends Activity {
                     super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(available, View.MeasureSpec.AT_MOST));
                 }
             };
-            LinearLayout rows = new LinearLayout(MainActivity.this); rows.setOrientation(LinearLayout.VERTICAL); scroll.addView(rows);
+            LinearLayout rows = new LinearLayout(MainActivity.this); rows.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout pickerBody = new LinearLayout(MainActivity.this); pickerBody.setOrientation(LinearLayout.VERTICAL);
+            if (suppliedView != null) pickerBody.addView(suppliedView);
+            pickerBody.addView(rows); scroll.addView(pickerBody);
             scroll.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
             content.addView(scroll);
             super.setTitle((CharSequence)null); super.setView(content);
-            AlertDialog dialog = super.create();
+            AlertDialog dialog = UiSheets.prepare(MainActivity.this, super.create(), uiTheme, REGULAR);
             close.setOnClickListener(v -> dialog.cancel());
             Runnable renderRows = () -> {
                 rows.removeAllViews(); String query = search == null ? "" : search.getText().toString().trim().toLowerCase(Locale.ROOT);
@@ -2253,17 +2749,24 @@ public final class MainActivity extends Activity {
                         row.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START); row.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
                         row.setPadding(dp(12), dp(10), dp(12), dp(10)); row.setMinHeight(dp(56));
                         row.setChecked(single ? index == selected : checked[index]);
-                        row.setBackground(outlined(row.isChecked() ? ACCENT_PALE : SURFACE, BORDER, 12));
+                        row.setBackground(ui.interactive(row.isChecked() ? ACCENT_PALE : SURFACE, BORDER, 12));
                         row.setOnClickListener(v -> {
                             if (single) { if (picked != null) picked.onClick(dialog, index); }
-                            else { checked[index] = row.isChecked(); row.setBackground(outlined(checked[index] ? ACCENT_PALE : SURFACE, BORDER, 12)); if (toggled != null) toggled.onClick(dialog, index, checked[index]); }
+                            else { checked[index] = row.isChecked(); row.setBackground(ui.interactive(checked[index] ? ACCENT_PALE : SURFACE, BORDER, 12)); if (toggled != null) toggled.onClick(dialog, index, checked[index]); }
                         });
                         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(6); rows.addView(row, lp);
                     } else {
                         LinearLayout row = new LinearLayout(MainActivity.this); row.setGravity(Gravity.CENTER_VERTICAL);
                         row.setPadding(dp(12), dp(10), dp(12), dp(10)); row.setMinimumHeight(dp(56));
-                        row.setBackground(outlined(SURFACE, BORDER, 12));
+                        row.setBackground(ui.interactive(SURFACE, BORDER, 12)); row.setFocusable(true);
+                        row.setContentDescription(text);
+                        row.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+                            @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                                super.onInitializeAccessibilityNodeInfo(host, info); info.setClassName(Button.class.getName());
+                            }
+                        });
                         ImageView icon = new ImageView(MainActivity.this); icon.setImageResource(menuIcon(text, destructive)); icon.setColorFilter(destructive ? CORAL : ACCENT);
+                        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
                         row.addView(icon, new LinearLayout.LayoutParams(dp(22), dp(22)));
                         TextView name = label(text, 15, color, false); name.setPadding(dp(12), 0, dp(12), 0);
                         row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
@@ -2337,10 +2840,9 @@ public final class MainActivity extends Activity {
     }
 
     private void button(String title, Runnable action) {
-        Button button = new Button(this);
-        button.setText(title);
-        button.setOnClickListener(v -> action.run());
-        page.addView(button);
+        Button button = ui.button(title, false, false, action);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(8);
+        page.addView(button, lp);
     }
 
     private void buttonStatus(String status) { toast(status); }
@@ -2432,6 +2934,7 @@ public final class MainActivity extends Activity {
     /** True when redrawing cannot disturb input the user has not saved yet. */
     private boolean canRedrawNow() {
         if (isFinishing() || isDestroyed()) return false;
+        if (formPages != null && formPages.isOpen()) return false;
         return !isEditingSurface(selectedTab, introVisible, getCurrentFocus() instanceof android.widget.EditText);
     }
 
@@ -2483,6 +2986,7 @@ public final class MainActivity extends Activity {
 
     private void render() {
         if (appLock != null && appLock.guard()) return;
+        if (formPages != null && formPages.isOpen()) { formPages.show(); return; }
         // Any committed tracked write bumps the persistent revision, so the cached suggestions cannot stay stale
         // behind a page whose only refresh path is this render().
         sourceKindCache = null;
@@ -2533,6 +3037,7 @@ public final class MainActivity extends Activity {
         markDetailActions(page);
         int restoreY=scrollPositions.getOrDefault(renderedPageKey,0);
         scroll.post(()->scroll.scrollTo(0,restoreY));
+        if(selectedTab==5&&settingsFocus!=null){String focus=settingsFocus;settingsFocus=null;scroll.post(()->focusSettingRow(scroll,focus));}
         refreshWidgets();
     }
 
@@ -2572,6 +3077,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onBackPressed() {
         if (appLock != null && appLock.locked()) { finish(); return; }
+        if (formPages != null && formPages.isOpen()) { formPages.back(); return; }
         if(introVisible){if(introStep>0){introStep--;render();}else finishIntro(false);return;}
         if(bulkMode){bulkMode=false;bulkSelected.clear();render();return;}
         if(selectedTab==4&&!insightsSection.isEmpty()){insightsSection="";render();return;}
@@ -2623,8 +3129,8 @@ public final class MainActivity extends Activity {
         greetingParams.setMarginStart(dp(10)); top.addView(greeting, greetingParams);
         top.addView(iconButton(R.drawable.ic_search, "بحث في العمليات", () -> {
             selectedTab = 6; searchOpen = true; render();
-        }), new LinearLayout.LayoutParams(dp(44), dp(44)));
-        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+        }), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         settingsParams.setMarginStart(dp(8));
         top.addView(iconButton(R.drawable.ic_settings, "الإعدادات", () -> { settingsSection="";selectedTab = 5; render(); }), settingsParams);
         page.addView(top);
@@ -2923,8 +3429,8 @@ public final class MainActivity extends Activity {
             searchOpen = !searchOpen;
             if (!searchOpen) transactionSearch = "";
             render();
-        }), new LinearLayout.LayoutParams(dp(44), dp(44)));
-        LinearLayout.LayoutParams filterParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+        }), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout.LayoutParams filterParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         filterParams.setMarginStart(dp(8));
         bar.addView(iconButton(R.drawable.ic_filter, "فلترة", this::transactionFilterDialog), filterParams);
         bar.addView(iconButton(bulkMode?R.drawable.ic_close:R.drawable.ic_check,"تحديد العمليات",()->{
@@ -3104,16 +3610,22 @@ public final class MainActivity extends Activity {
 
     private void bulkCategoryDialog() {
         if(bulkSelected.isEmpty())return;
-        List<Long> ids=new ArrayList<>(bulkSelected);
-        LinearLayout form=form();Spinner category=spinner("التصنيف الجديد",CATEGORIES,form);
-        StringBuilder preview=new StringBuilder("الأرقام والحسابات والمصدر لن تتغير.\n");int n=0;
-        for(Long id:ids){ExpenseDb.Transaction tx=db.transactionById(id);if(tx!=null&&n++<5)preview.append(tx.merchant).append(" · ").append(money(tx.amountMinor,tx.currency)).append("\n");}
-        form.addView(label(preview.toString(),13,MUTED,false));
-        new ChoiceDialogBuilder().setTitle("تغيير تصنيف "+ids.size()+" مصروف؟").setView(form)
-                .setPositiveButton("اعتماد التصنيف",(d,w)->{
-                    int count=db.updateCategories(ids,category.getSelectedItem().toString());
-                    bulkSelected.clear();bulkMode=false;toast("تم تصنيف "+count+" مصروف");render();
-                }).setNegativeButton("رجوع",null).show();
+        Bundle draft=new Bundle();draft.putString("ids",bulkSelected.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+        draft.putString("category",CATEGORIES[0]);savePageScroll();formPages.push(new BulkCategoryPage(draft,draft));
+    }
+
+    private final class BulkCategoryPage extends UiPages.Page {
+        BulkCategoryPage(Bundle draft,Bundle original){super("transaction_bulk_category","تغيير تصنيف المصروفات",draft,original);}
+        private List<Long> ids(){List<Long> ids=new ArrayList<>();for(String id:draft.getString("ids","").split(","))if(!id.isEmpty())ids.add(Long.parseLong(id));return ids;}
+        @Override void build(LinearLayout body,UiComponents components){
+            List<Long> ids=ids();components.caption("مراجعة "+ids.size()+" مصروف · الأرقام والحسابات والمصدر لن تتغير",body);
+            Button category=components.button(draft.getString("category"),false,false,()->{});components.caption("التصنيف الجديد",body);body.addView(category);
+            category.setOnClickListener(v->chooseValue("التصنيف الجديد",CATEGORIES,draft.getString("category"),value->{draft.putString("category",value);category.setText(value);}));
+            for(Long id:ids){ExpenseDb.Transaction tx=db.transactionById(id);if(tx!=null)components.caption(tx.merchant+" · "+money(tx.amountMinor,tx.currency),body);}
+        }
+        @Override String saveLabel(){return "اعتماد التصنيف";}
+        @Override boolean save(){int count=db.updateCategories(ids(),draft.getString("category"));bulkSelected.clear();bulkMode=false;toast("تم تصنيف "+count+" مصروف");return true;}
+        @Override boolean restoreAfterRecreation(){return true;}
     }
 
     private void chooseTransactionPeriod() {
@@ -3205,55 +3717,50 @@ public final class MainActivity extends Activity {
     }
 
     private void transactionFilterDialog() {
-        LinearLayout form = form();
-        form.addView(label("النوع", 12, MUTED, true));
-        LinearLayout kindsRow = new LinearLayout(this); kindsRow.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        LinearLayout.LayoutParams kindsParams = new LinearLayout.LayoutParams(-1, -2); kindsParams.topMargin = dp(6); kindsParams.bottomMargin = dp(10);
-        form.addView(kindsRow, kindsParams);
-        String[][] kinds = {{"الكل", ""}, {"مصروف", "expense"}, {"دخل", "income"}, {"تحويل", "transfer"}};
-        String[] chosenKind = {transactionKindFilter};
-        Runnable[] drawKinds = new Runnable[1];
-        drawKinds[0] = () -> {
-            kindsRow.removeAllViews();
-            for (String[] kind : kinds) addChip(kindsRow, kind[0], chosenKind[0].equals(kind[1]), () -> { chosenKind[0] = kind[1]; drawKinds[0].run(); });
-        };
-        drawKinds[0].run();
-        String[] categories = new String[CATEGORIES.length + 1];
-        categories[0] = "كل التصنيفات";
-        System.arraycopy(CATEGORIES, 0, categories, 1, CATEGORIES.length);
-        Spinner category = spinner("التصنيف", categories, form);
-        for (int i = 1; i < categories.length; i++) if (categories[i].equals(transactionCategoryFilter)) category.setSelection(i);
-        List<ExpenseDb.PaymentSource> sources = db.paymentSources();
-        String[] sourceLabels = new String[sources.size() + 1];
-        sourceLabels[0] = "كل الحسابات";
-        for (int i = 0; i < sources.size(); i++) {
-            ExpenseDb.PaymentSource source = sources.get(i);
-            sourceLabels[i + 1] = source.name + (source.last4 == null ? "" : "  •••• " + source.last4);
+        Bundle draft=new Bundle();draft.putString("kind",transactionKindFilter);draft.putString("category",transactionCategoryFilter);
+        draft.putLong("source",transactionSourceFilter==null?-1:transactionSourceFilter);draft.putBoolean("clear",false);
+        savePageScroll();formPages.push(new TransactionFilterPage(draft,draft));
+    }
+
+    private final class TransactionFilterPage extends UiPages.Page {
+        TransactionFilterPage(Bundle draft,Bundle original){super("transaction_filters","فلترة العمليات",draft,original);}
+        @Override void build(LinearLayout body,UiComponents components) {
+            components.caption("النوع",body);String[] values={"","expense","income","transfer"};
+            components.choices(new String[]{"الكل","مصروف","دخل","تحويل"},null,java.util.Arrays.asList(values).indexOf(draft.getString("kind")),
+                    i->draft.putString("kind",values[i]),body);
+            Button category=components.button(draft.getString("category","").isEmpty()?"كل التصنيفات":draft.getString("category"),false,false,()->{});
+            components.caption("التصنيف",body);body.addView(category);
+            String[] names=new String[CATEGORIES.length+1];names[0]="كل التصنيفات";System.arraycopy(CATEGORIES,0,names,1,CATEGORIES.length);
+            category.setOnClickListener(v->chooseValue("التصنيف",names,draft.getString("category","").isEmpty()?names[0]:draft.getString("category"),value->{
+                draft.putString("category",value.equals(names[0])?"":value);category.setText(value);}));
+            LinearLayout account=new LinearLayout(MainActivity.this);account.setOrientation(LinearLayout.VERTICAL);body.addView(account);drawAccount(account);
+            if(!transactionBucketFilter.isEmpty()||!transactionCurrencyFilter.isEmpty()||transactionExcludeTransfers){
+                List<String> fixed=new ArrayList<>();if(!transactionBucketFilter.isEmpty())fixed.add(MoneyFlow.filterLabel(transactionBucketFilter));
+                if(!transactionCurrencyFilter.isEmpty())fixed.add(transactionCurrencyFilter);if(transactionExcludeTransfers)fixed.add("بدون تحويلات");
+                components.caption("مفتوح من الرئيسية: "+String.join(" · ",fixed)+" — «مسح الفلاتر» يشيله",body);
+            }
+            components.caption("الفترة والبحث هيفضلوا زي ما هم عند مسح الفلاتر",body);
+            body.addView(components.button("مسح الفلاتر",false,false,()->{draft.putBoolean("clear",true);formPages.save();}));
         }
-        Spinner source = spinner("الحساب", sourceLabels, form);
-        for (int i = 0; i < sources.size(); i++)
-            if (transactionSourceFilter != null && transactionSourceFilter == sources.get(i).id) source.setSelection(i + 1);
-        if (!transactionBucketFilter.isEmpty() || !transactionCurrencyFilter.isEmpty() || transactionExcludeTransfers) {
-            List<String> fixed = new ArrayList<>();
-            if (!transactionBucketFilter.isEmpty()) fixed.add(MoneyFlow.filterLabel(transactionBucketFilter));
-            if (!transactionCurrencyFilter.isEmpty()) fixed.add(transactionCurrencyFilter);
-            if (transactionExcludeTransfers) fixed.add("بدون تحويلات");
-            TextView note = label("مفتوح من الرئيسية: " + String.join(" · ", fixed) + " — «مسح الفلاتر» يشيله", 12, MUTED, false);
-            LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2); noteParams.topMargin = dp(8);
-            form.addView(note, noteParams);
+        private void drawAccount(LinearLayout body) {
+            body.removeAllViews();List<ExpenseDb.PaymentSource> sources=db.paymentSources();long selected=draft.getLong("source",-1);
+            ExpenseDb.PaymentSource picked=null;for(ExpenseDb.PaymentSource source:sources)if(source.id==selected)picked=source;
+            ui.choiceCard("الحساب",picked==null?"كل الحسابات":db.sourceLabel(picked.id),picked==null?null:sourceBadge(picked,40),()->{
+                String[] labels=new String[sources.size()+1];labels[0]="كل الحسابات";int checked=0;
+                for(int i=0;i<sources.size();i++){labels[i+1]=db.sourceLabel(sources.get(i).id);if(sources.get(i).id==selected)checked=i+1;}
+                new ChoiceDialogBuilder().setTitle("الحساب").setSingleChoiceItems(labels,checked,(d,i)->{
+                    draft.putLong("source",i==0?-1:sources.get(i-1).id);d.dismiss();drawAccount(body);
+                }).setNegativeButton("إلغاء",null).show();
+            },body).setTag("filter_source");
         }
-        new ChoiceDialogBuilder().setTitle("فلترة العمليات").setView(form)
-                .setPositiveButton("تطبيق", (dialog, which) -> {
-                    int c = category.getSelectedItemPosition();
-                    int s = source.getSelectedItemPosition();
-                    transactionKindFilter = chosenKind[0];
-                    if (!transactionKindFilter.isEmpty()) transactionBucketFilter = "";
-                    transactionCategoryFilter = c <= 0 ? "" : categories[c];
-                    transactionSourceFilter = s <= 0 ? null : sources.get(s - 1).id;
-                    render();
-                })
-                .setNeutralButton("مسح الفلاتر", (dialog, which) -> { clearTransactionFilters(); render(); })
-                .setNegativeButton("إلغاء", null).show();
+        @Override String saveLabel(){return "تطبيق";}
+        @Override boolean save(){
+            if(draft.getBoolean("clear")){clearTransactionFilters();return true;}
+            transactionKindFilter=draft.getString("kind","");if(!transactionKindFilter.isEmpty())transactionBucketFilter="";
+            transactionCategoryFilter=draft.getString("category","");long source=draft.getLong("source",-1);transactionSourceFilter=source<0?null:source;
+            return true;
+        }
+        @Override boolean restoreAfterRecreation(){return true;}
     }
 
     private void transactionRow(ExpenseDb.Transaction item, boolean suggested) {
@@ -3270,7 +3777,7 @@ public final class MainActivity extends Activity {
             CheckBox check=new CheckBox(this);check.setContentDescription("تحديد "+item.merchant);
             check.setEnabled("expense".equals(item.kind));check.setChecked(bulkSelected.contains(item.id));
             check.setOnCheckedChangeListener((b,checked)->{if(checked)bulkSelected.add(item.id);else bulkSelected.remove(item.id);updateBulkCount();});
-            bulkChecks.put(item.id,check);line.addView(check,new LinearLayout.LayoutParams(dp(40),dp(48)));
+            bulkChecks.put(item.id,check);line.addView(check,new LinearLayout.LayoutParams(dp(48),dp(48)));
         }
         line.addView(rowBadge(item, 42), new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
@@ -3332,11 +3839,11 @@ public final class MainActivity extends Activity {
         LinearLayout toolbar = new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> {
             returnFromTransaction();
-        }), new LinearLayout.LayoutParams(dp(44), dp(44)));
+        }), new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = label("تفاصيل العملية", 15, INK, true); title.setGravity(Gravity.CENTER);
         toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         toolbar.addView(iconButton(R.drawable.ic_more, "خيارات", () -> transactionOptions(item)),
-                new LinearLayout.LayoutParams(dp(44), dp(44)));
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(toolbar);
         page.addView(label(transactionJourney.snapshot().length>0?"عملية مرتبطة · رجوع يرجعك للعملية اللي فتحتها منها":
                 "رجوع إلى "+(transactionReturnTab==0?"الرئيسية":transactionReturnTab==4?"التحليلات":transactionReturnTab==11?"تفاصيل الالتزام":"العمليات والبحث"),12,MUTED,false));
@@ -3555,15 +4062,15 @@ public final class MainActivity extends Activity {
         View handle=new View(this);handle.setBackground(rounded(BORDER,99));LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(dp(42),dp(4));hp.gravity=Gravity.CENTER_HORIZONTAL;hp.bottomMargin=dp(12);content.addView(handle,hp);
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);heading.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);TextView headingText=label(title,20,INK,true);headingText.setTextDirection(View.TEXT_DIRECTION_RTL);headingText.setMaxLines(3);heading.addView(headingText,new LinearLayout.LayoutParams(0,-2,1));heading.addView(iconButton(R.drawable.ic_close,"إغلاق",sheet::cancel),new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(heading);
         ScrollView scroller=scrollForm(body);scroller.setVerticalScrollBarEnabled(false);content.addView(scroller,new LinearLayout.LayoutParams(-1,0,1));
-        Button proceed=new Button(this);proceed.setTag("financial_journey_primary");proceed.setText(primary);proceed.setTypeface(BOLD);proceed.setTextColor(dark?0xff0d1f1a:Color.WHITE);proceed.setBackground(rounded(dark?ACCENT:BRAND,14));proceed.setAllCaps(false);proceed.setMinHeight(dp(52));
+        Button proceed=ui.button(primary,true,false,()->accept.accept(sheet));proceed.setTag("financial_journey_primary");proceed.setMinHeight(dp(52));
         LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2);pp.topMargin=dp(12);content.addView(proceed,pp);proceed.setOnClickListener(v->accept.accept(sheet));
-        if(secondary!=null){Button previous=new Button(this);previous.setText(secondary);previous.setTypeface(BOLD);previous.setTextColor(INK);previous.setBackground(outlined(SURFACE,BORDER,14));previous.setAllCaps(false);previous.setMinHeight(dp(48));LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2);bp.topMargin=dp(8);content.addView(previous,bp);previous.setOnClickListener(v->back.accept(sheet));}
+        if(secondary!=null){Button previous=ui.button(secondary,false,false,()->back.accept(sheet));LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2);bp.topMargin=dp(8);content.addView(previous,bp);}
         showJourneyWindow(sheet,content,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f));sheet.setCanceledOnTouchOutside(false);return sheet;
     }
     private void showJourneyWindow(android.app.Dialog sheet,LinearLayout content,int height){
         sheet.setContentView(content);sheet.setCanceledOnTouchOutside(true);android.view.Window window=sheet.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         window.setGravity(Gravity.BOTTOM);window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);window.setDimAmount(0.35f);window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        window.setNavigationBarColor(SURFACE);window.getDecorView().setPadding(0,0,0,0);sheet.show();window.setLayout(-1,Math.min(height,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f)));
+        window.setNavigationBarColor(SURFACE);window.getDecorView().setPadding(0,0,0,0);sheet.show();window.setLayout(-1,Math.min(height,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f)));SystemUi.apply(window,content);
     }
     private LinearLayout journeyAmountCard(LinearLayout parent,String title,String value,String caption){
         LinearLayout box=card(parent);box.setBackground(outlined(ACCENT_PALE,BORDER,18));box.addView(label(title,13,MUTED,false));TextView amount=label(value,28,INK,true);amount.setTextDirection(View.TEXT_DIRECTION_LTR);box.addView(amount);if(caption!=null)box.addView(label(caption,12,MUTED,false));return box;
@@ -3669,7 +4176,7 @@ public final class MainActivity extends Activity {
         form.addView(label("التطبيق سجّلها كده:", 12, MUTED, true));
         TextView summary = label(recorded, 13, INK, false); summary.setPadding(0, dp(2), 0, dp(10)); form.addView(summary);
         form.addView(label("حجبنا الأرقام والمبالغ وبعض الأسماء من الرسالة تلقائيًا. راجع النص واكتب تحتها الصح، وهيفتح مسودة إيميل وإنت اللي ترسلها.", 12, MUTED, false));
-        EditText body = new EditText(this); body.setTypeface(REGULAR); body.setMinLines(3); body.setGravity(Gravity.TOP | Gravity.START);
+        EditText body = input("نص الرسالة", form); body.setSingleLine(false); body.setMinLines(3); body.setGravity(Gravity.TOP | Gravity.START);
         body.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         StringBuilder redacted = new StringBuilder();
         for (ExpenseDb.SourceEvidence evidence : messages) {
@@ -3678,11 +4185,9 @@ public final class MainActivity extends Activity {
             redacted.append("المرسل: ").append(evidence.sender).append("\n").append(Redaction.text(evidence.body));
         }
         body.setText(redacted.length() == 0 ? "(الرسالة الأصلية غير متاحة؛ اكتب صيغتها هنا لو فاكرها)" : redacted.toString());
-        form.addView(body);
-        EditText correct = new EditText(this); correct.setTypeface(REGULAR); correct.setHint("الصح كان إيه؟ (مثلًا: دي إيداع مش خصم)");
+        EditText correct = input("الصح كان إيه؟ (مثلًا: دي إيداع مش خصم)", form); correct.setSingleLine(false);
         correct.setMinLines(2); correct.setGravity(Gravity.TOP | Gravity.START);
         correct.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        form.addView(correct);
         ScrollView preview = new ScrollView(this); preview.addView(form);
         new ChoiceDialogBuilder().setTitle("الرسالة اتقرت غلط؟").setView(preview)
                 .setPositiveButton("فتح مسودة إيميل", (dialog, which) -> {
@@ -4045,11 +4550,11 @@ public final class MainActivity extends Activity {
     private void recurringScreen() {
         LinearLayout bar = new LinearLayout(this); bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> { selectedTab = 0; render(); }),
-                new LinearLayout.LayoutParams(dp(44), dp(44)));
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1); titleParams.setMarginStart(dp(10));
         bar.addView(label("الالتزامات", 24, INK, true), titleParams);
         bar.addView(primaryIconButton(R.drawable.ic_plus, "إضافة التزام", () -> openCommitmentEditor(null)),
-                new LinearLayout.LayoutParams(dp(44), dp(44)));
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(bar);
         // Fixed monthly transfers (e.g. an apartment installment paid by instant transfer) are offered as installments.
         List<CommitmentPayments.ProviderNotice> pendingPayments=db.pendingCommitmentConfirmations();
@@ -4282,10 +4787,10 @@ public final class MainActivity extends Activity {
     private void commitmentCalendar(List<ExpenseDb.Recurring> all) {
         LinearLayout box=card();
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.addView(iconButton(R.drawable.ic_chevron_back,"الشهر السابق",() -> {commitmentMonth=commitmentMonth.minusMonths(1);render();}),new LinearLayout.LayoutParams(dp(40),dp(40)));
+        heading.addView(iconButton(R.drawable.ic_chevron_back,"الشهر السابق",() -> {commitmentMonth=commitmentMonth.minusMonths(1);render();}),new LinearLayout.LayoutParams(dp(48),dp(48)));
         TextView month=label(commitmentMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy",new Locale("ar"))),16,INK,true);
         month.setGravity(Gravity.CENTER);heading.addView(month,new LinearLayout.LayoutParams(0,-2,1));
-        heading.addView(iconButton(R.drawable.ic_chevron_forward,"الشهر التالي",() -> {commitmentMonth=commitmentMonth.plusMonths(1);render();}),new LinearLayout.LayoutParams(dp(40),dp(40)));
+        heading.addView(iconButton(R.drawable.ic_chevron_forward,"الشهر التالي",() -> {commitmentMonth=commitmentMonth.plusMonths(1);render();}),new LinearLayout.LayoutParams(dp(48),dp(48)));
         box.addView(heading);
         LinearLayout names=new LinearLayout(this);
         for(String name:new String[]{"س","ح","ن","ث","ر","خ","ج"}) names.addView(centered(label(name,12,MUTED,false)),new LinearLayout.LayoutParams(0,dp(32),1));
@@ -4385,11 +4890,11 @@ public final class MainActivity extends Activity {
         if(item.needsReview) note("الالتزام محفوظ باختيارك. راجع الاسم والمبلغ قبل الاعتماد على المطابقة التلقائية.");
         LinearLayout toolbar = new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> { selectedTab = 2; render(); }),
-                new LinearLayout.LayoutParams(dp(44), dp(44)));
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = label("تفاصيل " + kindLabel(item.kind), 15, INK, true); title.setGravity(Gravity.CENTER);
         toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         toolbar.addView(iconButton(R.drawable.ic_edit, "تعديل", () -> openCommitmentEditor(item)),
-                new LinearLayout.LayoutParams(dp(44), dp(44)));
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(toolbar);
 
         LinearLayout summary = card();
@@ -4706,10 +5211,10 @@ public final class MainActivity extends Activity {
         ExpenseDb.Suggestion suggestion=editingSuggestion;
         LocalDate[] chosenDue={suggestion!=null?suggestion.date:existing!=null?existing.nextDue:nextDueForDay(LocalDate.now().getDayOfMonth())};
         LinearLayout toolbar = new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", this::onBackPressed), new LinearLayout.LayoutParams(dp(44), dp(44)));
+        toolbar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", this::onBackPressed), new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = label(existing == null ? "التزام جديد" : "تعديل الالتزام", 16, INK, true); title.setGravity(Gravity.CENTER);
         toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        toolbar.addView(new View(this), new LinearLayout.LayoutParams(dp(44), dp(44)));
+        toolbar.addView(new View(this), new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(toolbar);
 
         String[] kind = {existing == null ? suggestion==null?"installment":suggestion.kind : existing.kind};
@@ -4811,10 +5316,13 @@ public final class MainActivity extends Activity {
         }
         paintDays.run();
         exactDue.setPadding(0,dp(12),0,dp(10));
-        exactDue.setOnClickListener(v -> new android.app.DatePickerDialog(this,(picker,year,month,day) -> {
+        exactDue.setOnClickListener(v -> {
+            android.app.DatePickerDialog picker = new android.app.DatePickerDialog(this,(view,year,month,day) -> {
             chosenDue[0]=LocalDate.of(year,month+1,day);dueDay[0]=day;paintDays.run();
             exactDue.setText("موعد الدفعة القادمة: "+chosenDue[0].format(DATE_LABEL)+" · تغيير");
-        },chosenDue[0].getYear(),chosenDue[0].getMonthValue()-1,chosenDue[0].getDayOfMonth()).show());
+            },chosenDue[0].getYear(),chosenDue[0].getMonthValue()-1,chosenDue[0].getDayOfMonth());
+            UiSheets.prepare(this,picker,uiTheme,REGULAR).show();
+        });
         page.addView(exactDue);
         dayScroll.post(() -> {
             View selected = dayViews.get(Math.max(0, Math.min(30, dueDay[0] - 1)));
@@ -5388,20 +5896,13 @@ public final class MainActivity extends Activity {
     }
 
     private ImageView iconButton(int res, String description, Runnable action) {
-        ImageView button = tintedIcon(res, INK);
-        button.setPadding(dp(11), dp(11), dp(11), dp(11));
-        button.setBackground(outlined(SURFACE, BORDER, 14));
-        button.setContentDescription(description);
-        button.setOnClickListener(v -> action.run());
-        return button;
+        return ui.icon(res, description, action);
     }
 
     private ImageView primaryIconButton(int res, String description, Runnable action) {
-        ImageView button = tintedIcon(res, LIME);
-        button.setPadding(dp(11), dp(11), dp(11), dp(11));
-        button.setBackground(rounded(BRAND, 14));
-        button.setContentDescription(description);
-        button.setOnClickListener(v -> action.run());
+        ImageView button = ui.icon(res, description, action);
+        button.setImageTintList(ColorStateList.valueOf(LIME));
+        button.setBackground(ui.interactive(BRAND, 0, UiTheme.BUTTON_RADIUS));
         return button;
     }
 
@@ -5417,9 +5918,17 @@ public final class MainActivity extends Activity {
         TextView chip = label(text, 13, selected ? onPrimary() : INK, selected);
         chip.setGravity(Gravity.CENTER);
         chip.setPadding(dp(14), 0, dp(14), 0);
-        chip.setBackground(selected ? rounded(primaryFill(), 99) : outlined(SURFACE, BORDER, 99));
+        chip.setBackground(ui.interactive(selected ? primaryFill() : SURFACE, BORDER, 99));
+        chip.setFocusable(true); chip.setSelected(selected);
+        chip.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info); info.setClassName(android.widget.RadioButton.class.getName());
+                info.setCheckable(true); info.setChecked(host.isSelected());
+            }
+        });
         chip.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(38)); params.setMarginEnd(dp(8));
+        chip.setMinHeight(dp(UiTheme.TOUCH)); chip.setPadding(dp(14), dp(10), dp(14), dp(10));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2); params.setMarginEnd(dp(8));
         row.addView(chip, params);
         return chip;
     }
@@ -5677,7 +6186,7 @@ public final class MainActivity extends Activity {
             int res = add ? R.drawable.ic_plus : "↥".equals(icon) ? R.drawable.ic_cat_income : R.drawable.ic_more;
             String description = add ? "إضافة" : "↥".equals(icon) ? "تصدير" : "خيارات";
             bar.addView(add ? primaryIconButton(res, description, action) : iconButton(res, description, action),
-                    new LinearLayout.LayoutParams(dp(44), dp(44)));
+                    new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
         page.addView(bar);
     }
@@ -5794,7 +6303,8 @@ public final class MainActivity extends Activity {
         toggle.setTrackTintList(new ColorStateList(states, new int[]{primaryFill(), BORDER}));
         toggle.setThumbTintList(new ColorStateList(states, new int[]{onPrimary(), MUTED}));
         toggle.setOnCheckedChangeListener((button, checked) -> change.accept(checked));
-        row.addView(toggle); row.setOnClickListener(view -> toggle.toggle()); settingsGroup.addView(row);
+        row.addView(toggle); row.setOnClickListener(view -> toggle.toggle());
+        row.setTag("setting:" + title); settingsGroup.addView(row);
     }
 
     private void setting(String name, Runnable action) {
@@ -5821,10 +6331,11 @@ public final class MainActivity extends Activity {
         icon.setPadding(dp(7), dp(7), dp(7), dp(7));
         icon.setBackground(rounded(destructive ? (dark ? 0x40c23a3a : 0xfffde8e8) : ACCENT_PALE, 10));
         row.addView(icon, new LinearLayout.LayoutParams(dp(34), dp(34)));
-        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, dp(54), 1); textParams.setMarginStart(dp(12));
+        row.setMinimumHeight(dp(54)); row.setPadding(0,dp(8),0,dp(8));
+        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, -2, 1); textParams.setMarginStart(dp(12));
         row.addView(label(name, 14, destructive ? CORAL : INK, false), textParams);
         row.addView(tintedIcon(R.drawable.ic_chevron_forward, MUTED), new LinearLayout.LayoutParams(dp(18), dp(18)));
-        settingsGroup.addView(row);
+        row.setTag("setting:" + name); settingsGroup.addView(row);
         row.setOnClickListener(v -> action.run());
     }
 
@@ -6543,7 +7054,7 @@ public final class MainActivity extends Activity {
             card.setOnClickListener(v -> new ChoiceDialogBuilder().setTitle(budget.name)
                     .setItems(new String[]{"تعديل", "حذف"}, (d, which) -> {
                         if (which == 0) budgetPlanDialog(budget);
-                        else { db.deleteBudgetPlan(budget.id); render(); }
+                        else confirmDelete(budget.name, () -> { db.deleteBudgetPlan(budget.id); render(); });
                     }).show());
         }
     }
@@ -6677,7 +7188,7 @@ public final class MainActivity extends Activity {
         final ExpenseDb.PaymentSource selectedAccount=account;
         LinearLayout bar = new LinearLayout(this); bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> { selectedTab = 4; render(); }),
-                new LinearLayout.LayoutParams(dp(44), dp(44)));
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1); titleParams.setMarginStart(dp(10));
         bar.addView(label(("بطاقة".equals(account.kind)?"حركة الكارت · ":"حركة الحساب · ") + flowPeriodName(), 18, INK, true), titleParams);
         page.addView(bar);
@@ -6993,24 +7504,6 @@ public final class MainActivity extends Activity {
                 if (openingDialog != null && openingDialog.isShowing()) afterOpening = show; else show.run();
             });
         });
-    }
-
-    private void reviewToolsDialog() {
-        if(!BuildConfig.DEBUG)return;
-        String[] options = {"تصحيح البيانات: إعلانات وتكرار وتحويلات داخلية", "فحص تغطية رسائل SMS", "تقرير تشخيص الأرقام",
-                "مراجعة التحويلات بين حساباتك", "عينات رسائل البنوك", "عطل تجريبي"};
-        new ChoiceDialogBuilder().setTitle("أدوات المراجعة")
-                .setItems(options, (dialog, which) -> {
-                    switch (which) {
-                        case 0: runRepair(true); break;
-                        case 1: smsCoverageDialog(); break;
-                        case 2: diagnosticsDialog(); break;
-                        case 3: repairTransfersDialog(); break;
-                        case 4: messageSamples(); break;
-                        case 5: debugCrashDialog(); break;
-                        default: break;
-                    }
-                }).setNegativeButton("إغلاق", null).show();
     }
 
     private void debugCrashDialog() {

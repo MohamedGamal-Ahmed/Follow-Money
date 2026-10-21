@@ -452,6 +452,56 @@ final class AuditRegressionTest {
         eq(0,db.paymentSources().size());eq(0,scalar("SELECT COUNT(*) FROM source_aliases"));
     }
 
+    public void testExplicitSourceBankCorrectionPreservesIdentityAndFinancialRows(){
+        long card=db.addPaymentSource("10001","بطاقة","4101"),account=db.addPaymentSource("20002","حساب","4102");
+        long when=at(LocalDate.now(),10);ok(db.addManualEntry(when,12345,"EGP","QA shop","بقالة",card,"expense",null,"original"));long tx=db.latestInserted().id;
+        ok(new SourceMutation(db).correctBank(card,"HSBC","كارت المشتريات"));ok(new SourceMutation(db).correctBank(account,"HSBC","حساب المرتب"));
+        eq("HSBC",db.paymentSource(card).name);eq("كارت المشتريات",db.paymentSource(card).displayName);eq("4101",db.paymentSource(card).last4);
+        ok(db.sourceAliasOwner("10001:4101")==card);ok(db.sourceAliasOwner("HSBC:4101")==card);ok(db.paymentSource(card).parentSourceId==null);
+        eq(12345,db.transactionById(tx).amountMinor);eq(when,db.transactionById(tx).when);eq(card,db.transactionById(tx).paymentSourceId);eq("original",db.transactionById(tx).note);
+        db.linkCardToAccount(card,account);eq(account,db.accountId(card));eq(1,db.transactionCount());
+    }
+
+    public void testSourceBankCorrectionAliasFailureRollsBackEverything(){
+        long id=db.addPaymentSource("10001","بطاقة","4101");
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_bank_alias_abort BEFORE INSERT ON source_aliases BEGIN SELECT RAISE(ABORT,'qa bank alias fault'); END");
+        try{new SourceMutation(db).correctBank(id,"HSBC","QA label");throw new AssertionError("Failed correction reported saved");}catch(android.database.sqlite.SQLiteException expected){}
+        eq("10001",db.paymentSource(id).name);ok(db.paymentSource(id).displayName==null);eq(1,db.sourceAliasCount(id));ok(db.sourceAliasOwner("HSBC:4101")==null);
+    }
+
+    public void testSourceBankCorrectionDoesNotStealAliasOrChangeConfirmedLinks(){
+        long owner=db.addPaymentSource("HSBC","حساب","4101"),card=db.addPaymentSource("10001","بطاقة","4101");
+        try{new SourceMutation(db).correctBank(card,"HSBC","QA label");throw new AssertionError("Alias was stolen");}catch(IllegalArgumentException expected){}
+        eq("10001",db.paymentSource(card).name);ok(db.sourceAliasOwner("HSBC:4101")==owner);
+        long goodCard=db.addPaymentSource("HSBC","بطاقة","5566");db.linkCardToAccount(goodCard,owner);
+        try{new SourceMutation(db).correctBank(goodCard,"بنك مصر","QA label");throw new AssertionError("Confirmed bank changed");}catch(IllegalArgumentException expected){}
+        eq("HSBC",db.paymentSource(goodCard).name);eq(owner,db.accountId(goodCard));
+    }
+
+    public void testSourceBankCorrectionRejectsDigitsAndMissingAndNestedWrites(){
+        long id=db.addPaymentSource("10001","بطاقة","4101");
+        try{new SourceMutation(db).correctBank(id,"20002","QA");throw new AssertionError("Digits accepted as bank");}catch(IllegalArgumentException expected){}
+        ok(!new SourceMutation(db).correctBank(999999,"HSBC","QA"));
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();try{
+            try{new SourceMutation(db).correctBank(id,"HSBC","QA");throw new AssertionError("Correction escaped outer transaction");}catch(IllegalStateException expected){}
+        }finally{sql.endTransaction();}
+        eq("10001",db.paymentSource(id).name);eq(1,db.paymentSources().size());
+    }
+
+    public void testNewSourceBankAndFriendlyNameAreSeparate(){
+        long id=new SourceMutation(db).createReviewed("HSBC","حساب","9988","حساب المرتب");
+        eq("HSBC",db.paymentSource(id).name);eq("حساب المرتب",db.paymentSource(id).displayName);ok(db.sourceAliasOwner("HSBC:9988")==id);
+    }
+
+    public void testSourceRecognitionQueryUsesExactIdentityAndIncludesIncomingTransfers(){
+        long source=db.addPaymentSource("HSBC","حساب","1111"),other=db.addPaymentSource("HSBC","حساب","2222");long when=at(LocalDate.now(),10);
+        for(int i=0;i<4;i++)ok(db.addManualEntry(when+i,100+i,"EGP","QA source "+i,"بقالة",source,"expense",null,null));
+        ok(db.addManualEntry(when+10,500,"EGP","QA incoming","تحويلات",other,"transfer",source,null));
+        ok(db.addManualEntry(when+20,600,"EGP","QA unrelated","بقالة",other,"expense",null,null));
+        List<ExpenseDb.Transaction> rows=db.recentSourceTransactions(source);eq(3,rows.size());eq("QA incoming",rows.get(0).merchant);eq("QA source 3",rows.get(1).merchant);
+        eq(6,db.transactionCount());
+    }
+
     public void testCaptureResultReportsCommittedDuplicateEvidenceChange(){
         long t=at(LocalDate.now(),10);String body="Card purchase EGP 100 at QA CONTRACT";
         ok(db.captureSms("BANK",body,t).dbChanged);long revision=db.changes();

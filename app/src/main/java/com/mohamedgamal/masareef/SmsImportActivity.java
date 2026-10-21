@@ -45,11 +45,11 @@ public final class SmsImportActivity extends Activity {
     private Typeface font;
     private int pageNumber;
     private static final int PAGE_SIZE=40;
-    private static final int BRAND=0xff0b3d2e;
-    private static final int LIME=0xffc8f25a;
-    private int accent=BRAND,border=0xffe3e6df;
+    private int BRAND, LIME, accent, border;
+    private UiTheme uiTheme;
+    private UiComponents ui;
     private boolean dark;
-    private int INK=0xff0d1f1a,MUTED=0xff5e6b66,background=0xfff4f5f1,surface=0xffffffff;
+    private int INK, MUTED, background, surface;
 
     private static android.content.SharedPreferences mainPreferences(Context context){
         String name=MainActivity.class.getName(),prefix=context.getPackageName()+".";
@@ -61,13 +61,14 @@ public final class SmsImportActivity extends Activity {
         if(dark)setTheme(R.style.AppTheme_Dark);
         super.onCreate(state);
         appLock=new AppLock(this,this::onAppUnlocked);
-        if(dark) {
-            INK=0xffeef3ef;MUTED=0xff9aaaa2;background=0xff0d1a16;surface=0xff16261f;accent=0xff2bbf85;border=0xff2a3b33;
-        }
+        uiTheme=new UiTheme(this,dark);
+        BRAND=uiTheme.brand;LIME=uiTheme.lime;INK=uiTheme.ink;MUTED=uiTheme.muted;
+        background=uiTheme.background;surface=uiTheme.surface;accent=uiTheme.accent;border=uiTheme.border;
         getWindow().setStatusBarColor(background);getWindow().setNavigationBarColor(background);
-        getWindow().getDecorView().setSystemUiVisibility(background==0xfff4f5f1?View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR:0);
+        getWindow().getDecorView().setSystemUiVisibility(dark?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         try {font=new Typeface.Builder(getAssets(),"fonts/ReadexPro.ttf").build();}
         catch(RuntimeException e) {font=Typeface.DEFAULT;}
+        ui=new UiComponents(this,uiTheme,font);
         Object retained=getLastNonConfigurationInstance();
         session=retained instanceof Session?(Session)retained:new Session(getApplicationContext());
         pageNumber=state==null?0:state.getInt("page",0);
@@ -113,17 +114,12 @@ public final class SmsImportActivity extends Activity {
         t.setPadding(0,dp(7),0,dp(7));return t;
     }
     private Button button(String s,Runnable action) {
-        Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTypeface(font);
-        b.setStateListAnimator(null);b.setElevation(0);b.setTextSize(14);b.setTextColor(accent);b.setMinHeight(dp(48));b.setPadding(dp(12),dp(10),dp(12),dp(10));
-        GradientDrawable bg=new GradientDrawable();bg.setColor(surface);bg.setCornerRadius(dp(16));bg.setStroke(dp(1),border);
-        b.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x220b3d2e),bg,null));
+        Button b=ui.button(s,false,false,action);
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(6);lp.bottomMargin=dp(6);b.setLayoutParams(lp);
-        b.setOnClickListener(v->action.run());return b;
+        return b;
     }
     private void primary(Button button) {
-        GradientDrawable bg=new GradientDrawable();bg.setColor(dark?accent:BRAND);bg.setCornerRadius(dp(16));
-        button.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33c8f25a),bg,null));
-        button.setTextColor(dark?0xff0d1f1a:0xffffffff);button.setTypeface(font,Typeface.BOLD);
+        ui.styleButton(button,true,false);
     }
     private void show() {
         if(appLock!=null&&appLock.guard())return;
@@ -215,7 +211,7 @@ public final class SmsImportActivity extends Activity {
     private void pickStartDate(){
         LocalDate initial=LocalDate.now().minusDays(29);
         android.app.DatePickerDialog picker=new android.app.DatePickerDialog(this,(view,year,month,day)->scan(LocalDate.of(year,month+1,day)),initial.getYear(),initial.getMonthValue()-1,initial.getDayOfMonth());
-        picker.setTitle("بداية فترة الاستيراد");picker.setButton(android.content.DialogInterface.BUTTON_POSITIVE,"استيراد",picker);picker.setButton(android.content.DialogInterface.BUTTON_NEGATIVE,"رجوع",picker);picker.getDatePicker().setMaxDate(System.currentTimeMillis());picker.show();
+        picker.setTitle("بداية فترة الاستيراد");picker.setButton(android.content.DialogInterface.BUTTON_POSITIVE,"استيراد",picker);picker.setButton(android.content.DialogInterface.BUTTON_NEGATIVE,"رجوع",picker);picker.getDatePicker().setMaxDate(System.currentTimeMillis());UiSheets.prepare(this,picker,uiTheme,font).show();
         styleText(picker.getWindow().getDecorView());primary(picker.getButton(android.content.DialogInterface.BUTTON_POSITIVE));
     }
     private void styleText(View view){

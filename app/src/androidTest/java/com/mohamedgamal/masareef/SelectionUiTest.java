@@ -53,6 +53,7 @@ final class SelectionUiTest {
         for(AccessibilityNodeInfo node:nodes){
             if(node.isEditable()||node.getText()==null||!node.getText().toString().equals(text))continue;
             while(node!=null&&!node.isClickable())node=node.getParent();
+            if(node!=null){node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());idle();node.refresh();}
             if(node!=null&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){idle();return;}
         }
         throw new AssertionError("Cannot click "+text);
@@ -65,6 +66,15 @@ final class SelectionUiTest {
         idle();Thread.sleep(800);runner.waitForIdleSync();
         android.graphics.Bitmap bitmap=runner.getUiAutomation().takeScreenshot();if(bitmap==null)throw new AssertionError("No screenshot");
         try(FileOutputStream out=new FileOutputStream(new File(captures,name+".png"))){ok(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{bitmap.recycle();}
+    }
+    private void visibleAction(String text) {
+        AccessibilityNodeInfo root=runner.getUiAutomation().getRootInActiveWindow();
+        for(AccessibilityNodeInfo node:root.findAccessibilityNodeInfosByText(text)) {
+            if(!plain(node.getText()).equals(plain(text))||!node.isVisibleToUser())continue;
+            android.graphics.Rect bounds=new android.graphics.Rect();node.getBoundsInScreen(bounds);
+            ok(bounds.height()>=Math.round(48*activity.getResources().getDisplayMetrics().density));return;
+        }
+        throw new AssertionError("Missing visible action "+text);
     }
     private AccessibilityNodeInfo editable(AccessibilityNodeInfo node,String hint) {
         if(node==null)return null;
@@ -101,14 +111,14 @@ final class SelectionUiTest {
             main(()->{((ExpenseDb)get("db")).close();set("db",db);set("introVisible",false);set("selectedTab",6);
                 if(fontScale>1){originalConfiguration=new android.content.res.Configuration(activity.getResources().getConfiguration());android.content.res.Configuration config=new android.content.res.Configuration(originalConfiguration);config.fontScale=fontScale;activity.getResources().updateConfiguration(config,activity.getResources().getDisplayMetrics());}
                 invoke("render",new Class<?>[0]);invoke("editTransactionDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(id));});
-            click("أكل وشرب");ok(has("بحث في الخيارات"));ok(choiceChecked("أكل وشرب"));screen("01-category");
+            click("كل التصنيفات");ok(has("بحث في الخيارات"));ok(choiceChecked("أكل وشرب"));screen("01-category");
             search("no-such-choice");ok(has("مفيش نتائج للبحث"));search("صحة");ok(has("صحة"));ok(!has("أكل وشرب"));click("صحة");awaitText("تعديل المعاملة");ok(has("تعديل المعاملة"));click("حفظ");ok("صحة".equals(db.transactionById(id).category));ok(db.transactionById(id).amountMinor==28800);
             main(()->invoke("editTransactionDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(id)));
-            click("EGP");ok(choiceChecked("EGP"));screen("02-currency");click("USD");click("إلغاء");ok("EGP".equals(db.transactionById(id).currency));
+            click("EGP");ok(choiceChecked("EGP"));screen("02-currency");click("USD");main(()->activity.onBackPressed());click("تجاهل التعديلات");ok("EGP".equals(db.transactionById(id).currency));
             main(()->invoke("sourceOptions",new Class<?>[]{ExpenseDb.PaymentSource.class},db.paymentSources().stream().filter(s->s.id==account).findFirst().get()));
-            ok(has("سجل الأرصدة"));ok(has("تسمية وتأكيد الاستخدام"));screen("03-source-actions");click("تسمية وتأكيد الاستخدام");ok(has("تسمية الوسيلة"));click("إلغاء");
+            ok(has("سجل الأرصدة"));ok(has("تسمية وتأكيد الاستخدام"));screen("03-source-actions");click("تسمية وتأكيد الاستخدام");ok(has("تسمية الوسيلة"));ok(has("راجعت الوسيلة وأعرف أني بستخدمها"));main(()->activity.onBackPressed());idle();ok(!has("راجعت الوسيلة وأعرف أني بستخدمها"));
             main(()->invoke("ownHandlesDialog",new Class<?>[0]));ok(has("مثال: name@instapay"));ok(has("بحث في الخيارات"));
-            fill("name@instapay","newqa@instapay");search("qa11@");click("qa11@instapay");ok(choiceChecked("qa11@instapay"));screen("04-multi-search");
+            fill("name@instapay","newqa@instapay");search("qa11@");click("qa11@instapay");ok(choiceChecked("qa11@instapay"));screen("04-multi-search");visibleAction("إلغاء");visibleAction("qa11@instapay");
             search("");search("qa11@");ok(choiceChecked("qa11@instapay"));click("حفظ");
             ok(!db.isOwnHandle("qa11@instapay"));ok(db.isOwnHandle("newqa@instapay"));ok(db.ownHandles().size()==12);ok(db.transactionCount()==1);
             main(()->invoke("ownHandlesDialog",new Class<?>[0]));search("qa10@");click("qa10@instapay");click("إلغاء");ok(db.isOwnHandle("qa10@instapay"));
@@ -121,13 +131,13 @@ final class SelectionUiTest {
             main(()->invoke("editTransactionDialog",new Class<?>[]{ExpenseDb.Transaction.class},stale));
             db.deleteTransaction(id);
             click("افتكر التصنيف للتاجر ده في العمليات الجديدة");click("حفظ");
-            ok(has("تعديل المعاملة"));ok(db.merchantRules().isEmpty());ok(db.transactionCount()==0);click("إلغاء");
+            ok(has("تعديل المعاملة"));ok(db.merchantRules().isEmpty());ok(db.transactionCount()==0);main(()->activity.onBackPressed());click("تجاهل التعديلات");
             if(android.os.Build.VERSION.SDK_INT>=29){
                 int sourcesBefore=db.paymentSources().size();
                 db.getWritableDatabase().execSQL("CREATE TRIGGER qa_source_alias_fault BEFORE INSERT ON source_aliases BEGIN SELECT RAISE(ABORT,'qa source alias fault'); END");
                 try{
                     main(()->invoke("paymentSourceDialog",new Class<?>[0]));
-                    fill("اسم الوسيلة","HSBC");fill("آخر 3 أو 4 أرقام","9988");
+                    click("حساب بنكي");fill("البنك","HSBC");fill("آخر 3 أو 4 أرقام","9988");
                     boolean[] callbackThrew={false};
                     main(()->{
                         android.view.View add=null;

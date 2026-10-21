@@ -4,4 +4,28 @@
     <color name="brand_forest">#0B3D2E</color>
     <color name="brand_emerald">#12A06E</color>
     <color name="brand_lime">#C8F25A</color>
+    <!-- Shared semantic pairs. The preference chooses the palette, independently of system night mode. -->
+    <color name="ui_ink_light">#0D1F1A</color>
+    <color name="ui_ink_dark">#EEF3EF</color>
+    <color name="ui_muted_light">#5E6B66</color>
+    <color name="ui_muted_dark">#9AAAA2</color>
+    <color name="ui_background_light">#F4F5F1</color>
+    <color name="ui_background_dark">#0D1A16</color>
+    <color name="ui_surface_light">#FFFFFF</color>
+    <color name="ui_surface_dark">#16261F</color>
+    <color name="ui_accent_dark">#2BBF85</color>
+    <color name="ui_pale_light">#E3F1E9</color>
+    <color name="ui_pale_dark">#1C3A2E</color>
+    <color name="ui_border_light">#E3E6DF</color>
+    <color name="ui_border_dark">#2A3B33</color>
+    <color name="ui_field_outline_light">#738078</color>
+    <color name="ui_field_outline_dark">#80968A</color>
+    <color name="ui_danger_light">#C23A3A</color>
+    <color name="ui_danger_dark">#F07070</color>
+    <color name="ui_income_light">#107C50</color>
+    <color name="ui_income_dark">#3CCB8B</color>
+    <color name="ui_brand_soft">#1C5443</color>
+    <color name="ui_indigo">#3B4BA8</color>
+    <color name="ui_gold">#D9A21B</color>
+    <color name="ui_orange">#C25E0B</color>
 </resources>

@@ -348,9 +348,6 @@ final class UiKit {
         return "•";
     }
 
-    /** Forest plate behind logos that are white on transparency; a white plate would hide them. */
-    static final int LOGO_PLATE_FOR_WHITE = 0xff0b3d2e;
-
     /** Catalog assets drawn entirely in white. Keep in sync with docs/brand-catalog-2026-10-10/README.md. */
     static boolean whiteOnlyLogo(String brandId) {
         return "alexbank".equals(brandId) || "fabmisr".equals(brandId);
@@ -372,7 +369,8 @@ final class UiKit {
         icon.setImageResource(logo);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         GradientDrawable plate = new GradientDrawable();
-        plate.setColor(whiteOnlyLogo(brandId) ? LOGO_PLATE_FOR_WHITE : 0xffffffff);
+        // Authentic logo plates keep their brand colors in either theme; read shared resources instead of a second palette.
+        plate.setColor(context.getColor(whiteOnlyLogo(brandId) ? R.color.brand_forest : R.color.ui_surface_light));
         plate.setCornerRadius(sizeDp / 2f * density);
         if (border != 0) plate.setStroke(Math.max(1, Math.round(density)), border);
         icon.setBackground(plate);

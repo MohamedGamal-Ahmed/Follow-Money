@@ -183,7 +183,9 @@ final class BackupRestoreTest {
             // Hints are not exposed as node text; the explanation and the action button are.
             ok(has("8 أحرف على الأقل") && has("اختار مكان الحفظ"), "Backup dialog explains the password rule and offers the save action");
             screen(target, "02-backup-password");
-            click("إلغاء");
+            // The password page holds nothing to discard while empty, so Back returns to the data section directly.
+            runner.runOnMainSync(activity::onBackPressed); idle();
+            ok(has("استعادة نسخة") && !has("اختار مكان الحفظ"), "Back from the empty backup page returned to settings");
             LocalBackup.Prepared prepared = LocalBackup.prepare(target, file, "backup-qa-2026".toCharArray());
             invoke(activity, "restoreSummaryDialog", new Class<?>[]{LocalBackup.Prepared.class}, prepared);
             ok(has("استعادة النسخة؟") && has("4 عملية") && has("استبدل بياناتي بالنسخة"), "Restore summary names the rows and warns before replacing");
