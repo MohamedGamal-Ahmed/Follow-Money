@@ -1,7 +1,9 @@
 # Change log
 
-## Unreleased
+## 0.3.1 — phone testing candidate, 21 October 2026
 
+- Commitment-link and provider-confirmation pages stay open until the queued database write succeeds, retain the draft on rejection and ignore repeated submission while saving.
+- InstaPay own-accounts, «misread message» reports, linking an existing payment to a commitment cycle and status-only provider confirmations are pages. Linking keeps the same cycle→payment→allocation review in one place and still never adds an expense; a new InstaPay account without «@» now shows an error instead of being dropped.
 - Daily budget and salary, split bill, «turn into a monthly commitment» and «record as installment» are pages with inline validation; balance history is a page of rows. Transaction details, the bulk-select tools and the account page use the shared buttons; account cards get a visible manage button and the account page offers update-balance and manage actions directly.
 - Settings search: one box on the settings home finds every setting and tool by Arabic or English keywords (hamza and taa-marbuta folded); a hit opens the owning section, scrolls to the row and highlights it without running it. App-lock options and the debug review tools are now first-level rows instead of nested menus. Privacy policy and what's new open as reading pages.
 - Account naming, manual balance, merchant rules, assets, debts, debt payments, budgets, backup, restore and support/suggestion reports are pages (backup and restore keep passwords only in their fields, never in saved drafts) with inline validation; manual transaction time is editable. Fix: editing an income into an expense no longer keeps «دخل» as its category, correcting a bank no longer copies a real bank name into the friendly name, the link confirmation cannot open twice, and Back on a spoken entry asks before discarding it.

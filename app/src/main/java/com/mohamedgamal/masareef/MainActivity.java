@@ -2386,6 +2386,8 @@ public final class MainActivity extends Activity {
         if ("daily_budget".equals(route)) return new DailyBudgetPage(draft,original);
         if ("commitment_from_transaction".equals(route)) return new CommitmentFromTransactionPage(draft,original);
         if ("split_bill".equals(route)) return new SplitBillPage(draft,original);
+        if ("own_handles".equals(route)) return new OwnHandlesPage(draft,original);
+        if ("commitment_link".equals(route)) return new CommitmentLinkPage(draft,original);
         if ("transaction".equals(route)) return new TransactionFormPage(draft,original);
         if ("transaction_filters".equals(route)) return new TransactionFilterPage(draft,original);
         if ("transaction_bulk_category".equals(route)) return new BulkCategoryPage(draft,original);
@@ -4150,36 +4152,6 @@ public final class MainActivity extends Activity {
      * reviews the text and sends the e-mail themselves. Nothing leaves the device otherwise (same policy as the
      * unrecognised-format draft in the import preview).
      */
-    private void reportTransactionReading(ExpenseDb.Transaction item) {
-        List<ExpenseDb.SourceEvidence> messages = db.sourceEvidence(item.id);
-        String recorded = ("income".equals(item.kind) ? "دخل" : "transfer".equals(item.kind) ? "تحويل بين حساباتي" : "مصروف") + " · " + money(item.amountMinor, item.currency)
-                + " · " + UiKit.displayName(item.merchant) + " · " + item.category + " · " + transactionTimeLabel(item, true);
-        LinearLayout form = form();
-        form.addView(label("التطبيق سجّلها كده:", 12, MUTED, true));
-        TextView summary = label(recorded, 13, INK, false); summary.setPadding(0, dp(2), 0, dp(10)); form.addView(summary);
-        form.addView(label("حجبنا الأرقام والمبالغ وبعض الأسماء من الرسالة تلقائيًا. راجع النص واكتب تحتها الصح، وهيفتح مسودة إيميل وإنت اللي ترسلها.", 12, MUTED, false));
-        EditText body = input("نص الرسالة", form); body.setSingleLine(false); body.setMinLines(3); body.setGravity(Gravity.TOP | Gravity.START);
-        body.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        StringBuilder redacted = new StringBuilder();
-        for (ExpenseDb.SourceEvidence evidence : messages) {
-            if (evidence.body == null || evidence.failed) continue;
-            if (redacted.length() > 0) redacted.append("\n\n");
-            redacted.append("المرسل: ").append(evidence.sender).append("\n").append(Redaction.text(evidence.body));
-        }
-        body.setText(redacted.length() == 0 ? "(الرسالة الأصلية غير متاحة؛ اكتب صيغتها هنا لو فاكرها)" : redacted.toString());
-        EditText correct = input("الصح كان إيه؟ (مثلًا: دي إيداع مش خصم)", form); correct.setSingleLine(false);
-        correct.setMinLines(2); correct.setGravity(Gravity.TOP | Gravity.START);
-        correct.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        ScrollView preview = new ScrollView(this); preview.addView(form);
-        new ChoiceDialogBuilder().setTitle("الرسالة اتقرت غلط؟").setView(preview)
-                .setPositiveButton("فتح مسودة إيميل", (dialog, which) -> {
-                    String reviewed = "قراءة غلط لرسالة بنك\nالتطبيق سجّلها: " + recorded + "\nالصح: " + correct.getText().toString().trim() + "\n\n" + body.getText().toString();
-                    try { startActivity(EmailSupport.draft(this, false, reviewed)); }
-                    catch (android.content.ActivityNotFoundException unavailable) { copySupportRequest(false, reviewed, "مفيش تطبيق إيميل؛ اتنسخت المسودة وعنوان الدعم"); }
-                })
-                .setNegativeButton("إلغاء", null).show();
-    }
-
     private void showOriginalMessages(List<ExpenseDb.SourceEvidence> messages) {
         LinearLayout content=form();
         if(messages.isEmpty()) content.addView(label("مصدر نصي غير متاح لهذه العملية. الإشعارات القديمة تحتاج إعادة وصول؛ والإدخال اليدوي وCSV ليس لهما رسالة أصلية.",14,MUTED,false));
@@ -4475,21 +4447,94 @@ public final class MainActivity extends Activity {
     }
 
     private void ownHandlesDialog() {
-        List<String> handles = db.ownHandles();
-        LinearLayout form = form();
-        form.addView(label(handles.isEmpty() ? "لسه مفيش حسابات مؤكدة. ضيف حسابك هنا علشان تحويلاتك لنفسك ما تتحسبش صرف." :
-                "التحويلات من وإلى الحسابات دي مش بتتحسب صرف ولا دخل. اختار حساب لو عايز تشيله.", 13, MUTED, false));
-        EditText add = input("مثال: name@instapay", form);
-        String[] items = handles.toArray(new String[0]);
-        boolean[] remove = new boolean[items.length];
-        AlertDialog.Builder builder = new ChoiceDialogBuilder().setTitle("حساباتك على إنستاباي").setView(form);
-        if (items.length > 0) builder.setMultiChoiceItems(items, remove, (dialog, which, checked) -> remove[which] = checked);
-        builder.setPositiveButton("حفظ", (dialog, which) -> {
-            for (int i = 0; i < items.length; i++) if (remove[i]) db.removeOwnHandle(items[i]);
-            String value = add.getText().toString().trim();
-            if (value.contains("@")) db.addOwnHandle(value);
-            render();
-        }).setNegativeButton("إلغاء", null).show();
+        Bundle draft = new Bundle(); draft.putString("add", ""); draft.putStringArrayList("remove", new ArrayList<>());
+        savePageScroll(); formPages.push(new OwnHandlesPage(draft, draft));
+    }
+
+    private final class OwnHandlesPage extends DraftFormPage {
+        OwnHandlesPage(Bundle draft, Bundle original) { super("own_handles", "حساباتك على إنستاباي", draft, original); }
+        private ArrayList<String> removed() { ArrayList<String> list = draft.getStringArrayList("remove"); return list == null ? new ArrayList<>() : list; }
+        @Override void build(LinearLayout body, UiComponents components) {
+            List<String> handles = db.ownHandles();
+            body.addView(components.label(handles.isEmpty() ? "لسه مفيش حسابات مؤكدة. ضيف حسابك هنا علشان تحويلاتك لنفسك ما تتحسبش صرف." :
+                    "التحويلات من وإلى الحسابات دي مش بتتحسب صرف ولا دخل. اختار حساب لو عايز تشيله.", UiTheme.BODY, MUTED));
+            EditText add = textField("حساب جديد", "add", body); add.setHint("مثال: name@instapay");
+            add.setTextDirection(View.TEXT_DIRECTION_LTR);
+            add.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+            if (handles.isEmpty()) { errorLabel(body); return; }
+            components.caption("شيل حساب", body);
+            LinearLayout rows = new LinearLayout(MainActivity.this); rows.setOrientation(LinearLayout.VERTICAL);
+            // Same search threshold as the shared pickers; the label is the pickers' too so it reads the same everywhere.
+            EditText search = handles.size() >= 8 ? components.field("بحث في الخيارات", body) : null; if (search != null) { search.setTag("app_choice_search"); search.setContentDescription("بحث في الخيارات"); }
+            body.addView(rows);
+            Runnable draw = () -> {
+                rows.removeAllViews();
+                String query = search == null ? "" : search.getText().toString().trim().toLowerCase(Locale.ROOT);
+                for (String handle : handles) {
+                    if (!query.isEmpty() && !handle.toLowerCase(Locale.ROOT).contains(query)) continue;
+                    CheckBox box = new CheckBox(MainActivity.this); box.setText(handle); box.setTextDirection(View.TEXT_DIRECTION_LTR);
+                    box.setTextColor(INK); box.setTypeface(REGULAR); box.setTextSize(UiTheme.BODY); box.setMinHeight(dp(UiTheme.TOUCH));
+                    box.setButtonTintList(ColorStateList.valueOf(ACCENT)); box.setChecked(removed().contains(handle));
+                    box.setOnCheckedChangeListener((v, checked) -> {
+                        ArrayList<String> next = new ArrayList<>(removed()); next.remove(handle); if (checked) next.add(handle);
+                        draft.putStringArrayList("remove", next);
+                    });
+                    rows.addView(box);
+                }
+                if (rows.getChildCount() == 0) rows.addView(ui.label("مفيش نتائج للبحث", UiTheme.BODY, MUTED));
+            };
+            if (search != null) search.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                public void onTextChanged(CharSequence s, int start, int before, int count) { draw.run(); }
+                public void afterTextChanged(Editable s) {}
+            });
+            draw.run(); errorLabel(body);
+        }
+        @Override boolean save() {
+            String value = text("add").trim();
+            if (!value.isEmpty() && !value.contains("@")) return fail("اكتب الحساب كامل، مثال name@instapay", "add");
+            for (String handle : removed()) db.removeOwnHandle(handle);
+            if (!value.isEmpty()) db.addOwnHandle(value);
+            return true;
+        }
+    }
+
+    private void reportTransactionReading(ExpenseDb.Transaction item) {
+        List<ExpenseDb.SourceEvidence> messages = db.sourceEvidence(item.id);
+        String recorded = ("income".equals(item.kind) ? "دخل" : "transfer".equals(item.kind) ? "تحويل بين حساباتي" : "مصروف") + " · " + money(item.amountMinor, item.currency)
+                + " · " + UiKit.displayName(item.merchant) + " · " + item.category + " · " + transactionTimeLabel(item, true);
+        StringBuilder redacted = new StringBuilder();
+        for (ExpenseDb.SourceEvidence evidence : messages) {
+            if (evidence.body == null || evidence.failed) continue;
+            if (redacted.length() > 0) redacted.append("\n\n");
+            redacted.append("المرسل: ").append(evidence.sender).append("\n").append(Redaction.text(evidence.body));
+        }
+        Bundle draft = new Bundle();
+        draft.putString("body", redacted.length() == 0 ? "(الرسالة الأصلية غير متاحة؛ اكتب صيغتها هنا لو فاكرها)" : redacted.toString());
+        draft.putString("correct", "");
+        savePageScroll();
+        formPages.push(new DraftFormPage("report_reading", "الرسالة اتقرت غلط؟", draft, new Bundle(draft)) {
+            @Override void build(LinearLayout body, UiComponents components) {
+                components.caption("التطبيق سجّلها كده", body);
+                body.addView(components.label(recorded, UiTheme.BODY, INK));
+                body.addView(components.label("حجبنا الأرقام والمبالغ وبعض الأسماء من الرسالة تلقائيًا. راجع النص واكتب تحتها الصح، وهيفتح مسودة إيميل وإنت اللي ترسلها.", UiTheme.CAPTION, MUTED));
+                for (String key : new String[]{"body", "correct"}) {
+                    EditText field = textField("body".equals(key) ? "نص الرسالة" : "الصح كان إيه؟ (مثلًا: دي إيداع مش خصم)", key, body);
+                    field.setSingleLine(false); field.setMinLines("body".equals(key) ? 3 : 2); field.setGravity(Gravity.TOP | Gravity.START);
+                    field.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+                }
+                errorLabel(body);
+            }
+            @Override String saveLabel() { return "فتح مسودة إيميل"; }
+            @Override boolean save() {
+                String reviewed = "قراءة غلط لرسالة بنك\nالتطبيق سجّلها: " + recorded + "\nالصح: " + text("correct").trim() + "\n\n" + text("body");
+                try { startActivity(EmailSupport.draft(MainActivity.this, false, reviewed)); }
+                catch (android.content.ActivityNotFoundException unavailable) { copySupportRequest(false, reviewed, "مفيش تطبيق إيميل؛ اتنسخت المسودة وعنوان الدعم"); }
+                return true;
+            }
+            // Message text stays out of saved instance state even after redaction.
+            @Override boolean restoreAfterRecreation() { return false; }
+        });
     }
 
     private LinearLayout cardStrip(ExpenseDb.PaymentSource source) {
@@ -5053,48 +5098,99 @@ public final class MainActivity extends Activity {
 
     private interface CommitmentChange{boolean apply();}
     private void commitmentWrite(CommitmentChange change){
+        commitmentWrite(change,null);
+    }
+    private void commitmentWrite(CommitmentChange change,java.util.function.Consumer<Boolean> completed){
         Context app=getApplicationContext();
         CaptureQueue.submit(()->{
             final boolean changed;
             final long before=db.changes();
             try{changed=change.apply();}
-            catch(RuntimeException failed){postUi(()->toast("تعذر اعتماد التسوية؛ راجع العملية والدورة وحاول تاني"));return;}
+            catch(RuntimeException failed){postUi(()->{if(completed!=null)completed.accept(false);else toast("تعذر اعتماد التسوية؛ راجع العملية والدورة وحاول تاني");});return;}
             if(changed||db.changes()!=before)try{SmsReceiver.notifyDataChanged(app);}catch(RuntimeException output){postUi(()->toast("التسوية محفوظة؛ تعذر تحديث التنبيهات"));}
-            postUi(()->{toast(changed?"اتحدثت التسوية بدون مصروف جديد":"ما اتسجلش سداد جديد؛ راجع الحالة الحالية");render();});
+            postUi(()->{if(completed!=null)completed.accept(changed);toast(changed?"اتحدثت التسوية بدون مصروف جديد":"ما اتسجلش سداد جديد؛ راجع الحالة الحالية");render();});
         });
     }
+
+    private abstract class CommitmentWritePage extends DraftFormPage {
+        private boolean pending;
+        CommitmentWritePage(String route,String title,Bundle draft,Bundle original){super(route,title,draft,original);}
+        final boolean submit(CommitmentChange change){
+            if(pending)return false;
+            pending=true;
+            commitmentWrite(change,changed->{
+                pending=false;
+                if(changed)formPages.completeSave(this);
+                else fail("لم تُحفظ التسوية؛ راجع العملية والدورة وحاول تاني",null);
+            });
+            return false;
+        }
+    }
     private void commitmentLinkDialog(ExpenseDb.Recurring item){
-        LinearLayout form=form();EditText due=dateInput("دورة الاستحقاق",form,item.nextDue);
-        form.addView(label("اختار دورة من الجدول؛ هنجيب العمليات المسجلة في الشهر المحيط بها.",12,MUTED,false));
-        new ChoiceDialogBuilder().setTitle("اربط دفع موجود · بدون مصروف إضافي").setView(form)
-                .setPositiveButton("اختار العملية",(d,w)->{
-                    LocalDate selected=dateValue(due);if(selected==null)return;
-                    List<ExpenseDb.Transaction> candidates=db.commitmentPaymentCandidates(selected);
-                    if(candidates.isEmpty()){toast("مفيش دفعات مؤهلة في الفترة دي. راجع تاريخ الدورة أو فك رابط سابق من التسويات.");return;}
-                    String[] titles=new String[candidates.size()];for(int i=0;i<titles.length;i++){
-                        ExpenseDb.Transaction tx=candidates.get(i);titles[i]=tx.merchant+" · "+money(tx.amountMinor,tx.currency)+" · "+Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate();
-                    }
-                    new ChoiceDialogBuilder().setTitle("اختار الدفعة اللي تخص "+item.merchant).setItems(titles,(a,i)->{
-                        try{commitmentAllocationDialog(db.commitmentPaymentPreview(item.id,selected,candidates.get(i).id));}
-                        catch(IllegalArgumentException changed){toast("الدورة مش متاحة بنفس العملة أو العملية اتغيرت؛ راجع الاختيار");}
-                    }).show();
-                }).setNegativeButton("إلغاء",null).show();
+        Bundle draft=new Bundle();draft.putLong("plan",item.id);draft.putString("due",item.nextDue==null?LocalDate.now().toString():item.nextDue.toString());
+        draft.putBoolean("searched",false);draft.putLong("transaction",-1);draft.putString("amount","");
+        savePageScroll();formPages.push(new CommitmentLinkPage(draft,draft));
     }
-    private void commitmentAllocationDialog(CommitmentPayments.AllocationPreview preview){
-        LinearLayout form=form();
-        form.addView(label(preview.transaction.merchant+" · "+money(preview.transaction.amountMinor,preview.transaction.currency)+"\nدورة "+preview.due+" · المطلوب "+money(preview.expected,preview.currency),14,INK,true));
-        EditText amount=input("المبلغ المخصص للدورة",form);decimalInput(amount);
-        amount.setText(String.format(Locale.ROOT,"%.2f",preview.max/100.0));
-        form.addView(label("حد الربط "+money(preview.max,preview.currency)+". الربط يستخدم العملية الحالية ولا يضيف مصروفًا.",12,MUTED,false));
-        form.addView(label("لو الدفعة التلقائية غير مصنفة أو تحويلات، هتاخد تصنيف الالتزام. أي تصنيف عدّلته بنفسك محفوظ.",12,MUTED,false));
-        AlertDialog dialog=new ChoiceDialogBuilder().setTitle("راجع ربط الدفعة").setView(form).setPositiveButton("اعتماد الربط",null).setNegativeButton("إلغاء",null).create();
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-            if(rejectMisreadAmount(amount))return;
-            long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-            if(minor<=0||minor>preview.max){toast("اكتب مبلغًا موجبًا لحد المبلغ المتاح");return;}
-            dialog.dismiss();commitmentWrite(()->{db.linkCommitmentPayment(preview,minor);return true;});
-        }));dialog.show();
+
+    /** Pick the cycle, then one recorded payment, then review the allocation: one page, no new expense at any step. */
+    private final class CommitmentLinkPage extends CommitmentWritePage {
+        private CommitmentPayments.AllocationPreview preview;
+        CommitmentLinkPage(Bundle draft,Bundle original){super("commitment_link","اربط دفع موجود · بدون مصروف إضافي",draft,original);}
+        @Override void build(LinearLayout body,UiComponents components){
+            ExpenseDb.Recurring item=db.recurringById(draft.getLong("plan"));preview=null;
+            if(item==null){body.addView(components.label("الالتزام ده لم يعد موجودًا",UiTheme.BODY,CORAL));return;}
+            body.addView(components.label(item.merchant+" · "+money(item.amountMinor,item.currency),UiTheme.BODY,INK));
+            components.caption("١ · دورة الاستحقاق",body);
+            EditText due=dateField("دورة الاستحقاق","due",body);
+            due.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void afterTextChanged(Editable s){}
+                public void onTextChanged(CharSequence s,int a,int b,int c){if(draft.getBoolean("searched")){draft.putBoolean("searched",false);draft.putLong("transaction",-1);formPages.rebuild();}}});
+            body.addView(components.label("اختار دورة من الجدول؛ هنجيب العمليات المسجلة في الشهر المحيط بها.",UiTheme.CAPTION,MUTED));
+            if(!draft.getBoolean("searched")){
+                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(10);
+                body.addView(components.button("اختار العملية",false,false,()->{draft.putBoolean("searched",true);formPages.rebuild();}),lp);
+                errorLabel(body);return;
+            }
+            LocalDate selected=LocalDate.parse(text("due"));
+            List<ExpenseDb.Transaction> candidates=db.commitmentPaymentCandidates(selected);
+            components.caption("٢ · اختار الدفعة اللي تخص "+item.merchant,body);
+            if(candidates.isEmpty()){body.addView(components.label("مفيش دفعات مؤهلة في الفترة دي. راجع تاريخ الدورة أو فك رابط سابق من التسويات.",UiTheme.BODY,MUTED));errorLabel(body);return;}
+            android.widget.RadioGroup group=new android.widget.RadioGroup(MainActivity.this);body.addView(group);
+            for(ExpenseDb.Transaction tx:candidates){
+                android.widget.RadioButton option=new android.widget.RadioButton(MainActivity.this);option.setId(View.generateViewId());option.setSaveEnabled(false);
+                option.setText(tx.merchant+" · "+money(tx.amountMinor,tx.currency)+" · "+Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate());
+                option.setTypeface(REGULAR);option.setTextSize(UiTheme.BODY);option.setTextColor(INK);option.setMinHeight(dp(UiTheme.TOUCH));
+                option.setButtonTintList(ColorStateList.valueOf(ACCENT));option.setChecked(tx.id==draft.getLong("transaction"));
+                option.setOnClickListener(v->{if(draft.getLong("transaction")==tx.id)return;draft.putLong("transaction",tx.id);draft.putString("amount","");formPages.rebuild();});
+                group.addView(option);
+            }
+            long chosen=draft.getLong("transaction");
+            if(chosen>=0){
+                try{preview=db.commitmentPaymentPreview(item.id,selected,chosen);}
+                catch(IllegalArgumentException changed){body.addView(components.label("الدورة مش متاحة بنفس العملة أو العملية اتغيرت؛ راجع الاختيار",UiTheme.BODY,CORAL));}
+                if(preview!=null){
+                    components.caption("٣ · راجع ربط الدفعة",body);
+                    body.addView(components.label(preview.transaction.merchant+" · "+money(preview.transaction.amountMinor,preview.transaction.currency)+"\nدورة "+preview.due+" · المطلوب "+money(preview.expected,preview.currency),UiTheme.BODY,INK));
+                    if(text("amount").isEmpty())draft.putString("amount",minorText(preview.max));
+                    amountField("المبلغ المخصص للدورة","amount",body);
+                    body.addView(components.label("حد الربط "+money(preview.max,preview.currency)+". الربط يستخدم العملية الحالية ولا يضيف مصروفًا.",UiTheme.CAPTION,MUTED));
+                    body.addView(components.label("لو الدفعة التلقائية غير مصنفة أو تحويلات، هتاخد تصنيف الالتزام. أي تصنيف عدّلته بنفسك محفوظ.",UiTheme.CAPTION,MUTED));
+                }
+            }
+            errorLabel(body);
+        }
+        @Override String saveLabel(){return "اعتماد الربط";}
+        @Override boolean save(){
+            if(preview==null)return fail(draft.getBoolean("searched")?"اختار الدفعة اللي تخص الالتزام":"اختار الدورة واضغط «اختار العملية»",null);
+            if(ExpenseParser.manualAmountMisread(text("amount")))return fail("راجع المبلغ","amount");
+            long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
+            if(minor<=0||minor>preview.max)return fail("اكتب مبلغًا موجبًا لحد المبلغ المتاح","amount");
+            CommitmentPayments.AllocationPreview approved=preview;
+            return submit(()->{db.linkCommitmentPayment(approved,minor);return true;});
+        }
+        // The preview is recomputed from the database on every build, never restored from a stale copy.
+        @Override boolean restoreAfterRecreation(){return true;}
     }
+
     private void commitmentPaymentsDialog(long id){
         List<CommitmentPayments.Payment> payments=db.commitmentPayments(id);
         if(payments.isEmpty()){toast("مفيش تسويات مرتبطة؛ العدد السابق إقرار محفوظ بدون روابط دفعات");return;}
@@ -5125,10 +5221,20 @@ public final class MainActivity extends Activity {
                     String[] titles=new String[plans.size()];for(int i=0;i<titles.length;i++)titles[i]=plans.get(i).merchant+" · "+money(plans.get(i).amountMinor,plans.get(i).currency);
                     new ChoiceDialogBuilder().setTitle("التزام التأكيد").setItems(titles,(a,i)->{
                         ExpenseDb.Recurring plan=plans.get(i);String key=db.commitmentIdentity(plan.id);
-                        LinearLayout form=form();EditText due=dateInput("دورة الاستحقاق",form,plan.nextDue);
-                        new ChoiceDialogBuilder().setTitle(plan.merchant+" · تأكيد حالة فقط").setView(form)
-                                .setPositiveButton("اعتماد التأكيد",(b,c)->{LocalDate date=dateValue(due);if(date!=null)commitmentWrite(()->db.resolveCommitmentConfirmation(notice.id,plan.id,date,key));})
-                                .setNegativeButton("إلغاء",null).show();
+                        Bundle draft=new Bundle();draft.putString("due",plan.nextDue==null?LocalDate.now().toString():plan.nextDue.toString());
+                        savePageScroll();formPages.push(new CommitmentWritePage("provider_confirmation",plan.merchant+" · تأكيد حالة فقط",draft,new Bundle(draft)){
+                            @Override void build(LinearLayout body,UiComponents components){
+                                body.addView(components.label("اختار دورة الاستحقاق اللي التأكيد ده بيخصها. التأكيد لا يضيف مصروفًا.",UiTheme.BODY,MUTED));
+                                dateField("دورة الاستحقاق","due",body);errorLabel(body);
+                            }
+                            @Override String saveLabel(){return "اعتماد التأكيد";}
+                            @Override boolean save(){
+                                if(text("due").isEmpty())return fail("اختار دورة الاستحقاق",null);
+                                LocalDate date=LocalDate.parse(text("due"));return submit(()->db.resolveCommitmentConfirmation(notice.id,plan.id,date,key));
+                            }
+                            // The pending notice is not part of the draft, so this step is not rebuilt after process death.
+                            @Override boolean restoreAfterRecreation(){return false;}
+                        });
                     }).show();
                 }).setNeutralButton("مش متعلق بالتزاماتي",(d,w)->commitmentWrite(()->db.dismissCommitmentConfirmation(notice.id)))
                 .setNegativeButton("لاحقًا",null).show();

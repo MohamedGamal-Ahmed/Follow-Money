@@ -118,10 +118,10 @@ final class SelectionUiTest {
             main(()->invoke("sourceOptions",new Class<?>[]{ExpenseDb.PaymentSource.class},db.paymentSources().stream().filter(s->s.id==account).findFirst().get()));
             ok(has("سجل الأرصدة"));ok(has("تسمية وتأكيد الاستخدام"));screen("03-source-actions");click("تسمية وتأكيد الاستخدام");ok(has("تسمية الوسيلة"));ok(has("راجعت الوسيلة وأعرف أني بستخدمها"));main(()->activity.onBackPressed());idle();ok(!has("راجعت الوسيلة وأعرف أني بستخدمها"));
             main(()->invoke("ownHandlesDialog",new Class<?>[0]));ok(has("مثال: name@instapay"));ok(has("بحث في الخيارات"));
-            fill("name@instapay","newqa@instapay");search("qa11@");click("qa11@instapay");ok(choiceChecked("qa11@instapay"));screen("04-multi-search");visibleAction("إلغاء");visibleAction("qa11@instapay");
+            fill("name@instapay","newqa@instapay");search("qa11@");click("qa11@instapay");ok(choiceChecked("qa11@instapay"));screen("04-multi-search");visibleAction("حفظ");visibleAction("qa11@instapay");
             search("");search("qa11@");ok(choiceChecked("qa11@instapay"));click("حفظ");
             ok(!db.isOwnHandle("qa11@instapay"));ok(db.isOwnHandle("newqa@instapay"));ok(db.ownHandles().size()==12);ok(db.transactionCount()==1);
-            main(()->invoke("ownHandlesDialog",new Class<?>[0]));search("qa10@");click("qa10@instapay");click("إلغاء");ok(db.isOwnHandle("qa10@instapay"));
+            main(()->invoke("ownHandlesDialog",new Class<?>[0]));search("qa10@");click("qa10@instapay");main(()->activity.onBackPressed());idle();click("تجاهل التعديلات");ok(db.isOwnHandle("qa10@instapay"));
             List<ExpenseDb.SourceEvidence> evidence=java.util.Arrays.asList(
                 new ExpenseDb.SourceEvidence("SMS","QA BANK",System.currentTimeMillis(),"تم خصم مبلغ 227 جنيه من حساب رقم 1111 — رسالة اختبار فقط"),
                 new ExpenseDb.SourceEvidence("SMS","QA BANK",System.currentTimeMillis()+1000,"تم الغاء التحويل بمبلغ 227 جنيه — رسالة اختبار فقط"));

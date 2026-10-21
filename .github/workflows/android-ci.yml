@@ -108,6 +108,7 @@ jobs:
           script: |
             bash -o pipefail -c "pwsh -NoProfile -File tools/run-checks.ps1 -Online -Android -Device emulator-5554 2>&1 | tee .tmp/ci/instrumentation.txt"
             bash -o pipefail -c "pwsh -NoProfile -File tools/run-resource-lifetime.ps1 -Online -Device emulator-5554 2>&1 | tee .tmp/ci/lifetime.txt"
+            bash -o pipefail -c "pwsh -NoProfile -File tools/run-unified-ui.ps1 -Device emulator-5554 2>&1 | tee .tmp/ci/unified-ui.txt"
       - name: Upload instrumentation output
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -118,4 +119,5 @@ jobs:
           path: |
             .tmp/ci/instrumentation.txt
             .tmp/ci/lifetime.txt
+            .tmp/ci/unified-ui.txt
             app/build/reports/lint-results-debug.*

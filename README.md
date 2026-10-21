@@ -7,7 +7,7 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 | | |
 | --- | --- |
 | Status | Private project; feature freeze from 14 October 2026 — fixes, testing and Play preparation only |
-| App version | 0.2.1 — development build |
+| App version | 0.3.1 / versionCode 6 — phone acceptance candidate |
 | Platform | Android 8.0+ / API 26+ |
 | Implementation | Java 17, native Android views, SQLite |
 | Services | No backend, account registration or analytics service |
@@ -24,6 +24,8 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 - **Optional points:** whole daily-limit points rounded per day after explicit coverage confirmation; a clear balance/yesterday/today summary and 100-point milestones, with today's result provisional and refunds correcting the original purchase day.
 - **Keep it visible:** three home screen widgets plus a compact transparent variant for compatible lock-screen hosts, optional hidden amounts, daily reminders and payment alerts. Lock-screen placement and notification space remain controlled by the host.
 - **Get help:** Arabic problem/suggestion drafts sent through your configured email app, with a preview of basic device information. GitHub remains available for developers.
+- **Protect and recover:** optional device-authentication app lock and password-encrypted local backup/restore. CSV exports are not full backups.
+- **Consistent forms:** shared light/dark controls, full-page editors, searchable settings, draft/discard protection and inline validation.
 
 The parser runs locally and uses rules. It does not guarantee recognition of every bank or notification format. Review ambiguous transfers, unclassified expenses and proposed commitments before relying on totals.
 
@@ -69,7 +71,7 @@ The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`. Uploa
 
 ### Separate APK for private testers
 
-The `beta` build uses `com.mohamedgamal.masareef.beta`, the launcher/widget label **Follow Money Beta**, and version name `0.2.1-beta`. It inherits release shrinking and disables debugging. Its signature permission is scoped to its application ID, so it can coexist with the original app even with a different signer. Beta data is separate and does not automatically migrate to the production app.
+The `beta` build uses `com.mohamedgamal.masareef.beta`, the launcher/widget label **Follow Money Beta**, and version name `0.3.1-beta`. It inherits release shrinking and disables debugging. Its signature permission is scoped to its application ID, so it can coexist with the original app even with a different signer. Beta data is separate and does not automatically migrate to the production app.
 
 On the original Windows account, create a dedicated Beta key once, then retain that same key for updates:
 

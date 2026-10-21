@@ -119,6 +119,16 @@ final class UnifiedUiTest {
                 ok("QA saved".equals(target.getSharedPreferences(MainActivity.class.getName(),0).getString("profile_name","")),"Save committed draft");
                 invoke("displayNamePage",new Class<?>[0]);name().setText("temporary");name().setText("QA saved");activity.onBackPressed();
                 ok(!((UiPages)get("formPages")).isOpen(),"Reverted edits are clean");
+                UiPages pages=(UiPages)get("formPages");
+                UiPages.Page completed=new UiPages.Page("async_old","QA old",new Bundle(),new Bundle()){
+                    void build(LinearLayout body,UiComponents ui){} boolean save(){return false;}
+                };
+                UiPages.Page next=new UiPages.Page("async_next","QA next",new Bundle(),new Bundle()){
+                    void build(LinearLayout body,UiComponents ui){} boolean save(){return false;}
+                };
+                pages.push(completed);pages.back();pages.push(next);pages.completeSave(completed);
+                ok(pages.isOpen()&&root().findViewWithTag("ui_form_page:async_next")!=null,"Late save completion cannot close another page");
+                pages.completeSave(next);ok(!pages.isOpen(),"Successful async save closes its own page");
             });
             final AlertDialog[] dialog={null};final int[] saved={0};final EditText[] field={null};
             main(()->{
@@ -239,6 +249,10 @@ final class UnifiedUiTest {
                 ok(!((UiPages)get("formPages")).isOpen()&&ledger.transactionCount()==1,"Valid split records one share");
                 ok(ledger.latestInserted().amountMinor==10000,"Share is the total divided by people");
                 ExpenseDb.Transaction share=ledger.latestInserted();
+                invoke("reportTransactionReading",new Class<?>[]{ExpenseDb.Transaction.class},share);
+                ok(((UiPages)get("formPages")).isOpen()&&findButton(root(),"فتح مسودة إيميل")!=null,"Misread report is a page with its mail action");
+                ok(((UiPages)get("formPages")).snapshot().getParcelableArrayList("pages").isEmpty(),"Message text page is never saved for recreation");
+                activity.onBackPressed();ok(!((UiPages)get("formPages")).isOpen(),"Untouched report page closes on Back");
                 invoke("commitmentFromTransaction",new Class<?>[]{ExpenseDb.Transaction.class},share);
                 ok(((UiPages)get("formPages")).isOpen(),"Commitment from a transaction is a page");
                 ((EditText)root().findViewWithTag("commitment_from_transaction_name")).setText("");findButton(root(),"حفظ الالتزام").performClick();

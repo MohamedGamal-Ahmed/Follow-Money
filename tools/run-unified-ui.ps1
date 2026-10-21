@@ -1,11 +1,14 @@
 param([string]$Device = 'emulator-5556', [switch]$SkipBuild,
     [string[]]$Modes = @('source_link_light','source_link_dark','source_link_max','transactions_light','transactions_dark','transactions_max','unified_light','unified_dark','unified_max','menus_max'))
 $ErrorActionPreference = 'Stop'
+$windowsHost = $env:OS -eq 'Windows_NT'
+$suffix = if ($windowsHost) { '.exe' } else { '' }
 if ($Device -notmatch '^emulator-[0-9]+$') { throw 'Unified UI tests require a disposable emulator.' }
-if (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME/bin/javac.exe")) { $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr' }
+if ($windowsHost -and (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME/bin/javac$suffix"))) { $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr' }
 $sdk = $env:ANDROID_HOME
-if (-not $sdk) { $sdk = "$env:LOCALAPPDATA/Android/Sdk" }
-$adb = "$sdk/platform-tools/adb.exe"
+if (-not $sdk) { $sdk = $env:ANDROID_SDK_ROOT }
+if (-not $sdk -and $windowsHost) { $sdk = "$env:LOCALAPPDATA/Android/Sdk" }
+$adb = "$sdk/platform-tools/adb$suffix"
 if (-not (Test-Path $adb)) { throw 'Set ANDROID_HOME to an Android SDK with platform-tools.' }
 $appId = 'com.mohamedgamal.masareef.cardreview.journeyqa'
 Push-Location (Split-Path $PSScriptRoot -Parent)
@@ -20,7 +23,8 @@ allprojects { p ->
     }
 }
 '@ | Set-Content '.tmp/unified-ui.init.gradle' -Encoding utf8
-        & ./gradlew.bat --offline -I .tmp/unified-ui.init.gradle assembleDebug assembleDebugAndroidTest
+        $wrapper = if ($windowsHost) { './gradlew.bat' } else { './gradlew' }
+        & $wrapper --offline -I .tmp/unified-ui.init.gradle assembleDebug assembleDebugAndroidTest
         if ($LASTEXITCODE -ne 0) { throw 'Unified UI APK build failed' }
     }
     $metadata = Get-Content 'app/build/outputs/apk/debug/output-metadata.json' -Raw | ConvertFrom-Json

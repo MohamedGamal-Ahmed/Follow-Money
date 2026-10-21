@@ -109,6 +109,11 @@ final class UiPages {
         if (page.save()) { pop(); page.onSaved(); }
     }
 
+    /** An asynchronous save may finish after Back or navigation. Never close a different page. */
+    void completeSave(Page page) {
+        if (isOpen() && current() == page) { pop(); page.onSaved(); }
+    }
+
     void back() { leave(false, this::pop); }
 
     /** Finish an explicitly committed flow, including its selection page, without a discard prompt. */
