@@ -61,7 +61,7 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "ShadowDiff.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "ShadowDiff.java", "ShadowReport.java", "ShadowRescan.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
@@ -111,6 +111,29 @@ public final class ParserShadowTest {
         // The debug screen is read-only and local: no ledger write, no network, not exported.
         String debug = Files.readString(source.resolve("ParserDebugActivity.java"), StandardCharsets.UTF_8);
         check(!debug.matches("(?s).*(getWritableDatabase|\\.insert\\(|execSQL|\\.delete\\(|\\.update\\(|HttpURLConnection|java\\.net\\.|Intent\\.ACTION_SEND).*"), "Debug screen is read-only and offline");
+        // The re-scan reads the inbox like the import and writes shadow rows only: no capture, import or ledger table.
+        String rescan = Files.readString(source.resolve("ShadowRescan.java"), StandardCharsets.UTF_8);
+        check(!rescan.matches("(?s).*(addSms|captureSms|captureNotification|ImportBatch|applySelected|\\.execute\\(|INSERT INTO|\"transactions\"|excluded_messages|capture_evidence|sms_import_receipts).*"), "Re-scan records no operation");
+        check(rescan.contains("SmsPreview.parse(sender, body, date, sent)") && rescan.contains("Telephony.Sms.Inbox.CONTENT_URI"), "Re-scan uses the import path");
+        check(rescan.contains("ShadowStore.record(sql, \"rescan\""), "Re-scan rows are tagged");
+        check(rescan.matches("(?s).*private static void submit\\(Context app, Work work\\) \\{\\s*CaptureQueue\\.submit\\(.*") && !rescan.contains("beginTransaction();\n            try {\n                while"), "Re-scan writes only on the capture worker, in short batches");
+        check(debug.contains("ACTION_CREATE_DOCUMENT") && debug.contains("ShadowReport.text("), "Report saved only to a file the user picks");
+        // The report: totals, by source and type, differences; the export has no message text, merchant or counterparty.
+        List<ShadowReport.Row> reportRows = List.of(
+                new ShadowReport.Row("BANK", now, "RECORDED", "PREVIEW_EXPENSE/LEDGER_RECORDED", 4500L, "EGP", "out", "AUTO", 4500L, "EGP", "out", "TRANSACTION", "card_purchase", "COMPLETED_EVENT", 90),
+                new ShadowReport.Row("BANK", now + 1, "RECORDED", "PREVIEW_INCOME/LEDGER_NEW", 1000L, "EGP", "in", "IGNORE", null, null, null, "PROMO", null, "PROMOTIONAL_MESSAGE", -1),
+                new ShadowReport.Row("WALLET", now + 2, "NOT_RECORDED", "NOT_CANDIDATE/LEDGER_NEW", null, null, null, "REVIEW", 25000L, "EGP", "in", "TRANSACTION", "wallet_topup", "POSSIBLE_INTERNAL_TRANSFER", 70));
+        ShadowReport.Summary report = ShadowReport.build(reportRows, 40, 37);
+        same(report.compared() + "/" + report.agreed() + "/" + report.disagree, "40/38/2", "Report totals");
+        same(report.byOutcome.get(ShadowDiff.Outcome.BOTH_SKIP), 37, "Unstored skips counted");
+        same(report.bySource.get("BANK")[0] + "/" + report.bySource.get("BANK")[1], "1/1", "By source");
+        same(report.byType.get("wallet_topup")[1], 1, "By type");
+        same(report.differences.get(0).source, "WALLET", "Newest difference first");
+        String exported = ShadowReport.text(report, "t", java.time.ZoneOffset.UTC);
+        check(exported.contains("| WALLET |") && exported.contains("NEW_ONLY") && exported.contains("250.00 EGP") && exported.contains("LEGACY_ONLY"), "Export lists differences");
+        check(!exported.toLowerCase().matches("(?s).*\\|\\s*(merchant|counterparty|party|text|body)\\s*\\|.*"), "Export has no merchant, party or text column");
+        for (java.lang.reflect.Field field : ShadowReport.Row.class.getDeclaredFields())
+            check(!field.getName().matches("(?i).*(merchant|counterparty|text|body).*"), "Report rows cannot carry message content: " + field.getName());
         String manifest = Files.readString(Path.of("app/src/main/AndroidManifest.xml"), StandardCharsets.UTF_8);
         check(manifest.contains("<activity android:name=\".ParserDebugActivity\" android:exported=\"false\" />"), "Debug screen not exported");
         ParserShadow.clear();

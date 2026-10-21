@@ -36,3 +36,16 @@ Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade 
   - **لم أفهمها**: the ununderstood messages, with their text opened on this device.
 - **Agreement** (`ShadowDiff`): legacy *recorded* means it wrote a ledger row, and the new pipeline *records* on AUTO or REVIEW. Two records agree only on the same amount and direction; a legacy own-account transfer fits either direction. The outcomes are BOTH_SKIP, BOTH_RECORD_SAME, BOTH_RECORD_DIFFERENT (AMOUNT / DIRECTION), LEGACY_ONLY and NEW_ONLY.
 - **Read-only and local:** a check (`ParserShadowTest`) rejects any database write, network class or share intent in the screen, and confirms it is not exported.
+
+## Shadow re-scan (step 5)
+
+- **Where:** debug screen → **إعادة الفحص (بدون تسجيل)**, with a period of 30 days, 90 days, a year, or all messages.
+- **Path:** the same inbox query and legacy preview as «اختيار فترة الرسائل القديمة» (`Telephony.Sms.Inbox`, `SmsPreview.parse`).
+  - **Legacy side:** what that import would capture (the preview is a transaction), with amount, currency and direction. Its current ledger status goes in the reason, e.g. `PREVIEW_EXPENSE/LEDGER_RECORDED`.
+  - **New side:** the full shadow pipeline. Each SMS carries its inbox ID as identity.
+- **No operation is recorded.** A check (`ParserShadowTest`) rejects any capture, import or ledger-table write in `ShadowRescan`. Rows go to `shadow_observations` with `origin='rescan'`, and each run replaces the previous one.
+  - A message both sides skip is only counted, unless the new pipeline did not understand it.
+  - At most `RESCAN_MAX_ROWS` = 10000 rows are stored; later ones are counted and the report says so.
+- **Live capture is never delayed:** reading and parsing run on the re-scan thread. Each batch of `RESCAN_BATCH` = 200 rows is written on the single capture worker (`CaptureQueue`) in a short transaction, so a new SMS or notification is captured between batches.
+- **Report on screen** (`ShadowReport`): messages scanned, compared, agree and disagree, counts by `ShadowDiff` outcome, agreement by source and by type (movement kind, else message type), and one card per difference. Each card shows the source, date, legacy decision, reason, amount and direction, then the new decision, amount, direction, score, type and reasons.
+- **Export (optional):** **حفظ التقرير في ملف** opens the system file picker (`ACTION_CREATE_DOCUMENT`) and writes the same report as Markdown to the file the user picks. It contains no message text, merchant or counterparty; a check confirms the report rows have no such field. Nothing is uploaded or shared.

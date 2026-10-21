@@ -104,8 +104,9 @@ final class ShadowStore {
         row.put("policy", o.policy);
         row.put("encrypted_body", EvidenceVault.encrypt(sealed.toString()));
         sql.insert("shadow_observations", null, row);
-        sql.execSQL("DELETE FROM shadow_observations WHERE id <= (SELECT MAX(id) FROM shadow_observations) - ?",
-                new Object[]{ParsingPolicy.SHADOW_STORE_MAX_ROWS});
+        // Live rows are bounded here; a re-scan bounds itself (RESCAN_MAX_ROWS) and replaces the previous one.
+        if ("live".equals(origin)) sql.execSQL("DELETE FROM shadow_observations WHERE origin='live' AND id < " +
+                "(SELECT id FROM shadow_observations WHERE origin='live' ORDER BY id DESC LIMIT 1 OFFSET ?)", new Object[]{ParsingPolicy.SHADOW_STORE_MAX_ROWS - 1});
         if ("UNUNDERSTOOD".equals(o.decision) && raw != null) rememberUnunderstood(sql, raw, content, source, o);
     }
 
@@ -142,6 +143,11 @@ final class ShadowStore {
         sql.insert("ununderstood_messages", null, row);
         sql.execSQL("DELETE FROM ununderstood_messages WHERE message_hash NOT IN " +
                 "(SELECT message_hash FROM ununderstood_messages ORDER BY last_seen DESC LIMIT ?)", new Object[]{ParsingPolicy.UNUNDERSTOOD_MAX_ROWS});
+    }
+
+    /** Removes every stored row of one origin (the previous re-scan before a new one). */
+    static void clearOrigin(SQLiteDatabase sql, String origin) {
+        sql.delete("shadow_observations", "origin=?", new String[]{origin});
     }
 
     /** One stored observation, its sealed values opened on this device. */

@@ -20,6 +20,9 @@ final class ParsingPolicy {
     static final int SHADOW_STORE_MAX_ROWS = 5000;
     /** Stored "messages I did not understand" (distinct message hashes); the least recently seen are removed first. */
     static final int UNUNDERSTOOD_MAX_ROWS = 500;
+    /** Shadow re-scan: stored rows at most (later messages are only counted), and inbox rows per write transaction. */
+    static final int RESCAN_MAX_ROWS = 10_000;
+    static final int RESCAN_BATCH = 200;
 
     // Message normalization.
     /** Longer inputs are cut for the shadow stage only; the legacy path keeps the full text. */
