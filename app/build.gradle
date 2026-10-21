@@ -88,6 +88,10 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // The owner's on-phone shadow test build (Development, same app ID and signer, in-place update).
+            versionNameSuffix '- Test'
+        }
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
