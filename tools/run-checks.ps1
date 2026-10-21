@@ -13,7 +13,7 @@ try {
     $src = 'app/src/main/java/com/mohamedgamal/masareef'
     $files = @('ExpenseParser','CaptureNotice','MerchantClassifier','NavigationState','TransactionJourney','DailyPoints','CsvImport','BudgetPeriod','SourceIdentity','CaptureIdentity','BalanceTimeline','CommitmentHint','MoneyTotals','SmsPreview','SmsParts','BrandCatalog','DailyAllowance','MoneyFlow','AccountMovement','RepairRules','Insights','MonthlyReport','BackupVault','Redaction','WhatsNew') | ForEach-Object { "$src/$_.java" }
     $tests = @('CaptureNoticeTest','ParserSmokeTest','TeldaCaptureTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','BalanceTimelineSmokeTest','CommitmentHintSmokeTest','PhaseOneLogicTest','MoneyFlowTest','RepairRulesTest','InsightsTest','MerchantClassificationTest','MonthlyReportTest','JourneyLogicTest','DailyPointsTest','AuditStructureTest','ManualAmountTest','BackupVaultTest','RedactionTest','WhatsNewTest') | ForEach-Object { "tools/$_.java" }
-    $tests += @('tools/ParserCorpusFixture.java','tools/ParserCorpusTest.java')
+    $tests += @('tools/ParserCorpusFixture.java','tools/ParserCorpusTest.java','tools/MessageShapeTest.java')
     & "$env:JAVA_HOME/bin/javac$suffix" -encoding UTF-8 -d $out @files @tests
     if ($LASTEXITCODE -ne 0) { throw 'JVM compilation failed' }
     foreach ($class in @('com.mohamedgamal.masareef.CaptureNoticeTest','ParserSmokeTest','com.mohamedgamal.masareef.TeldaCaptureTest','InstaPaySmokeTest','CsvImportSmokeTest','BudgetPeriodSmokeTest','com.mohamedgamal.masareef.BalanceTimelineSmokeTest','com.mohamedgamal.masareef.CommitmentHintSmokeTest','com.mohamedgamal.masareef.PhaseOneLogicTest','com.mohamedgamal.masareef.MoneyFlowTest','com.mohamedgamal.masareef.RepairRulesTest','com.mohamedgamal.masareef.InsightsTest','com.mohamedgamal.masareef.MerchantClassificationTest','com.mohamedgamal.masareef.MonthlyReportTest','com.mohamedgamal.masareef.JourneyLogicTest','com.mohamedgamal.masareef.DailyPointsTest','AuditStructureTest','com.mohamedgamal.masareef.ManualAmountTest','com.mohamedgamal.masareef.BackupVaultTest','com.mohamedgamal.masareef.RedactionTest','com.mohamedgamal.masareef.WhatsNewTest')) {
@@ -22,6 +22,8 @@ try {
     }
     & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.ParserCorpusTest
     if ($LASTEXITCODE -ne 0) { throw 'Parser corpus fixture contract failed' }
+    & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.MessageShapeTest
+    if ($LASTEXITCODE -ne 0) { throw 'Message diagnostic shape checks failed' }
     $wrapper = if ($windowsHost) { './gradlew.bat' } else { './gradlew' }
     $gradleArguments = @('assembleDebug','lintDebug','assembleDebugAndroidTest')
     if (-not $Online) { $gradleArguments = @('--offline') + $gradleArguments }
