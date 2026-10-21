@@ -46,6 +46,9 @@ public final class MerchantClassificationTest {
             eq(pair[0],BrandCatalog.merchant(pair[1]));
         for(String[] pair:new String[][]{{"sharafdg","Sharaf DG"},{"centrepoint","Centrepoint"},{"max","MAX"},{"lcwaikiki","LC WAIKIKI"},{"raya","راية"},{"aman","Aman"}})
             eq(pair[0],BrandCatalog.merchant(pair[1]));
+        for(String[] pair:new String[][]{{"paymob","PAYMOB-"},{"mahalawy","El Mahalawy"},{"pizzaking","PIZZA KING"}})
+            eq(pair[0],BrandCatalog.merchant(pair[1]));
+        eq("أكل وشرب",MerchantClassifier.category("PIZZA KING"));
         eq("تسوق",MerchantClassifier.category("LC Waikiki"));eq("تسوق",MerchantClassifier.category("Sharaf DG"));
         eq("nbe",BrandCatalog.bank("NBE"));eq("bdc",BrandCatalog.bank("Banque du Caire"));eq("bdc",BrandCatalog.bank("بنك القاهرة"));eq("cib",BrandCatalog.bank("CIB"));
         eq("أكل وشرب",MerchantClassifier.category("Etoile"));eq("رعاية صحية",MerchantClassifier.category("العزبي"));

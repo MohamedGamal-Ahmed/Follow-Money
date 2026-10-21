@@ -356,6 +356,12 @@ final class UiKit {
         return "alexbank".equals(brandId) || "fabmisr".equals(brandId);
     }
 
+    /** Logos drawn on their own solid colour: they fill the whole circle instead of sitting inside a white ring. */
+    static boolean fullBleedLogo(String brandId) {
+        return brandId != null && java.util.Arrays.asList("bdc", "bookingdotcom", "butlers", "cib", "costa", "etoile", "ezaby",
+                "illy", "lcwaikiki", "seoudi", "sharafdg", "tru", "zaher", "paymob", "mahalawy", "pizzaking").contains(brandId);
+    }
+
     /**
      * The one round logo plate used for banks, merchants and the SMS import preview, so a brand looks the
      * same everywhere. {@code border} is 0 for none; light surfaces pass their divider color.
@@ -370,8 +376,13 @@ final class UiKit {
         plate.setCornerRadius(sizeDp / 2f * density);
         if (border != 0) plate.setStroke(Math.max(1, Math.round(density)), border);
         icon.setBackground(plate);
-        int inset = Math.round(Math.max(4, sizeDp * 0.16f) * density);
-        icon.setPadding(inset, inset, inset, inset);
+        if (fullBleedLogo(brandId)) {
+            icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            icon.setClipToOutline(true);
+        } else {
+            int inset = Math.round(Math.max(4, sizeDp * 0.14f) * density);
+            icon.setPadding(inset, inset, inset, inset);
+        }
         icon.setContentDescription(description);
         icon.setImportantForAccessibility(description == null || description.isEmpty()
                 ? View.IMPORTANT_FOR_ACCESSIBILITY_NO : View.IMPORTANT_FOR_ACCESSIBILITY_YES);

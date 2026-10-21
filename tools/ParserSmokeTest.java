@@ -35,6 +35,9 @@ public final class ParserSmokeTest {
     }
 
     public static void main(String[] args) {
+        ExpenseParser.Parsed telda = ExpenseParser.parse("Telda", "Telda تم دفع 15 ج.م. في \"Kashier Butlers\"\nرصيدك: 31.5 ج.م.");
+        if (telda == null || telda.amountMinor != 1500 || !"EGP".equals(telda.currency) || !telda.merchant.contains("Butlers"))
+            throw new AssertionError("Telda notification: " + (telda == null ? "null" : telda.merchant + "/" + telda.amountMinor));
         expect("BANK", "Card purchase at AMAZON EGP 1,250.50. Available balance EGP 300", 125050, "EGP");
         expect("BANK", "تم خصم ٢٥٠٫٠٠ جنيه لدى كارفور من بطاقة ****1234", 25000, "EGP");
         ExpenseParser.Parsed card = ExpenseParser.parse("BANK", "تم خصم ٢٥٠٫٠٠ جنيه لدى كارفور من بطاقة ****1234");

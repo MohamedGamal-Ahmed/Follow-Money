@@ -4,6 +4,10 @@
 
 - Fix the new brand logos not showing: every catalog id now maps to its drawable (`tools/check-repo.py` fails when one does not), and the merchant-category refresh runs once more so older untouched automatic purchases pick up the new merchants' categories. Logos themselves are resolved when a row is drawn, so older transactions show them too.
 
+- Telda notifications («تم دفع 15 ج.م. في "Kashier Butlers"») now keep the shop name instead of saving the purchase as «Telda»; any quoted shop name after في/عند/at is read the same way.
+
+- Add Paymob, El Mahalawy and Pizza King logos (Pizza King also gets «أكل وشرب»). Logos on a solid colour now fill the whole circle, and logos on white (InstaPay, NBE, ChatGPT…) lose their empty margin so they no longer sit small inside a white ring.
+
 - Add logos and names for Sharaf DG, Centrepoint, Max, LC Waikiki, Raya, Aman, NBE, Banque du Caire, CIB, Butlers, Seoudi, ChatGPT, OneDrive, Truecaller, Google One, Costa, Etoile, Zaher, Ted's, El Ezaby, illy and TRU (supplied by the owner); Etoile, Zaher, Ted's, El Ezaby and illy also get categories.
 
 - Keep the figure inside the home ring on large-font phones (more padding, smaller auto-size range) and show the InstaPay logo on «تحويل لحظي» transactions.
