@@ -140,6 +140,24 @@ final class ParsingPolicy {
     static final String EXPENSE_OFFSET = "refund|reversal|reversed|credited back|عكس|اعاده المبلغ|استرداد|(?<!\\p{L})تم رد";
     static final String EXPIRY = "صالح حتي|valid until|expires?(?: on)?|تنتهي في";
 
+    // Confidence (stage 4): additive evidence score 0..100, thresholds, review caps and hard failures.
+    static final String CONFIDENCE_VERSION = "confidence-1";
+    static final int SCORE_EVENT_EXPLICIT = 30;    // completed verb, refund/reversal, or signed amount in the event clause
+    static final int SCORE_EVENT_CONTEXT = 15;     // only a terse card + merchant alert, no verb
+    static final int SCORE_AMOUNT = 30;            // one unambiguous positive principal
+    static final int SCORE_CURRENCY = 10;          // explicit currency unit
+    static final int SCORE_DIRECTION_EXPLICIT = 20;
+    static final int SCORE_DIRECTION_LIKELY = 5;
+    static final int SCORE_IDENTITY = 10;          // merchant, counterparty, account or card is known
+    static final int PENALTY_PROMO_SIGNALS = 10;   // promotional wording inside a completed event
+    static final int AUTO_THRESHOLD = 80;
+    static final int REVIEW_THRESHOLD = 50;
+    /** Any of these makes the message UNUNDERSTOOD whatever the score: nothing ambiguous is booked. */
+    static final String[] HARD_FAILURES = {"MISSING_AMOUNT", "AMBIGUOUS_CURRENCY", "INVALID_SIGNED_AMOUNT", "AMBIGUOUS_NUMBER_FORMAT",
+            "NON_POSITIVE_AMOUNT", "AMBIGUOUS_DIRECTION"};
+    /** Any of these caps the decision at REVIEW: the user must confirm ownership, expiry, merchant or direction. */
+    static final String[] REVIEW_CAPS = {"POSSIBLE_INTERNAL_TRANSFER", "EXPIRING_CREDIT", "MISSING_MERCHANT", "INFERRED_OUTGOING_DIRECTION"};
+
     // Later stages: defined by the approved corpus, not yet used by any implemented stage.
     /** Identity-less identical messages within this window become possible-duplicate review items. */
     static final long DUPLICATE_CANDIDATE_WINDOW_MS = 60_000L;

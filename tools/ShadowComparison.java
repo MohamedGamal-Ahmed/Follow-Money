@@ -246,10 +246,123 @@ public final class ShadowComparison {
         return out;
     }
 
+    static ConfidenceScorer.Confidence confidence(MessageNormalizer.Raw raw, long receivedAt, TransactionExtractor.Extraction[] phase3) {
+        MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);
+        MessageClassifier.Result classified = MessageClassifier.classify(normalized);
+        phase3[0] = TransactionExtractor.extract(normalized, classified, receivedAt);
+        return ConfidenceScorer.score(classified, phase3[0]);
+    }
+
+    static String bucket(ConfidenceScorer.Confidence c) {
+        if (c.components.isEmpty()) return "not scored (" + c.decision + ")";
+        return c.score >= 100 ? "100" : c.score >= ParsingPolicy.AUTO_THRESHOLD ? "80-99" : c.score >= ParsingPolicy.REVIEW_THRESHOLD ? "50-79" : "0-49";
+    }
+
+    static void distribution(List<String> out, String title, String[] labels, List<java.util.Map<String, Integer>> counts) {
+        out.add("| " + title + " | " + String.join(" | ", labels) + " |");
+        out.add("| --- |" + " ---: |".repeat(labels.length));
+        java.util.Set<String> keys = new java.util.TreeSet<>();
+        for (var map : counts) keys.addAll(map.keySet());
+        for (String key : keys) {
+            StringBuilder line = new StringBuilder("| " + key + " |");
+            for (var map : counts) line.append(" ").append(map.getOrDefault(key, 0)).append(" |");
+            out.add(line.toString());
+        }
+    }
+
+    /** Phase 4: final scored decision vs phase 3 provisional decision, legacy and expectation; corpus and held-out. */
+    static List<String> confidenceReport(List<ParserCorpusFixture.Row> rows) throws Exception {
+        int both = 0, newOnly = 0, legacyOnly = 0, neither = 0;
+        java.util.Map<String, Integer> expected = new java.util.TreeMap<>(), legacy = new java.util.TreeMap<>(), p3 = new java.util.TreeMap<>(),
+                p4 = new java.util.TreeMap<>(), buckets = new java.util.TreeMap<>();
+        List<String> table = new ArrayList<>(), changes = new ArrayList<>(), misses = new ArrayList<>();
+        for (ParserCorpusFixture.Row row : rows) {
+            Legacy old = legacy(row);
+            TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
+            ConfidenceScorer.Confidence c = confidence(MessageNormalizerTest.raw(row), Long.parseLong(row.get("received_at_ms")), x);
+            String want = expectedDecision(row);
+            expected.merge(want, 1, Integer::sum); legacy.merge(old.decision, 1, Integer::sum);
+            p3.merge(x[0].decision, 1, Integer::sum); p4.merge(c.decision, 1, Integer::sum); buckets.merge(bucket(c), 1, Integer::sum);
+            boolean transaction = "transaction".equals(row.get("expected_type"));
+            boolean fields = !transaction || (Objects.equals(str(x[0].amountMinor), row.get("expected_amount_minor")) &&
+                    Objects.equals(x[0].currency, row.get("expected_currency")) && Objects.equals(x[0].direction, row.get("expected_direction")) &&
+                    Objects.equals(x[0].merchantKey, row.get("expected_merchant_key")));
+            boolean legacyFields = !transaction || ("AUTO".equals(old.decision) && Objects.equals(str(old.amount), row.get("expected_amount_minor")) &&
+                    Objects.equals(old.currency, row.get("expected_currency")) && Objects.equals(old.direction, row.get("expected_direction")) &&
+                    Objects.equals(MerchantNormalizer.key(old.merchant), row.get("expected_merchant_key")));
+            boolean newRight = c.decision.equals(want) && fields, legacyRight = old.decision.equals(want) && (want.equals("IGNORE") || legacyFields);
+            if (legacyRight && newRight) both++; else if (newRight) newOnly++; else if (legacyRight) legacyOnly++; else neither++;
+            if (!c.decision.equals(x[0].decision))
+                changes.add("| " + row.get("id") + " | " + x[0].decision + " | " + c.decision + " | " + c.score + " | " + cell(String.valueOf(c.components)) + " |");
+            if (!newRight) misses.add("| " + row.get("id") + " | " + want + " | " + c.decision + " | " + c.score + " |");
+            table.add("| " + row.get("id") + " | " + want + " | " + old.decision + " | " + x[0].decision + " | " + c.decision + " | " +
+                    (c.components.isEmpty() ? "–" : String.valueOf(c.score)) + " | " + (legacyRight ? "✓" : "✗") + " | " + (newRight ? "✓" : "✗") + " |");
+        }
+        // Held-out blind set: decisions only (its own fields are gated by HeldOutBlind).
+        java.util.Map<String, Integer> hExpected = new java.util.TreeMap<>(), hP3 = new java.util.TreeMap<>(), hP4 = new java.util.TreeMap<>(), hBuckets = new java.util.TreeMap<>();
+        List<String> heldChanges = new ArrayList<>();
+        int heldRight = 0;
+        long blindReceived = java.time.LocalDateTime.of(2026, 10, 22, 12, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+        List<java.util.Map<String, String>> held = HeldOutBlind.read(Path.of("tools/fixtures/held-out-blind.tsv"));
+        for (java.util.Map<String, String> h : held) {
+            MessageNormalizer.Raw raw = "sms".equals(h.get("channel")) ? MessageNormalizer.Raw.sms("held-out", h.get("body")) :
+                    MessageNormalizer.Raw.notification("held-out", 0, h.get("android.title"), h.get("android.text"), null, h.get("android.textLines"), null, null);
+            TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
+            ConfidenceScorer.Confidence c = confidence(raw, blindReceived, x);
+            hExpected.merge(h.get("expected_decision"), 1, Integer::sum); hP3.merge(x[0].decision, 1, Integer::sum);
+            hP4.merge(c.decision, 1, Integer::sum); hBuckets.merge(bucket(c), 1, Integer::sum);
+            if (c.decision.equals(h.get("expected_decision"))) heldRight++;
+            if (!c.decision.equals(x[0].decision)) heldChanges.add("| " + h.get("id") + " | " + x[0].decision + " | " + c.decision + " | " + c.score + " |");
+        }
+        List<String> out = new ArrayList<>();
+        out.add("Score = event " + ParsingPolicy.SCORE_EVENT_EXPLICIT + " (card+merchant context only " + ParsingPolicy.SCORE_EVENT_CONTEXT + ") + amount " +
+                ParsingPolicy.SCORE_AMOUNT + " + currency " + ParsingPolicy.SCORE_CURRENCY + " + direction " + ParsingPolicy.SCORE_DIRECTION_EXPLICIT +
+                " (likely " + ParsingPolicy.SCORE_DIRECTION_LIKELY + ") + identity " + ParsingPolicy.SCORE_IDENTITY + " − promo " + ParsingPolicy.PENALTY_PROMO_SIGNALS +
+                ". AUTO ≥ " + ParsingPolicy.AUTO_THRESHOLD + ", REVIEW ≥ " + ParsingPolicy.REVIEW_THRESHOLD + "; hard failures are UNUNDERSTOOD and review caps are never AUTO.");
+        out.add("");
+        out.add("### Corpus (" + rows.size() + " rows): decision and principal fields vs expectation");
+        out.add("");
+        out.add("| Outcome | Rows |");
+        out.add("| --- | ---: |");
+        out.add("| Both correct | " + both + " |");
+        out.add("| **New correct, legacy wrong** | " + newOnly + " |");
+        out.add("| **Legacy correct, new wrong** | " + legacyOnly + " |");
+        out.add("| Both wrong | " + neither + " |");
+        out.add("");
+        out.add("### Decision distribution, corpus");
+        out.add("");
+        distribution(out, "Decision", new String[]{"Expected", "Legacy", "Phase 3 (rules)", "Phase 4 (scored)"}, List.of(expected, legacy, p3, p4));
+        out.add("");
+        out.add("Phase 4 score buckets (corpus): " + buckets + ".");
+        out.add("");
+        out.add("### Decision distribution, held-out blind set (" + held.size() + " messages)");
+        out.add("");
+        distribution(out, "Decision", new String[]{"Expected", "Phase 3 (rules)", "Phase 4 (scored)"}, List.of(hExpected, hP3, hP4));
+        out.add("");
+        out.add("Phase 4 held-out decisions equal to expected: " + heldRight + " / " + held.size() + ". Score buckets: " + hBuckets + ".");
+        out.add("");
+        out.add("### Decisions that changed from phase 3 to phase 4");
+        out.add("");
+        out.add("Corpus: " + changes.size() + ". Held-out: " + heldChanges.size() + ".");
+        if (!changes.isEmpty()) { out.add(""); out.add("| Row | Phase 3 | Phase 4 | Score | Components |"); out.add("| --- | --- | --- | ---: | --- |"); out.addAll(changes); }
+        if (!heldChanges.isEmpty()) { out.add(""); out.add("| Held-out | Phase 3 | Phase 4 | Score |"); out.add("| --- | --- | --- | ---: |"); out.addAll(heldChanges); }
+        out.add("");
+        out.add("### Rows where phase 4 differs from the expectation (" + misses.size() + ")");
+        if (!misses.isEmpty()) { out.add(""); out.add("| Row | Expected | Phase 4 | Score |"); out.add("| --- | --- | --- | ---: |"); out.addAll(misses); }
+        out.add("");
+        out.add("### Every corpus row");
+        out.add("");
+        out.add("| Row | Expected | Legacy | Phase 3 | Phase 4 | Score | Legacy | New |");
+        out.add("| --- | --- | --- | --- | --- | ---: | :-: | :-: |");
+        out.addAll(table);
+        return out;
+    }
+
     public static void main(String[] args) throws Exception {
         String phase = args.length == 0 ? "classification" : args[0];
         List<ParserCorpusFixture.Row> rows = ParserCorpusFixture.readV2(Path.of("tools/fixtures/parser-corpus-v2-draft.tsv"));
-        List<String> body = phase.equals("classification") ? classification(rows) : phase.equals("extraction") ? extraction(rows) : null;
+        List<String> body = phase.equals("classification") ? classification(rows) : phase.equals("extraction") ? extraction(rows) :
+                phase.equals("confidence") ? confidenceReport(rows) : null;
         Objects.requireNonNull(body, "Unknown phase " + phase);
         List<String> page = new ArrayList<>();
         page.add("# Shadow comparison: " + phase);
