@@ -1,0 +1,51 @@
+# HELD-OUT BLIND SET 3, owner-written 24 October 2026. Separate from the corpus and from sets 1-2. Never use these messages to develop or tune rules.
+# Owner verdict on the raw run (b75588f): decision 33/48, full row about 26/48. '*' = not specified by the owner (not scored); '|' separates accepted alternatives.
+id	channel	body	android.title	android.text	android.bigText	android.textLines	expected_type	expected_decision	expected_amount_minor	expected_currency	expected_direction	expected_party_key	expected_balance_minor	expected_fee_minor	note
+c3A01	sms	تم خصم 85.00 جنيه رسوم تجديد اشتراك الخدمة البنكية الشهرية من حسابك الجاري.	\N	\N	\N	\N	transaction	AUTO	8500	EGP	out	\N	\N	\N	bank_fee; MISSING_MERCHANT does not apply to fees
+c3A02	sms	تم دفع مبلغ 1,500.00 جنيه قيمة مصروفات مدرسية لمدارس النيل عبر بوابة الدفع الإلكتروني.	\N	\N	\N	\N	transaction	AUTO	150000	EGP	out	مدارس النيل	\N	\N	glued lam prefix
+c3A03	notification	\N	BMSC	تم خصم 120 ج.م في محطة وقود وطنية. الرصيد المتاح 3,400 ج.م.	\N	\N	transaction	AUTO	12000	EGP	out	محطه وقود وطنيه	340000	\N	fi marker without quotes
+c3A04	sms	تم خصم 420.00 جنيه لدى صيدليات العزبي ببطاقتك الائتمانية المنتهية بـ 7001.	\N	\N	\N	\N	transaction	AUTO	42000	EGP	out	صيدليات العزبي	\N	\N	card 7001
+c3A05	sms	عزيزي العميل، تم إصدار بطاقتك الائتمانية الجديدة وجاري شحنها إلى عنوانك المسجل خلال 3 أيام عمل.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+c3A06	sms	تم خصم 1,150.00 جنيه لدى مستشفى دار الفؤاد مقابل خدمات طبية باستخدام البطاقة المنتهية بـ 2210.	\N	\N	\N	\N	transaction	AUTO	115000	EGP	out	مستشفي دار الفواد	\N	\N	card 2210
+c3A07	sms	تم إضافة مكافأة استخدام بقيمة 100.00 جنيه إلى محفظتك الإلكترونية صالحة لمدة أسبوعين.	\N	\N	\N	\N	transaction	REVIEW	10000	EGP	in	\N	\N	\N	EXPIRING_CREDIT: valid for a period
+c3A08	sms	تم سداد قسط التأمين الاجتماعي بقيمة 600.00 جنيه من حسابك رقم 5566.	\N	\N	\N	\N	transaction	AUTO	60000	EGP	out	\N	\N	\N	
+c3A09	sms	تنبيه: رصيدك الحالي وصل إلى الحد الأدنى (250.00 جنيه) في حسابك المنتهي بـ 3344.	\N	\N	\N	\N	balance_inquiry	IGNORE	\N	\N	\N	\N	\N	\N	
+c3A10	sms	تم تحويل 10,000.00 جنيه من حسابك التوفير إلى حسابك الجاري بناءً على طلبك المسبق.	\N	\N	\N	\N	transaction	REVIEW	1000000	EGP	out	\N	\N	\N	
+c3A11	sms	Your credit card ending with #7001 was charged EUR 45.00 at BOOKING.COM on 23/10/2026.	\N	\N	\N	\N	transaction	AUTO	4500	EUR	out	booking	\N	\N	
+c3A12	sms	تم خصم 310.00 جنيه لدى سينما سيتي ستارس ببطاقة الخصم المباشر المنتهية بـ 4321.	\N	\N	\N	\N	transaction	AUTO	31000	EGP	out	سينما سيتي ستارس	\N	\N	card 4321
+c3A13	notification	\N	ValU	تم تأكيد طلب الشراء بقيمة 2,890.00 جنيه لدى راية شوب.	\N	\N	transaction	REVIEW	*	*	*	*	*	*	BNPL purchase confirmation: a commitment event shown for review; later installments link to it. Only the decision was specified
+c3A14	sms	تم تحويل مبلغ 350.00 جنيه إلى حسابك من أحمد حسن عبر تحويل محفظة محمول.	\N	\N	\N	\N	transaction	AUTO	35000	EGP	in	احمد حسن	\N	\N	to your account from X is incoming whatever the verb
+c3A15	sms	تم خصم 95.00 جنيه رسوم إدارية لإصدار كشف حساب ورقي من الفرع.	\N	\N	\N	\N	transaction	AUTO	9500	EGP	out	\N	\N	\N	bank_fee; the branch is not a merchant
+c3B01	sms	تم شحن رصيد موبايل للرقم 01076543218 بقيمة 40.00 جنيه. المبلغ المخصوم من محفظتك 57.15 جنيه شامل الضريبة.	\N	\N	\N	\N	transaction	AUTO	5715	EGP	out	01076543218	\N	\N	explicit deducted amount; nominal 40 kept separately
+c3B02	sms	تم دفع فاتورة كهرباء بقيمة 463.20 جنيه من محفظتك. رسوم الخدمة 4.80 جنيه. إجمالي الخصم 468.00 جنيه.	\N	\N	\N	\N	transaction	AUTO	46320	EGP	out	كهرباء	\N	480	
+c3B03	sms	تم إنشاء كود سحب نقدي بمبلغ 600.00 جنيه من محفظتك. الكود صالح لمدة 30 دقيقة. لم يتم السحب بعد.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	reason PENDING_EVENT, not UNSUCCESSFUL
+c3B04	sms	تم سحب 600.00 جنيه من محفظتك بنجاح باستخدام كود السحب. الرسوم 6.00 جنيه. الرصيد المتبقي 328.25 جنيه.	\N	\N	\N	\N	transaction	AUTO	60000	EGP	out	\N	32825	600	
+c3B05	sms	تم إلغاء طلب السحب النقدي بقيمة 600.00 جنيه لانتهاء صلاحية الكود دون استخدامه. لم يتم خصم المبلغ.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+c3B06	sms	Your card ending 3629 was charged EUR 7.99 at SPOTIFY on 24/10/2026. Available credit: EGP 17,940.00.	\N	\N	\N	\N	transaction	AUTO	799	EUR	out	spotify	\N	\N	17,940 is a credit limit, not a balance
+c3B07	sms	تمت عملية شراء بقيمة 120.00 ريال سعودي لدى NAHDI باستخدام بطاقتك المنتهية بـ 3629. القيمة المقيدة 1,572.00 جنيه مصري.	\N	\N	\N	\N	transaction	AUTO	157200	EGP	out	nahdi	\N	\N	booked amount 1572 EGP is the accounting amount; original 120 SAR; card 3629
+c3B08	sms	Foreign transaction fee of EGP 31.44 was debited for your SAR 120.00 purchase at NAHDI. Card ending 3629.	\N	\N	\N	\N	transaction	AUTO	3144	EGP	out	nahdi	\N	\N	
+c3B09	sms	تم خصم ١٬٢٣٤٫٥٠ ج.م من حسابك مقابل شراء لدى مكتبة الشروق. الرصيد المتاح ٥٬٦٧٨٫٩٠ ج.م.	\N	\N	\N	\N	transaction	AUTO	123450	EGP	out	مكتبه الشروق	567890	\N	
+c3B10	sms	تم دفع ٨٧,٥٠ جنيه لدى فرن الحارة باستخدام بطاقتك المنتهية بـ ٦٣٨٢. رقم المرجع ٢٤١٠٦٣٨٢٠٥.	\N	\N	\N	\N	transaction	AUTO	8750	EGP	out	فرن الحاره	\N	\N	card 6382
+c3B11	sms	Purchase approved: EGP 1 249,95 at LC WAIKIKI. Card: **6382. Balance: EGP 2 600,30.	\N	\N	\N	\N	transaction	AUTO	124995	EGP	out	lc waikiki	260030	\N	Purchase approved is a completed event
+c3B12	sms	تم خصم مبلغ 0.50 جنيه للتحقق من بطاقتك لدى PAYPAL. سيتم رد المبلغ بعد إتمام التحقق.	\N	\N	\N	\N	transaction	AUTO	50	EGP	out	paypal	\N	\N	
+c3B13	sms	تم رد مبلغ التحقق 0.50 جنيه من PAYPAL إلى بطاقتك المنتهية بـ 6382.	\N	\N	\N	\N	transaction	AUTO	50	EGP	in	paypal	\N	\N	
+c3B14	sms	أدخل الرمز 408196 لربط بطاقتك بمحفظة إلكترونية. قد يظهر مبلغ تحقق بقيمة 1.00 جنيه. لا تشارك الرمز مع أي شخص.	\N	\N	\N	\N	otp	IGNORE	\N	\N	\N	\N	\N	\N	
+c3B15	sms	طلب دفع من كريم سمير بقيمة 725.00 جنيه عبر InstaPay. افتح التطبيق لمراجعة الطلب وقبوله أو رفضه.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+c3B16	sms	تم رفض طلب الدفع الوارد من كريم سمير بقيمة 725.00 جنيه. لم يتم خصم أي مبلغ.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+c3B17	sms	تم دفع طلب كريم سمير بنجاح. المبلغ 725.00 جنيه، رسوم التحويل 0.73 جنيه، إجمالي الخصم 725.73 جنيه.	\N	\N	\N	\N	transaction	AUTO	72500	EGP	out	كريم سمير	\N	73	
+c3B18	sms	تم تسجيل تحويل مجدول بقيمة 1,850.00 جنيه إلى حسام فؤاد للتنفيذ بتاريخ 01/11/2026. لن يتم الخصم قبل موعد التنفيذ.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+c3B19	sms	تم تنفيذ تحويلك المجدول إلى حسام فؤاد بمبلغ 1,850.00 جنيه. رسوم العملية 1.85 جنيه. إجمالي المبلغ المخصوم 1,851.85 جنيه.	\N	\N	\N	\N	transaction	AUTO	185000	EGP	out	حسام فواد	\N	185	
+c3B20	sms	Your EGP 329.00 payment at WATCH IT failed. A separate EGP 1.00 card verification was completed successfully.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+c3B21	sms	تم خصم 210.00 جنيه لدى مطعم بازوكا ثم رد 35.00 جنيه كتسوية على نفس العملية. صافي الخصم 175.00 جنيه.	\N	\N	\N	\N	transaction	REVIEW|AUTO	21000|17500	EGP	out	مطعم بازوكا	\N	\N	owner accepts REVIEW 210 or AUTO 175 (explicit net debit)
+c3B22	notification	\N	Telda	تم دفع ١٢٥٫٧٥ ج.م. لدى Breadfast	تم دفع ١٢٥٫٧٥ ج.م. لدى Breadfast\nرصيدك الحالي ٨٤٠٫٢٥ ج.م.	\N	transaction	AUTO	12575	EGP	out	breadfast	84025	\N	
+c3B23	notification	\N	InstaPay	تم التحويل بنجاح	تم إرسال EGP 940.00 إلى Hany Mostafa\nرسوم EGP 0.94\nالإجمالي EGP 940.94\nالمرجع 2610245512	\N	transaction	AUTO	94000	EGP	out	hany mostafa	\N	94	
+c3B24	notification	\N	فشل العملية	تعذر دفع 156.00 جنيه لدى RABBIT	تعذر دفع 156.00 جنيه لدى RABBIT. لم يتم الخصم من حسابك.	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+c3C01	sms	تم إلغاء الحجز المؤقت بمبلغ 680.00 جنيه الخاص بعملية AMAZON.EG وإتاحة المبلغ للاستخدام مرة أخرى.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	reason HOLD_RELEASED
+c3C02	sms	تم رد جزء من قيمة مشترياتك لدى DECATHLON بمبلغ 425.00 جنيه إلى بطاقتك المنتهية بـ 6382. قيمة العملية الأصلية 1,700.00 جنيه.	\N	\N	\N	\N	transaction	AUTO	42500	EGP	in	decathlon	\N	\N	expense_offset; original transaction amount is a known role
+c3C03	sms	تم خصم 150.00 جنيه مصاريف إدارية ربع سنوية من حسابك المنتهي بـ 1840. الرصيد بعد الخصم 6,230.40 جنيه.	\N	\N	\N	\N	transaction	AUTO	15000	EGP	out	\N	623040	\N	bank_fee
+c3C04	sms	Interest of EGP 83.46 has been credited to your savings account ending 9057. Current balance: EGP 25,083.46.	\N	\N	\N	\N	transaction	AUTO	8346	EGP	in	\N	2508346	\N	interest; savings alone is not an internal transfer
+c3C05	sms	تم شراء شهادة ادخار بقيمة 25,000.00 جنيه من حسابك المنتهي بـ 1840. رقم الشهادة 70931582.	\N	\N	\N	\N	transaction	REVIEW	2500000	EGP	out	\N	\N	\N	POSSIBLE_INTERNAL_TRANSFER / investment, not MISSING_MERCHANT
+c3C06	sms	تم استرداد شهادة الادخار رقم 70931582 وإضافة أصل المبلغ 25,000.00 جنيه إلى حسابك. تم خصم مصاريف استرداد مبكر 375.00 جنيه.	\N	\N	\N	\N	transaction	UNUNDERSTOOD	\N	\N	\N	\N	\N	\N	
+c3C07	sms	تم تنفيذ تحويل داخلي بقيمة 900.00 جنيه إلى حساب نورهان محمود المنتهي بـ 7731. رسوم التحويل 0.00 جنيه.	\N	\N	\N	\N	transaction	AUTO	90000	EGP	out	نورهان محمود	\N	0	internal = within the bank to another person
+c3C08	sms	تم تحويل 6,200.00 جنيه من حساب التوفير الخاص بك المنتهي بـ 9057 إلى حسابك الجاري المنتهي بـ 1840. تمت العملية بنجاح.	\N	\N	\N	\N	transaction	REVIEW	620000	EGP	out	\N	\N	\N	
+c3C09	sms	تم خصم 1,480.00 جنيه سداد بطاقة ائتمان من حسابك المنتهي بـ 1840 إلى بطاقتك المنتهية بـ 3629.	\N	\N	\N	\N	transaction	REVIEW	148000	EGP	out	\N	\N	\N	

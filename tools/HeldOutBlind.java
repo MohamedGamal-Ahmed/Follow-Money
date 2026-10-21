@@ -72,8 +72,10 @@ public final class HeldOutBlind {
         return want;
     }
 
+    /** "*" = not specified by the owner (not scored); "a|b" = any of the accepted alternatives. */
     static boolean equal(String field, String got, String want) {
-        if (field.equals("party") && want != null) return got != null && List.of(want.split("\\|")).contains(got);
+        if ("*".equals(want)) return true;
+        if (want != null && want.contains("|")) return got != null && List.of(want.split("\\|")).contains(got);
         return Objects.equals(got, want);
     }
 
