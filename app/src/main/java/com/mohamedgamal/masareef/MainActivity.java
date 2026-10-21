@@ -805,6 +805,7 @@ public final class MainActivity extends Activity {
                     db.clearAllData();
                     getSharedPreferences(DailySummary.SETTINGS,MODE_PRIVATE).edit().clear().apply();
                     getSharedPreferences(DailyPointsStore.SETTINGS,MODE_PRIVATE).edit().clear().apply();
+                    getSharedPreferences(ShadowRescan.PREFS,MODE_PRIVATE).edit().clear().apply();
                     getPreferences(MODE_PRIVATE).edit().putBoolean("initial_sms_import_done", true).apply();
                     selectedTab = 0; render();
                     toast("تم حذف البيانات المحلية");

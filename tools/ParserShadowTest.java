@@ -94,6 +94,7 @@ public final class ParserShadowTest {
         for (String table : List.of("shadow_observations", "ununderstood_messages")) check(vault.contains("\"" + table + "\""), "Backup re-seals " + table);
         String schema = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
         check(schema.contains("ShadowStore.create(db);\n    }") && schema.contains("if(oldVersion<26)ShadowStore.create(db);"), "Shadow tables on install and upgrade");
+        check(schema.matches("(?s).*public void clearAllData\\(\\) \\{[^}]*\"commitment_cycles\"\\}\\) db\\.delete\\(table, null, null\\);\\s*ShadowStore\\.clearAll\\(db\\);.*"), "Deleting all data deletes shadow data too");
         String db = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
         check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner|TransactionExtractor|ConfidenceScorer|LocalLearning)\\b.*"), "Ledger storage never reads shadow output");
 

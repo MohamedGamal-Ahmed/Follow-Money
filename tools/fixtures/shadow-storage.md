@@ -49,3 +49,17 @@ Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade 
 - **Live capture is never delayed:** reading and parsing run on the re-scan thread. Each batch of `RESCAN_BATCH` = 200 rows is written on the single capture worker (`CaptureQueue`) in a short transaction, so a new SMS or notification is captured between batches.
 - **Report on screen** (`ShadowReport`): messages scanned, compared, agree and disagree, counts by `ShadowDiff` outcome, agreement by source and by type (movement kind, else message type), and one card per difference. Each card shows the source, date, legacy decision, reason, amount and direction, then the new decision, amount, direction, score, type and reasons.
 - **Export (optional):** **حفظ التقرير في ملف** opens the system file picker (`ACTION_CREATE_DOCUMENT`) and writes the same report as Markdown to the file the user picks. It contains no message text, merchant or counterparty; a check confirms the report rows have no such field. Nothing is uploaded or shared.
+
+## On-device verification and data deletion
+
+- **Delete all local data** (البيانات والخصوصية → حذف كل البيانات المحلية) now also removes `shadow_observations`, `ununderstood_messages`, `learning_rules`, the re-scan summary and the in-memory shadow copies. A check enforces it.
+- `tools/run-shadow-store.ps1` (disposable emulator, isolated `.shadowqa` app) runs `ShadowStoreTest`: **32 checks passed** on Medium_Phone_API_36.1, 21 October 2026. They cover:
+  - the v25 → v26 upgrade;
+  - a live SMS capture whose shadow row is linked to the ledger row, with the ledger revision unchanged by the shadow write;
+  - values and text sealed by the Keystore and opened again;
+  - an ununderstood message kept once with a count;
+  - a GROUP_SUMMARY observed and never captured, then replayed (REPLAY/DELIVERY_REPLAY);
+  - learning rules stored as hashes;
+  - a backup snapshot opening every shadow body and a restore re-sealing it, with the live database untouched;
+  - a re-scan of real inbox SMS (sent through the emulator console) comparing the payment on both sides, with no ledger change, and a second re-scan replacing the first;
+  - delete-all emptying everything.

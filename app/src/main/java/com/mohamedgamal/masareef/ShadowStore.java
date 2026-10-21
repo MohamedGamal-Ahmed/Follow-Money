@@ -145,6 +145,13 @@ final class ShadowStore {
                 "(SELECT message_hash FROM ununderstood_messages ORDER BY last_seen DESC LIMIT ?)", new Object[]{ParsingPolicy.UNUNDERSTOOD_MAX_ROWS});
     }
 
+    /** "Delete all local data": every shadow row, ununderstood message and learned rule, and the in-memory copies. */
+    static void clearAll(SQLiteDatabase sql) {
+        for (String table : new String[]{"shadow_observations", "ununderstood_messages", "learning_rules"}) sql.delete(table, null, null);
+        ParserShadow.learning().restoreShapes(new ArrayList<>());
+        ParserShadow.clear();
+    }
+
     /** Removes every stored row of one origin (the previous re-scan before a new one). */
     static void clearOrigin(SQLiteDatabase sql, String origin) {
         sql.delete("shadow_observations", "origin=?", new String[]{origin});
