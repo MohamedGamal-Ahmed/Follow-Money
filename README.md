@@ -102,6 +102,10 @@ python tools/check-repo.py
 
 The script runs the standalone JVM suites, assembles the app and instrumentation APK, and runs Android lint. `-Android` also installs both APKs and runs five instrumentation groups (base, phase, features, focused audit regressions and card/cancellation). Use an emulator with synthetic data: these checks exercise writes and repairs. They are deliberately blocked on physical device IDs. Additional installed-update, lifetime and visual checks use separate QA packages so existing emulator data is preserved.
 
+The replacement bank-message parser starts with a [240-case synthetic corpus](tools/fixtures/README.md).
+Its fixture integrity gate also runs on Gradle `check` and `preBuild`; this validates the authored test data,
+not semantic recognition by the replacement pipeline, which is not implemented in this first delivery.
+
 GitHub Actions runs the JVM/build/lint checks, SQLite emulator groups and isolated resource-lifetime regression for pushes and pull requests to `main`. No CI pass or production readiness is implied by the presence of the workflow.
 
 ## Project map
