@@ -1,0 +1,23 @@
+evidence_id	level	url	locator	limitations
+legacy-v1	generated_fixture_v1	\N	parser-corpus.tsv at 38f0395	Synthetic historical coverage; not observed bank wording. The 72 source_independence rows are excluded from v2.
+u01	user_redacted	\N	User sample B.1	Amounts and identifiers are examples. Source attributed by user context to Bank Misr. Missing merchant is intentional.
+u02	user_redacted	\N	User sample B.2	Completed outgoing instant transfer; no merchant required.
+u03	user_redacted	\N	User sample B.3	Potential funding of own credit/prepaid card. Ownership is not established by wording alone.
+u04	user_redacted	\N	User sample B.4	Salary teaser with a loan advertisement and no monetary amount. No transaction.
+u05	user_redacted	\N	User sample B.5	Bank Misr promotion; date and link are not payment amounts.
+u06	user_redacted	\N	User sample B.6 and its explicitly requested Transfer-to variation	Transfer-to ellipsis is expanded using the salary layout and labelled as a derived variant, not another observed message.
+u07	user_redacted	\N	User sample B.7	Account and counterparty differ; hex references are not amounts or account numbers.
+u08	user_redacted	\N	User sample B.8	Sender was not specified. Expiring credited cashback requires review; do not turn it into normal income automatically.
+u09	user_redacted	\N	User second batch B.9	Signed Phone Banking Transfer; standalone AUTO versus contextual internal-transfer REVIEW are separate expectations.
+u10	user_redacted	\N	User second batch B.10	Direction follows trailing minus even though grammar says from. Same-currency pairs are declared generated context fixtures.
+u12	user_redacted	\N	User second batch B.12	TT Payment with trailing plus is inward remittance, not outgoing from the word to.
+u13	user_redacted	\N	User second batch B.13	Source follows the user's QNB grouping; telephone footer alone does not establish bank identity. Year is inferred from receipt context.
+u14	user_redacted	\N	User second batch B.14	Truncated form is explicitly requested. Complete amount/direction remain AUTO while AM/PM is unknown.
+u15-maintenance	user_redacted	\N	User second batch B.15 first message	Sender not specified; no bank identity inferred from maintenance wording.
+u15-card_policy	user_redacted	\N	User second batch B.15 second message	Sender not specified. Card digits and telephone number must not become monetary values.
+u15-card_delivery	user_redacted	\N	User second batch B.15 third message	Sender not specified; do not infer it from 19700. Completed card issuance is nonfinancial.
+u15-secure_key	user_redacted	\N	User second batch B.15 fourth message	Security-key request is verification, always ignored for transaction capture.
+public-cib-issue145	public_user_report	https://github.com/ritesh-kanwar/Cashiro/issues/145	SMS Examples, Example 1; opened 7 July 2026	User-published CIB wording, not bank-issued specification. Card digits, merchant, date and balance replaced with examples. Preserve wording; generated variations are not new observations.
+public-cib-test	public_developer_fixture	https://github.com/sarim2000/pennywiseai-tracker/blob/7a3ac7b4742dc320de9cb6e73a8ea70b1c9b695e/parser-core/src/test/kotlin/TestCIBEgyptParser.kt	Credit Card Charge - User Example; Credit Card Refund - User Example	Pinned public test file labels its bases as user examples. This does not independently verify a current bank format. Names/card/date replaced. No third-party parser implementation copied.
+public-nbe-test	public_developer_fixture	https://github.com/sarim2000/pennywiseai-tracker/blob/7a3ac7b4742dc320de9cb6e73a8ea70b1c9b695e/parser-core/src/test/kotlin/com/pennywiseai/parser/core/bank/NationalBankOfEgyptParserTest.kt	Debit card ATM withdrawal; Credit card spend; Instant transfer received	Pinned public developer examples, not an official SMS specification or a new phone sample. Names redacted where present; KASHIERFast retained because a glued gateway-looking word is not necessarily a processor prefix. Partial date 09-10 remains ambiguous. No third-party parser implementation copied.
+public-cib-ipn-readme	public_developer_example	https://github.com/Appenza-Main-Org/sms-to-whatsapp#cib-egypt-ipn-example	CIB Egypt IPN Example	Published example, not a verified bank specification. Account/date/reference replaced with examples. Do not assume the same wording is exclusive to CIB.

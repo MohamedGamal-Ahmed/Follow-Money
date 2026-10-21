@@ -1,6 +1,10 @@
-# Bank-message parser corpus: first delivery
+# Bank-message parser corpus v1: historical, not semantically approved
 
-`parser-corpus.tsv` is the authoritative, versioned set of **240 synthetic input/expected-result pairs**.
+**The owner rejected v1 as a semantic parser contract.** Its 240 rows remain here as the immutable
+comparison baseline for the protected groups. Do not implement the replacement pipeline against this
+file as though it had approval. See [v2 draft and remaining acceptance gates](corpus-v2-draft.md).
+
+`parser-corpus.tsv` is the first, historical set of **240 synthetic input/expected-result pairs**.
 It was authored before implementing the replacement pipeline. Expectations are not produced by the legacy
 parser or by a new parser. No personal inbox exports, real account identifiers or real notification dumps
 are included. The Telda title-only layout reproduces the reported input shape using the synthetic payment

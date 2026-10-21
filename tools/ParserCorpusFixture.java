@@ -19,6 +19,12 @@ final class ParserCorpusFixture {
             "expected_card_last4 expected_datetime expected_time_precision expected_decision required_reasons " +
             "expected_capture expected_capture_reason duplicate_of note").split(" ");
 
+    static final String[] V2_EXTRA = ("expected_fee_minor expected_fee_currency expected_account_last4 expected_counterparty_token " +
+            "expected_movement_kind expected_direction_certainty expected_equivalent_minor expected_equivalent_currency " +
+            "expected_credit_limit_minor expected_credit_limit_currency expected_expiry_date expected_time_ambiguity " +
+            "expected_year_origin context_group expected_standalone_decision expected_context_decision " +
+            "source_evidence_id base_case_id variant feature_tags expected_accounting_effect").split(" ");
+
     static final class Row {
         private final Map<String, String> values;
         final int line;
@@ -47,16 +53,26 @@ final class ParserCorpusFixture {
     }
 
     static List<Row> read(Path path) throws IOException {
+        return readColumns(path, COLUMNS);
+    }
+
+    static List<Row> readV2(Path path) throws IOException {
+        String[] columns = java.util.Arrays.copyOf(COLUMNS, COLUMNS.length + V2_EXTRA.length);
+        System.arraycopy(V2_EXTRA, 0, columns, COLUMNS.length, V2_EXTRA.length);
+        return readColumns(path, columns);
+    }
+
+    private static List<Row> readColumns(Path path, String[] columns) throws IOException {
         List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
-        if (lines.isEmpty() || !lines.get(0).equals(String.join("\t", COLUMNS)))
+        if (lines.isEmpty() || !lines.get(0).equals(String.join("\t", columns)))
             throw new IllegalArgumentException("Unexpected parser corpus header");
         List<Row> rows = new ArrayList<>();
         for (int i = 1; i < lines.size(); i++) {
             String[] cells = lines.get(i).split("\t", -1);
-            if (cells.length != COLUMNS.length)
+            if (cells.length != columns.length)
                 throw new IllegalArgumentException("Column count at corpus line " + (i + 1));
             Map<String, String> values = new LinkedHashMap<>();
-            for (int c = 0; c < cells.length; c++) values.put(COLUMNS[c], decode(cells[c]));
+            for (int c = 0; c < cells.length; c++) values.put(columns[c], decode(cells[c]));
             rows.add(new Row(values, i + 1));
         }
         return Collections.unmodifiableList(rows);
