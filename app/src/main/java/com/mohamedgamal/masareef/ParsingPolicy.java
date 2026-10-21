@@ -177,6 +177,17 @@ final class ParsingPolicy {
     static final String[] REVIEW_CAPS = {"POSSIBLE_INTERNAL_TRANSFER", "EXPIRING_CREDIT", "MISSING_MERCHANT", "INFERRED_OUTGOING_DIRECTION",
             "UNASSIGNED_SECOND_AMOUNT"};
 
+    // Local learning (stage 5): on-device only, from the user's own actions; never uploaded.
+    static final String LEARNING_VERSION = "learning-1";
+    /** Dismissals of the same source + message shape before that shape is ignored. */
+    static final int LEARN_DISMISS_MIN = 2;
+    /** Confirmations of the same source + shape + direction before a learnable REVIEW cap is lifted. */
+    static final int LEARN_CONFIRM_MIN = 3;
+    /** Shapes remembered; the least recently updated is forgotten first. */
+    static final int LEARN_MAX_SHAPES = 500;
+    /** Review caps the user's own confirmation can resolve (ownership of the other account, the direction). */
+    static final String[] LEARNABLE_CAPS = {"POSSIBLE_INTERNAL_TRANSFER", "INFERRED_OUTGOING_DIRECTION"};
+
     // Later stages: defined by the approved corpus, not yet used by any implemented stage.
     /** Identity-less identical messages within this window become possible-duplicate review items. */
     static final long DUPLICATE_CANDIDATE_WINDOW_MS = 60_000L;
