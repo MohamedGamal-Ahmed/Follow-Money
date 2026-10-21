@@ -63,6 +63,7 @@ public final class HeldOutBlind {
         if (x.accountLast4 != null) extras.add("account " + x.accountLast4);
         if (x.creditLimitMinor != null) extras.add("limit " + x.creditLimitMinor + " " + x.creditLimitCurrency);
         if (x.accountingEffect != null) extras.add(x.accountingEffect);
+        if (x.movementKind != null) extras.add("kind " + x.movementKind);
         got.put("extras", String.join(", ", extras));
         return got;
     }

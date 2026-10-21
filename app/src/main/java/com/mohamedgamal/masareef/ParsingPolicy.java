@@ -6,7 +6,7 @@ package com.mohamedgamal.masareef;
  * The pipeline runs in shadow mode only: the legacy ExpenseParser path remains the sole ledger authority.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-25.2";
+    static final String POLICY_VERSION = "2026-10-26.1";
     static final String NORMALIZER_VERSION = "normalization-1";
     static final String CLASSIFIER_VERSION = "classification-1";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
@@ -146,7 +146,7 @@ final class ParsingPolicy {
     static final String CLAUSE_EQUIVALENCE = "\\brate\\b|\\bexchange\\b|\\bequivalent\\b|المعادل|المقيد|سعر (?:ال)?صرف";
 
     // Extraction vocabulary, matched against length-preserving folded text (lower case; أإآٱ->ا, ؤ->و, ئ->ي, ى->ي, ة->ه).
-    static final String EXTRACTOR_VERSION = "extraction-1";
+    static final String EXTRACTOR_VERSION = "extraction-2";
     /** How far before an amount a role word (balance, fee, limit, equivalent) may sit inside the same clause. */
     static final int ROLE_WINDOW_CHARS = 60;
     static final String ROLE_BALANCE = "balance|available|رصيد|المتاح";
@@ -208,6 +208,23 @@ final class ParsingPolicy {
     static final String KIND_INTEREST = "\\binterest\\b|(?<!\\p{L})(?:فوائد|فائده|عائد)(?!\\p{L})";
     static final String KIND_INSTALLMENT = "قسط|اقساط|\\binstall?ments?\\b";
     static final String KIND_INVESTMENT = "شهاده (?:ال)?ادخار|شهادات|\\bcertificates? of deposit\\b|(?<!\\p{L})وديعه";
+    /**
+     * Movement kind (corpus vocabulary), decided after direction, most specific first. A kind with an _in/_out pair
+     * takes the extracted direction; no matching wording leaves the kind empty.
+     */
+    static final String[] MOVEMENT_KINDS = {"refund", "reversal", "expiring_cashback", "wallet_topup", "possible_internal_transfer",
+            "wallet_payment", "wallet_transfer_in", "wallet_transfer_out", "bill_payment", "installment_payment", "cash_withdrawal", "salary",
+            "inward_remittance", "instant_transfer_in", "instant_transfer_out", "transfer_in", "transfer_out", "card_purchase"};
+    static final String MOVEMENT_REFUND = "\\brefund(?:ed)?\\b|استرداد|مسترد|(?<!\\p{L})تم رد";
+    static final String MOVEMENT_CASHBACK = "كاش ?باك|\\bcash ?back\\b";
+    static final String MOVEMENT_WALLET = "محفظ|\\bwallet\\b|فودافون كاش|\\bvodafone cash\\b|اورانج كاش|اتصالات كاش|\\b(?:orange|etisalat|we) cash\\b";
+    static final String MOVEMENT_WALLET_TOPUP = "(?<!\\p{L})شحن\\s+(?:ال)?محفظ|\\btop.?up\\b";
+    static final String MOVEMENT_BILL = "فاتوره|\\bbill\\b|شحن رصيد|\\brecharge\\b";
+    static final String MOVEMENT_CASH = "\\batm\\d*\\b|صراف|سحب نقدي|\\bcash withdrawal\\b|(?<!\\p{L})ماكينه";
+    static final String MOVEMENT_SALARY = "\\bsalary\\b|\\bpayroll\\b|(?<!\\p{L})(?:راتب|مرتب)";
+    static final String MOVEMENT_REMITTANCE = "\\btt payment\\b|\\bremittance\\b|\\bswift\\b|حواله (?:خارجيه|دوليه|وارده من الخارج)";
+    static final String MOVEMENT_INSTANT = "\\bipn\\b|instapay|انستا ?باي|(?:ال)?تحويل (?:ال)?لحظي";
+    static final String MOVEMENT_TRANSFER = "تحويل|حواله|\\btransfer(?:red)?\\b";
     /** Expiring credit wording, with or without a date ("صالحة لمدة أسبوعين"). */
     static final String EXPIRY_PHRASE = "صالح(?:ه)? (?:لمده|حتي|لل?استخدام)|\\bvalid (?:for|until|till)\\b|\\bexpires?\\b|(?<!\\p{L})تنتهي";
     /** Purchase wording where a merchant is expected; transfers, cash, installments, bills and refunds are excluded. */

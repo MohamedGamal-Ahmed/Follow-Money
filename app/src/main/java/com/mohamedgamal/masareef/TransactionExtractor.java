@@ -21,7 +21,9 @@ final class TransactionExtractor {
     static final class Extraction {
         String decision, currency, direction, directionCertainty, merchantSurface, merchantKey;
         Long amountMinor, balanceMinor, feeMinor, creditLimitMinor, originalMinor, nominalMinor;
-        /** Self-describing kinds (bank_fee, interest, installment, investment, commitment); null otherwise. */
+        /** Self-describing kinds (bank_fee, interest, installment, investment, commitment, cheque, card_purchase); null otherwise. */
+        String selfKind;
+        /** Movement kind in the corpus vocabulary (ParsingPolicy.MOVEMENT_KINDS); null when no wording names one. */
         String movementKind;
         /** Position of the principal in the folded text, or -1. */
         int principalAt = -1;
@@ -96,6 +98,16 @@ final class TransactionExtractor {
     private static final Pattern KIND_INTEREST = Pattern.compile(ParsingPolicy.KIND_INTEREST, FLAGS);
     private static final Pattern KIND_INSTALLMENT = Pattern.compile(ParsingPolicy.KIND_INSTALLMENT, FLAGS);
     private static final Pattern KIND_INVESTMENT = Pattern.compile(ParsingPolicy.KIND_INVESTMENT, FLAGS);
+    private static final Pattern MOVEMENT_REFUND = Pattern.compile(ParsingPolicy.MOVEMENT_REFUND, FLAGS);
+    private static final Pattern MOVEMENT_CASHBACK = Pattern.compile(ParsingPolicy.MOVEMENT_CASHBACK, FLAGS);
+    private static final Pattern MOVEMENT_WALLET = Pattern.compile(ParsingPolicy.MOVEMENT_WALLET, FLAGS);
+    private static final Pattern MOVEMENT_WALLET_TOPUP = Pattern.compile(ParsingPolicy.MOVEMENT_WALLET_TOPUP, FLAGS);
+    private static final Pattern MOVEMENT_BILL = Pattern.compile(ParsingPolicy.MOVEMENT_BILL, FLAGS);
+    private static final Pattern MOVEMENT_CASH = Pattern.compile(ParsingPolicy.MOVEMENT_CASH, FLAGS);
+    private static final Pattern MOVEMENT_SALARY = Pattern.compile(ParsingPolicy.MOVEMENT_SALARY, FLAGS);
+    private static final Pattern MOVEMENT_REMITTANCE = Pattern.compile(ParsingPolicy.MOVEMENT_REMITTANCE, FLAGS);
+    private static final Pattern MOVEMENT_INSTANT = Pattern.compile(ParsingPolicy.MOVEMENT_INSTANT, FLAGS);
+    private static final Pattern MOVEMENT_TRANSFER = Pattern.compile(ParsingPolicy.MOVEMENT_TRANSFER, FLAGS);
     private static final Pattern EXPIRY_PHRASE = Pattern.compile(ParsingPolicy.EXPIRY_PHRASE, FLAGS);
     private static final Pattern GLUED_LAM = Pattern.compile(ParsingPolicy.MERCHANT_GLUED_LAM, FLAGS);
     private static final Pattern OWN_ACCOUNT = Pattern.compile(ParsingPolicy.OWN_ACCOUNT_MARKER, FLAGS);
@@ -167,7 +179,7 @@ final class TransactionExtractor {
             String clause = t.substring(clauseStart(t, m.start), clauseEnd(t, m.end));
             if (!RETAINED.matcher(clause).find() || m.currency == null || m.minor <= 0) continue;
             x.amountMinor = m.minor; x.currency = m.currency; x.principalAt = m.start;
-            x.direction = "out"; x.directionCertainty = "explicit"; x.movementKind = "bank_fee";
+            x.direction = "out"; x.directionCertainty = "explicit"; x.selfKind = "bank_fee";
             x.reasons.add("AMOUNT_UNAMBIGUOUS"); x.reasons.add("COMPLETED_EVENT"); x.reasons.add("DIRECTION_OUT"); x.reasons.add("RETAINED_FEE");
             identities(f, x);
             x.decision = "REVIEW";
@@ -488,8 +500,8 @@ final class TransactionExtractor {
         x.reasons.add("COMPLETED_EVENT");
         x.reasons.add("DIRECTION_" + x.direction.toUpperCase(Locale.ROOT));
         boolean review = "likely".equals(x.directionCertainty);
-        x.movementKind = kind(t, x, classified);
-        if (x.movementKind != null && x.movementKind.equals("commitment")) { x.reasons.add("COMMITMENT_EVENT"); review = true; }
+        x.selfKind = kind(t, x, classified);
+        if ("commitment".equals(x.selfKind)) { x.reasons.add("COMMITMENT_EVENT"); review = true; }
         // Internal: a direct own-account movement, a self-account marker with a transfer verb, or both own-account roles.
         boolean bothRoles = ROLE_IN.matcher(t).find() && ROLE_OUT.matcher(t).find();
         if (INTERNAL.matcher(t).find() || (OWN_ACCOUNT.matcher(t).find() && TRANSFER_VERB.matcher(t).find()) || bothRoles) {
@@ -501,12 +513,31 @@ final class TransactionExtractor {
             review = true;
         }
         // A merchant is expected only for a card purchase; fees, interest, installments and investments describe themselves.
-        if (x.merchantKey == null && x.movementKind == null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find() &&
+        if (x.merchantKey == null && x.selfKind == null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find() &&
                 !NOT_A_PURCHASE.matcher(t).find()) { x.reasons.add("MISSING_MERCHANT"); review = true; }
         if (classified.reasons.contains("ADJUSTED_EVENT")) x.reasons.add("ADJUSTED_EVENT");
         // Every review cap the policy names applies here too, so the provisional and scored decisions cannot disagree.
         for (String cap : ParsingPolicy.REVIEW_CAPS) review |= x.reasons.contains(cap);
         x.decision = review ? "REVIEW" : "AUTO";
+        x.movementKind = movement(t, x);
+    }
+
+    /** The corpus movement kind, most specific first (ParsingPolicy.MOVEMENT_KINDS gives the order). */
+    private static String movement(String t, Extraction x) {
+        boolean in = "in".equals(x.direction), out = "out".equals(x.direction);
+        if (in && "expense_offset".equals(x.accountingEffect)) return MOVEMENT_REFUND.matcher(t).find() ? "refund" : "reversal";
+        if (in && x.reasons.contains("EXPIRING_CREDIT") && MOVEMENT_CASHBACK.matcher(t).find()) return "expiring_cashback";
+        if (in && MOVEMENT_WALLET_TOPUP.matcher(t).find()) return "wallet_topup";
+        if (x.reasons.contains("POSSIBLE_INTERNAL_TRANSFER")) return "possible_internal_transfer";
+        if (MOVEMENT_WALLET.matcher(t).find()) return out && x.merchantKey != null ? "wallet_payment" : in ? "wallet_transfer_in" : "wallet_transfer_out";
+        if (out && MOVEMENT_BILL.matcher(t).find()) return "bill_payment";
+        if (out && "installment".equals(x.selfKind)) return "installment_payment";
+        if (out && MOVEMENT_CASH.matcher(t).find()) return "cash_withdrawal";
+        if (in && MOVEMENT_SALARY.matcher(t).find()) return "salary";
+        if (in && MOVEMENT_REMITTANCE.matcher(t).find()) return "inward_remittance";
+        if (MOVEMENT_INSTANT.matcher(t).find()) return in ? "instant_transfer_in" : "instant_transfer_out";
+        if (MOVEMENT_TRANSFER.matcher(t).find()) return in ? "transfer_in" : "transfer_out";
+        return "card_purchase".equals(x.selfKind) ? "card_purchase" : null;
     }
 
     /** Self-describing movement kinds, most specific first. */

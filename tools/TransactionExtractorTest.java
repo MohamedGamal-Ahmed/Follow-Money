@@ -28,7 +28,7 @@ public final class TransactionExtractorTest {
 
     public static void main(String[] args) throws Exception {
         List<ParserCorpusFixture.Row> rows = ParserCorpusFixture.readV2(Path.of("tools/fixtures/parser-corpus-v2-draft.tsv"));
-        int compared = 0, listed = 0;
+        int compared = 0, listed = 0, kinds = 0;
         for (ParserCorpusFixture.Row row : rows) {
             String id = row.get("id");
             TransactionExtractor.Extraction x = ShadowComparison.extract(row);
@@ -40,6 +40,11 @@ public final class TransactionExtractorTest {
             // Accounting effect: only expense_offset is extracted so far; pending/pending_internal rows are not compared yet.
             if (!"legacy-v1".equals(row.get("source_evidence_id")) && (row.get("expected_accounting_effect") == null || "expense_offset".equals(row.get("expected_accounting_effect"))))
                 got.put("expected_accounting_effect", x.accountingEffect);
+            // Movement kind: every v2 row names one; legacy-v1 rows only where the corpus does.
+            if (!"legacy-v1".equals(row.get("source_evidence_id")) || row.get("expected_movement_kind") != null) {
+                got.put("expected_movement_kind", x.movementKind);
+                kinds++;
+            }
             for (var entry : got.entrySet()) {
                 boolean equal = Objects.equals(entry.getValue(), row.get(entry.getKey()));
                 if (entry.getKey().equals(KNOWN_DISAGREEMENTS.get(id))) { check(!equal, "Listed disagreement now agrees; remove it: " + id); listed++; continue; }
@@ -79,7 +84,7 @@ public final class TransactionExtractorTest {
         same(run("تم دفع 50 جنيه لدى \"مَكْتَبَة النور\"", received).merchantSurface, "مَكْتَبَة النور", "Surface keeps harakat");
 
         System.out.println("Transaction extractor checks passed: " + checks + " (" + compared + " corpus field comparisons, " + listed +
-                " listed disagreements, " + heldOut.length + " held-out messages).");
+                " listed disagreements, " + kinds + " movement kinds, " + heldOut.length + " held-out messages).");
     }
 
     static String value(TransactionExtractor.Extraction x, String field) {
