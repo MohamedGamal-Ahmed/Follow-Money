@@ -14,13 +14,15 @@ import java.util.Set;
  */
 final class ParserShadow {
     /** Stages not implemented yet; every observation says so instead of inventing a decision. */
-    static final String NOT_IMPLEMENTED = "CONFIDENCE|LOCAL_LEARNING";
+    static final String NOT_IMPLEMENTED = "LOCAL_LEARNING";
 
     static final class Observation {
         final long observedAt;
         final String channel, legacyReason, status, merchantProposal, policy, type, stageDecision, decision;
         final Set<String> reasons;
         final int fragments, normalizedChars;
+        /** Stage-4 confidence 0..100, or -1 when the message was not scored (IGNORE / multiple events / failure). */
+        int score = -1;
         /** Notification extras used, then the names (never values) of the transaction fields extraction found. */
         final List<String> fields, extracted;
 
@@ -33,12 +35,12 @@ final class ParserShadow {
             this.type = type; this.stageDecision = stageDecision; this.decision = decision;
             this.extracted = Collections.unmodifiableList(extracted);
             this.policy = ParsingPolicy.POLICY_VERSION + "/" + ParsingPolicy.NORMALIZER_VERSION + "/" + ParsingPolicy.CLASSIFIER_VERSION +
-                    "/" + ParsingPolicy.EXTRACTOR_VERSION + "/" + ParsingPolicy.CORPUS_CONTRACT;
+                    "/" + ParsingPolicy.EXTRACTOR_VERSION + "/" + ParsingPolicy.CONFIDENCE_VERSION + "/" + ParsingPolicy.CORPUS_CONTRACT;
         }
 
         @Override public String toString() {
             return channel + " " + status + (type == null ? "" : " type=" + type + "/" + stageDecision) +
-                    (decision == null ? "" : " decision=" + decision + " found=" + extracted) +
+                    (decision == null ? "" : " decision=" + decision + (score < 0 ? "" : " score=" + score) + " found=" + extracted) +
                     " legacy=" + legacyReason + " reasons=" + reasons + " fields=" + fields +
                     " chars=" + normalizedChars + (merchantProposal == null ? "" : " merchant=" + merchantProposal) +
                     " notImplemented=" + NOT_IMPLEMENTED + " policy=" + policy;
@@ -64,7 +66,8 @@ final class ParserShadow {
             Set<String> reasons = new LinkedHashSet<>(normalized.reasons);
             MessageClassifier.Result classified = MessageClassifier.classify(normalized);
             TransactionExtractor.Extraction extraction = TransactionExtractor.extract(normalized, classified, receivedAt);
-            reasons.addAll(extraction.reasons);
+            ConfidenceScorer.Confidence confidence = ConfidenceScorer.score(classified, extraction);
+            reasons.addAll(confidence.reasons);
             List<String> extracted = new ArrayList<>();
             String[] names = {"AMOUNT", "CURRENCY", "DIRECTION", "MERCHANT", "BALANCE", "FEE", "CREDIT_LIMIT", "ORIGINAL_AMOUNT", "CARD", "ACCOUNT", "COUNTERPARTY", "DATETIME"};
             Object[] values = {extraction.amountMinor, extraction.currency, extraction.direction, extraction.merchantKey, extraction.balanceMinor,
@@ -80,7 +83,8 @@ final class ParserShadow {
             }
             observation = new Observation(now, raw.channel.name(), legacyReason, normalized.empty() ? "EMPTY" : "EXTRACTED",
                     reasons, normalized.fragments.size(), normalized.text.length(), new ArrayList<>(normalized.fields), proposal,
-                    classified.type.name(), classified.decision.name(), extraction.decision, extracted);
+                    classified.type.name(), classified.decision.name(), confidence.decision, extracted);
+            if (!confidence.components.isEmpty()) observation.score = confidence.score;
         } catch (RuntimeException | StackOverflowError failure) {
             // A shadow failure is itself a diagnostic; it never propagates to legacy capture.
             observation = new Observation(now, raw.channel.name(), legacyReason, "STAGE_FAILED:" + failure.getClass().getSimpleName(),
