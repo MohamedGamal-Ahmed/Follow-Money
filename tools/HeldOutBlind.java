@@ -75,7 +75,10 @@ public final class HeldOutBlind {
     /** "*" = not specified by the owner (not scored); "a|b" = any of the accepted alternatives. */
     static boolean equal(String field, String got, String want) {
         if ("*".equals(want)) return true;
-        if (want != null && want.contains("|")) return got != null && List.of(want.split("\\|")).contains(got);
+        if (want != null && want.contains("|")) {
+            List<String> accepted = List.of(want.split("\\|"));
+            return got == null ? accepted.contains("\\N") : accepted.contains(got);
+        }
         return Objects.equals(got, want);
     }
 
