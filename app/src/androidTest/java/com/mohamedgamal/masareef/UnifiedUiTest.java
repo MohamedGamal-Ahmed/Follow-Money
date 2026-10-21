@@ -230,12 +230,42 @@ final class UnifiedUiTest {
             screen("09-backup-page");
             main(()->activity.onBackPressed());click("تجاهل التعديلات");
             main(()->ok(!((UiPages)get("formPages")).isOpen(),"Typed password asks before leaving, then discards"));
+            main(()->{
+                invoke("splitBillDialog",new Class<?>[0]);
+                ((EditText)root().findViewWithTag("split_bill_total")).setText("300");((EditText)root().findViewWithTag("split_bill_merchant")).setText("QA dinner");
+                ((EditText)root().findViewWithTag("split_bill_people")).setText("1");findButton(root(),"سجل حصتي").performClick();
+                ok(((UiPages)get("formPages")).isOpen()&&ledger.transactionCount()==0,"Split bill for one person is refused on the page");
+                ((EditText)root().findViewWithTag("split_bill_people")).setText("3");findButton(root(),"سجل حصتي").performClick();
+                ok(!((UiPages)get("formPages")).isOpen()&&ledger.transactionCount()==1,"Valid split records one share");
+                ok(ledger.latestInserted().amountMinor==10000,"Share is the total divided by people");
+                ExpenseDb.Transaction share=ledger.latestInserted();
+                invoke("commitmentFromTransaction",new Class<?>[]{ExpenseDb.Transaction.class},share);
+                ok(((UiPages)get("formPages")).isOpen(),"Commitment from a transaction is a page");
+                ((EditText)root().findViewWithTag("commitment_from_transaction_name")).setText("");findButton(root(),"حفظ الالتزام").performClick();
+                ok(((UiPages)get("formPages")).isOpen()&&root().findViewWithTag("commitment_from_transaction_error").getVisibility()==View.VISIBLE,"Empty commitment name stays on the page");
+                ok(ledger.transactionCount()==1,"Creating a commitment never adds a transaction");
+                activity.onBackPressed();
+            });
+            click("تجاهل التعديلات");
+            main(()->{
+                set("selectedTab",0);invoke("render",new Class<?>[0]);
+                invoke("dailyBudgetDialog",new Class<?>[0]);
+                ((EditText)root().findViewWithTag("daily_budget_amount")).setText("250");findButton(root(),"حفظ").performClick();
+                ok(!((UiPages)get("formPages")).isOpen(),"Daily budget saves and returns");
+                DailyAllowance.Plan plan=DailySummary.plan(activity,"EGP");ok(plan!=null&&plan.limit==25000,"Daily limit saved in minor units");
+                invoke("dailyBudgetDialog",new Class<?>[0]);
+                ok(root().findViewWithTag("daily_budget_remove")!=null,"Existing plan offers removal");
+            });
+            screen("10-daily-budget");
+            click("حذف الحد اليومي");click("حذف");
+            main(()->{ok(DailySummary.plan(activity,"EGP")==null&&!((UiPages)get("formPages")).isOpen(),"Confirmed removal clears only the limit and leaves the page");});
             result.putString("stream","Unified UI checks passed: "+checks+"; failed: 0; dark="+dark+"; fontScale="+fontScale+"\nCaptures: "+captures+"\n");
         } catch(Throwable error) {
             status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));
             result.putString("stream","Unified UI FAILED: "+trace);
         } finally {
             try{if(fixture)((ExpenseDb)get("db")).clearAllData();}catch(Throwable ignored){}
+            try{DailySummary.remove(runner.getTargetContext(),"EGP");}catch(Throwable ignored){}
             try{if(activity!=null)main(()->activity.finish());}catch(Throwable ignored){}
             runner.finish(status,result);
         }

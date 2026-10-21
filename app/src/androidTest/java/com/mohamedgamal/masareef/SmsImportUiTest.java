@@ -32,7 +32,9 @@ final class SmsImportUiTest{
         if(node instanceof ViewGroup){ViewGroup group=(ViewGroup)node;for(int i=0;i<group.getChildCount();i++){View found=findPrefix(group.getChildAt(i),prefix);if(found!=null)return found;}}return null;
     }
     private void click(String text){main(()->{View button=find(activity.getWindow().getDecorView(),text);if(button==null)throw new AssertionError("Missing "+text);button.performClick();});}
-    private void awaitDone()throws Exception{for(int i=0;i<300;i++){runner.waitForIdleSync();String phase=(String)field(field(activity,"session"),"phase");if("done".equals(phase))return;if("ready".equals(phase)||"error".equals(phase))throw new AssertionError("Automatic import stopped at "+phase);Thread.sleep(100);}throw new AssertionError("Import did not finish");}
+    private void awaitDone()throws Exception{for(int i=0;i<300;i++){runner.waitForIdleSync();Object session=field(activity,"session");String phase=(String)field(session,"phase");if("done".equals(phase))return;
+        // Automatic import passes through «ready» while it reads pending cancellations; only a review session stops there.
+        if("ready".equals(phase)&&(Boolean)field(session,"reviewBeforeImport")||"error".equals(phase))throw new AssertionError("Automatic import stopped at "+phase);Thread.sleep(100);}throw new AssertionError("Import did not finish");}
     private void shot(String name)throws Exception{runner.waitForIdleSync();Thread.sleep(600);android.graphics.Bitmap b=runner.getUiAutomation().takeScreenshot();if(b==null)throw new AssertionError("No screenshot");try(FileOutputStream out=new FileOutputStream(new File(captures,name+".png"))){ok(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}}
     @SuppressWarnings("unchecked") void run(boolean dark,float scale){
         int status=-1;Bundle result=new Bundle();android.content.res.Configuration original=null;

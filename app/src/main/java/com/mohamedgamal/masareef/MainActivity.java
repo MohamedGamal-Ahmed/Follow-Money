@@ -393,11 +393,14 @@ public final class MainActivity extends Activity {
             title.addView(sourceBadge(source,34),new LinearLayout.LayoutParams(dp(34),dp(34)));
             TextView name=label(db.sourceLabel(source.id),16,INK,true);
             LinearLayout.LayoutParams nameParams=new LinearLayout.LayoutParams(0,-2,1);nameParams.setMarginStart(dp(10));title.addView(name,nameParams);
+            android.widget.ImageButton manage=ui.icon(R.drawable.ic_more,"إدارة "+db.sourceLabel(source.id),()->sourceOptions(source));
+            manage.setTag("source_manage_"+source.id);title.addView(manage,new LinearLayout.LayoutParams(dp(UiTheme.TOUCH),dp(UiTheme.TOUCH)));
             card.addView(title);
             card.addView(label(source.archived?"مؤرشف · يمكنك إعادة تفعيله":source.reviewed?"استخدام مؤكد منك":"مكتشف من الرسائل · يحتاج مراجعة",12,MUTED,false));
             if(bankSource(source.kind)&&!usableBank(source.name)){
                 card.addView(label("البنك لسه مش محدد؛ ده ممكن يمنع ظهور الكارت والحساب لبعض",12,CORAL,false));
-                card.addView(ui.button("تحديد البنك",false,false,()->sourceBankPage(source)));
+                Button bank=ui.button("تحديد البنك",false,false,()->sourceBankPage(source));
+                LinearLayout.LayoutParams bankParams=new LinearLayout.LayoutParams(-2,-2);bankParams.topMargin=dp(6);card.addView(bank,bankParams);
             }
             boolean knownBalance=false;
             for(String currency:CURRENCIES) {
@@ -425,7 +428,7 @@ public final class MainActivity extends Activity {
                 if (tx.paymentSourceId != null && members.contains(tx.paymentSourceId) &&
                         "EGP".equals(tx.currency) && "expense".equals(tx.kind)) total += tx.amountMinor;
             card.addView(label("خرج منه الشهر ده  " + money(total, "EGP"), 16, ACCENT, true));
-            card.addView(label("آخر استخدام: "+sourceDate(db.sourceLastActivity(source.id))+" · اضغط للإدارة",12,MUTED,false));
+            card.addView(label("آخر استخدام: "+sourceDate(db.sourceLastActivity(source.id)),12,MUTED,false));
             card.setOnClickListener(v->sourceOptions(source));
             }
         }
@@ -577,15 +580,30 @@ public final class MainActivity extends Activity {
     private void balanceHistoryDialog(ExpenseDb.PaymentSource source) {
         List<ExpenseDb.BalanceSnapshot> history = db.balanceHistory(source.id, "EGP", 50);
         if (history.isEmpty()) { toast("لسه مفيش أرصدة مسجلة للحساب"); return; }
-        StringBuilder body = new StringBuilder();
-        DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT);
-        for (ExpenseDb.BalanceSnapshot snapshot : history) {
-            body.append(Instant.ofEpochMilli(snapshot.occurredAt).atZone(ZoneId.systemDefault()).format(format))
-                    .append("   ·   ").append(money(snapshot.amountMinor, "EGP"))
-                    .append("   ·   ").append(snapshot.source).append("\n\n");
-        }
-        new ChoiceDialogBuilder().setTitle("سجل أرصدة " + db.sourceLabel(db.accountId(source.id)))
-                .setMessage(body.toString().trim()).setPositiveButton("تمام", null).show();
+        long accountId = db.accountId(source.id);
+        savePageScroll();
+        formPages.push(new UiPages.Page("balance_history", "سجل الأرصدة", new Bundle(), new Bundle()) {
+            @Override void build(LinearLayout body, UiComponents components) {
+                body.addView(components.label(db.sourceLabel(accountId) + " · EGP · أحدث 50", UiTheme.BODY, MUTED));
+                LinearLayout list = listCard(body);
+                DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT);
+                for (ExpenseDb.BalanceSnapshot snapshot : history) {
+                    if (list.getChildCount() > 0) divider(list);
+                    LinearLayout row = new LinearLayout(MainActivity.this); row.setGravity(Gravity.CENTER_VERTICAL);
+                    row.setPadding(0, dp(10), 0, dp(10)); row.setMinimumHeight(dp(UiTheme.TOUCH));
+                    LinearLayout copy = new LinearLayout(MainActivity.this); copy.setOrientation(LinearLayout.VERTICAL);
+                    TextView stamp = components.label(Instant.ofEpochMilli(snapshot.occurredAt).atZone(ZoneId.systemDefault()).format(format), UiTheme.BODY, INK);
+                    stamp.setTextDirection(View.TEXT_DIRECTION_LTR); copy.addView(stamp);
+                    copy.addView(components.label(snapshot.source, UiTheme.CAPTION, MUTED));
+                    row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+                    TextView amount = label(money(snapshot.amountMinor, "EGP"), 15, INK, true); amount.setTextDirection(View.TEXT_DIRECTION_LTR);
+                    row.addView(amount); list.addView(row);
+                }
+            }
+            @Override boolean save() { return true; }
+            @Override String saveLabel() { return "إغلاق"; }
+            @Override boolean readOnly() { return true; }
+        });
     }
 
     private void manualBalanceDialog(ExpenseDb.PaymentSource source) {
@@ -2140,42 +2158,6 @@ public final class MainActivity extends Activity {
         }).setNegativeButton("إلغاء",null).show();
     }
 
-    private void splitBillDialog() {
-        LinearLayout form = form();
-        EditText merchant = input("المكان أو الفاتورة", form);
-        EditText total = input("إجمالي الفاتورة", form);
-        total.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        EditText people = input("عدد الأشخاص معاك", form);
-        people.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        Spinner currency = spinner("العملة", CURRENCIES, form);
-        Spinner category = spinner("التصنيف", CATEGORIES, form);
-        List<ExpenseDb.PaymentSource> sources = db.selectableSources();
-        Spinner payment = spinner("وسيلة دفع حصتك", sourceNames(sources), form);
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle("قسم فاتورة").setView(form)
-                .setPositiveButton("سجل حصتي", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            try {
-                if (rejectMisreadAmount(total)) return;
-                long amount = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(total.getText().toString()));
-                int count = Integer.parseInt(ExpenseParser.normalizeDigits(people.getText().toString().trim()));
-                if (amount <= 0 || count < 2 || merchant.getText().toString().trim().isEmpty()) throw new IllegalArgumentException();
-                boolean added = db.addSplitShare(System.currentTimeMillis(), amount, count, currency.getSelectedItem().toString(),
-                        merchant.getText().toString(), category.getSelectedItem().toString(), selectedSource(payment, sources),
-                        "حصتي من فاتورة " + money(amount, currency.getSelectedItem().toString()) +
-                                " مقسمة على " + count + " أشخاص");
-                if (!added) {
-                    new ChoiceDialogBuilder().setTitle("الفاتورة دي مسجلة بالفعل")
-                            .setMessage("إضافة حصتك هنا هتعمل مصروف مكرر فوق الدفع الأصلي. لم نحفظ أي مبلغ جديد ولم نغير العملية المسجلة. " +
-                                    "ربط الحصة بالدفع والمستحقات غير متاح حاليًا.")
-                            .setPositiveButton("رجوع", null).show();
-                    return;
-                }
-                dialog.dismiss(); render();
-            } catch (RuntimeException error) { toast("راجع إجمالي الفاتورة وعدد الأشخاص"); }
-        }));
-        dialog.show();
-    }
-
     /**
      * Ids of expenses that look like a monthly commitment: another payment to the same merchant in the
      * same currency about a month earlier. Grouped by merchant so each list is scanned once, not per row.
@@ -2401,6 +2383,9 @@ public final class MainActivity extends Activity {
         if ("debt_payment".equals(route)) return new DebtPaymentPage(draft,original);
         if ("budget".equals(route)) return new BudgetPlanPage(draft,original);
         if ("support".equals(route)) return new SupportPage(draft,original);
+        if ("daily_budget".equals(route)) return new DailyBudgetPage(draft,original);
+        if ("commitment_from_transaction".equals(route)) return new CommitmentFromTransactionPage(draft,original);
+        if ("split_bill".equals(route)) return new SplitBillPage(draft,original);
         if ("transaction".equals(route)) return new TransactionFormPage(draft,original);
         if ("transaction_filters".equals(route)) return new TransactionFilterPage(draft,original);
         if ("transaction_bulk_category".equals(route)) return new BulkCategoryPage(draft,original);
@@ -3440,13 +3425,14 @@ public final class MainActivity extends Activity {
         bulkChecks.clear();bulkCount=null;bulkApply=null;
         if(bulkMode) {
             LinearLayout tools=card();bulkCount=label("المحدد: "+bulkSelected.size(),14,INK,true);tools.addView(bulkCount);
-            LinearLayout actions=new LinearLayout(this);
-            Button all=new Button(this);all.setText("اختيار النتائج كلها");all.setTypeface(REGULAR);
-            all.setOnClickListener(v->{for(CheckBox c:bulkChecks.values())if(c.isEnabled())c.setChecked(true);});
+            LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.CENTER_VERTICAL);
+            Button all=ui.button("اختيار النتائج كلها",false,false,()->{for(CheckBox c:bulkChecks.values())if(c.isEnabled())c.setChecked(true);});
             actions.addView(all,new LinearLayout.LayoutParams(0,-2,1));
-            Button clear=new Button(this);clear.setText("إلغاء التحديد");clear.setTypeface(REGULAR);
-            clear.setOnClickListener(v->{for(CheckBox c:bulkChecks.values())c.setChecked(false);});actions.addView(clear,new LinearLayout.LayoutParams(0,-2,1));tools.addView(actions);
-            bulkApply=new Button(this);bulkApply.setText("تغيير تصنيف المحدد");bulkApply.setTypeface(REGULAR);bulkApply.setOnClickListener(v->bulkCategoryDialog());tools.addView(bulkApply);
+            Button clear=ui.button("إلغاء التحديد",false,false,()->{for(CheckBox c:bulkChecks.values())c.setChecked(false);});
+            LinearLayout.LayoutParams clearParams=new LinearLayout.LayoutParams(0,-2,1);clearParams.setMarginStart(dp(8));actions.addView(clear,clearParams);
+            LinearLayout.LayoutParams actionsParams=new LinearLayout.LayoutParams(-1,-2);actionsParams.topMargin=dp(10);tools.addView(actions,actionsParams);
+            bulkApply=ui.button("تغيير تصنيف المحدد",true,false,this::bulkCategoryDialog);
+            LinearLayout.LayoutParams applyParams=new LinearLayout.LayoutParams(-1,-2);applyParams.topMargin=dp(8);tools.addView(bulkApply,applyParams);
             tools.addView(label("التعديل الجماعي للمصروفات فقط؛ الدخل والتحويلات الداخلية لا تتغير.",12,MUTED,false));
         }
         EditText search = null;
@@ -3575,8 +3561,8 @@ public final class MainActivity extends Activity {
                 LinearLayout box = card(results);
                 box.setGravity(Gravity.CENTER_HORIZONTAL);
                 box.addView(label("مفيش عمليات تطابق البحث والفلاتر", 14, MUTED, false));
-                Button reset=new Button(this);reset.setText("مسح البحث والفلاتر");reset.setTypeface(REGULAR);
-                reset.setOnClickListener(v->{resetTransactionFilters();render();});box.addView(reset);
+                Button reset=ui.button("مسح البحث والفلاتر",false,false,()->{resetTransactionFilters();render();});
+                LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(-2,-2);resetParams.topMargin=dp(10);box.addView(reset,resetParams);
             }
         };
         if (search != null) search.addTextChangedListener(new TextWatcher() {
@@ -3840,7 +3826,8 @@ public final class MainActivity extends Activity {
         toolbar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> {
             returnFromTransaction();
         }), new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView title = label("تفاصيل العملية", 15, INK, true); title.setGravity(Gravity.CENTER);
+        TextView title = label("تفاصيل العملية", UiTheme.TITLE, INK, true); title.setGravity(Gravity.CENTER);
+        if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
         toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         toolbar.addView(iconButton(R.drawable.ic_more, "خيارات", () -> transactionOptions(item)),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
@@ -3943,16 +3930,11 @@ public final class MainActivity extends Activity {
         }
 
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
-        TextView edit = label("تعديل العملية", 15, onPrimary(), true);
-        edit.setGravity(Gravity.CENTER); edit.setBackground(rounded(primaryFill(), 16));
-        actions.addView(edit, new LinearLayout.LayoutParams(0, dp(54), 1));
-        edit.setOnClickListener(v -> editTransactionDialog(item));
-        ImageView delete = tintedIcon(R.drawable.ic_trash, CORAL);
-        delete.setPadding(dp(15), dp(15), dp(15), dp(15));
-        delete.setBackground(outlined(SURFACE, dark ? 0xff5a2a2a : 0xfff1d3d3, 16));
-        delete.setContentDescription("حذف العملية");
-        delete.setOnClickListener(v -> confirmDeleteTransaction(item));
-        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(54), dp(54)); deleteParams.setMarginStart(dp(10));
+        Button edit = ui.button("تعديل العملية", true, false, () -> editTransactionDialog(item));
+        actions.addView(edit, new LinearLayout.LayoutParams(0, -2, 1));
+        android.widget.ImageButton delete = ui.icon(R.drawable.ic_trash, "حذف العملية", () -> confirmDeleteTransaction(item));
+        delete.setImageTintList(ColorStateList.valueOf(uiTheme.danger));
+        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(UiTheme.TOUCH + 6), dp(UiTheme.TOUCH + 6)); deleteParams.setMarginStart(dp(10));
         actions.addView(delete, deleteParams);
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, -2); actionParams.topMargin = dp(24);
         page.addView(actions, actionParams);
@@ -4322,9 +4304,8 @@ public final class MainActivity extends Activity {
         content.addView(scroller,new LinearLayout.LayoutParams(-1,0,1));
         List<ExpenseDb.Transaction> candidates=db.reimbursementCandidates(fresh,older);
         long[] selection={previousSelection};
-        Button review=new Button(this);review.setText("راجع الربط");review.setTypeface(BOLD);review.setTextColor(onPrimary());
-        review.setBackground(rounded(primaryFill(),14));review.setAllCaps(false);review.setMinHeight(dp(50));
-        LinearLayout.LayoutParams reviewParams=new LinearLayout.LayoutParams(-1,dp(52));reviewParams.topMargin=dp(10);content.addView(review,reviewParams);
+        Button review=ui.button("راجع الربط",true,false,()->{});
+        LinearLayout.LayoutParams reviewParams=new LinearLayout.LayoutParams(-1,-2);reviewParams.topMargin=dp(10);content.addView(review,reviewParams);
         Runnable[] draw=new Runnable[1];draw[0]=()->{
             list.removeAllViews();String text=search.getText().toString().trim().toLowerCase(Locale.ROOT);int found=0;
             boolean selectedVisible=false;
@@ -5494,30 +5475,6 @@ public final class MainActivity extends Activity {
         openCommitmentEditor(null);
     }
 
-    private void commitmentFromTransaction(ExpenseDb.Transaction item) {
-        LinearLayout form=form();EditText name=input("اسم الالتزام",form);name.setText(item.merchant);
-        EditText amount=input("المبلغ",form);amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        amount.setText(String.format(Locale.ROOT,"%.2f",item.amountMinor/100.0));
-        Spinner type=spinner("النوع",new String[]{"اشتراك","فاتورة"},form);if("فواتير".equals(item.category))type.setSelection(1);
-        LocalDate day=Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate();
-        int anchor=day.getDayOfMonth();LocalDate next=day.plusMonths(1);
-        while(next.isBefore(LocalDate.now())){java.time.YearMonth m=java.time.YearMonth.from(next).plusMonths(1);next=m.atDay(Math.min(anchor,m.lengthOfMonth()));}
-        EditText date=dateInput("موعد الدفعة القادمة",form,next);
-        form.addView(label("الموعد مقترح من آخر عملية؛ راجعه. إنشاء الالتزام لا يضيف مصروفًا أو يسجل سدادًا جديدًا.",13,MUTED,false));
-        AlertDialog dialog=new ChoiceDialogBuilder().setTitle("حوّلها لالتزام شهري").setView(form).setPositiveButton("حفظ الالتزام",null).setNegativeButton("إلغاء",null).create();
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-            try {
-                if(rejectMisreadAmount(amount))return;
-                String merchant=name.getText().toString().trim();long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(amount.getText().toString()));
-                LocalDate due=java.util.Objects.requireNonNull(dateValue(date));
-                if(merchant.isEmpty()||minor<=0||due.isBefore(LocalDate.now()))throw new IllegalArgumentException();
-                long id=db.putCommitmentFromTransaction(item.id,merchant,minor,item.currency,due,type.getSelectedItemPosition()==0?"subscription":"bill");
-                if(id<0){toast("التزام بنفس الاسم والمبلغ موجود بالفعل، أو العملية غير متاحة");return;}
-                dialog.dismiss();selectedCommitmentId=id;selectedTab=11;ReminderReceiver.schedule(this);askNotificationPermission();render();
-            }catch(RuntimeException error){toast("راجع الاسم والمبلغ وموعد الاستحقاق");}
-        }));dialog.show();
-    }
-
     private void openWidgetAction(Intent intent) {
         if(intent.getBooleanExtra("open_add_transaction",false)){intent.removeExtra("open_add_transaction");introVisible=false;selectedTab=6;render();manualDialog(null);}
         if(intent.getBooleanExtra("open_daily_budget",false)){intent.removeExtra("open_daily_budget");introVisible=false;selectedTab=0;render();dailyBudgetDialog();}
@@ -5681,32 +5638,192 @@ public final class MainActivity extends Activity {
     }
 
     private void dailyBudgetDialog() {
-        LinearLayout form=form();form.addView(label("الميزانية اليومية ثابتة. الراتب الشهري للتخطيط فقط؛ لا يُسجّل كدخل تلقائيًا. كل عملة منفصلة.",13,MUTED,false));
-        Spinner currency=spinner("العملة",CURRENCIES,form);EditText amount=input("الحد اليومي (اختياري)",form);decimalInput(amount);
-        EditText starts=dateInput("بداية الخطة",form,LocalDate.now());EditText salaryAmount=input("الراتب الشهري (اختياري)",form);decimalInput(salaryAmount);
-        Spinner salary=spinner("ميعاد القبض المتوقع",salaryDayLabels(),form);
-        form.addView(label("آخر يوم في الشهر يتبع 28/29/30/31. اليوم المحدد الذي لا يوجد في شهر قصير يُحسب آخر يوم فيه.",12,MUTED,false));
-        java.util.function.Consumer<String> populate=code->{DailyAllowance.Plan plan=DailySummary.plan(this,code);
-            amount.setText(plan==null?"":java.math.BigDecimal.valueOf(plan.limit,2).toPlainString());
-            setDateValue(starts,plan==null?LocalDate.now():plan.starts);
-            long monthly=DailySummary.monthlySalary(this,code);salaryAmount.setText(monthly==0?"":java.math.BigDecimal.valueOf(monthly,2).toPlainString());
-            salary.setSelection(salarySelection(getSharedPreferences(DailySummary.SETTINGS,MODE_PRIVATE).getInt("salary_"+code,0)));};
-        currency.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> parent){}
-            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){populate.accept(CURRENCIES[position]);}});
-        populate.accept(currency.getSelectedItem().toString());
-        AlertDialog dialog=new ChoiceDialogBuilder().setTitle("ميزانية اليوم والراتب").setView(scrollForm(form))
-                .setPositiveButton("حفظ",null).setNegativeButton("إلغاء",null).setNeutralButton("حذف الحد اليومي",null).create();
-        dialog.setOnShowListener(d->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-            try {String daily=amount.getText().toString().trim(),monthly=salaryAmount.getText().toString().trim(),code=currency.getSelectedItem().toString();
-                if(rejectMisreadAmount(daily)||rejectMisreadAmount(monthly))return;
-                long limit=optionalMinor(daily),salaryValue=optionalMinor(monthly);int day=selectedSalaryDay(salary.getSelectedItemPosition());
-                LocalDate start=java.util.Objects.requireNonNull(dateValue(starts));
-                if(!daily.isEmpty())DailySummary.save(this,new DailyAllowance.Plan(code,limit,start,day));else DailySummary.remove(this,code);
-                DailySummary.saveSalary(this,code,salaryValue,day);dialog.dismiss();render();
-            }catch(RuntimeException invalid){toast("راجع المبلغ اليومي والراتب وتاريخ البداية");}
-        });dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->new ChoiceDialogBuilder().setTitle("حذف حد "+currency.getSelectedItem()+" اليومي؟")
-                .setMessage("الراتب وميعاده والعمليات محفوظون؛ هنلغي الحد اليومي فقط.").setPositiveButton("حذف",(confirm,w)->{DailySummary.remove(this,currency.getSelectedItem().toString());dialog.dismiss();render();})
-                .setNegativeButton("إلغاء",null).show());});dialog.show();
+        Bundle draft = new Bundle(); fillDailyBudgetDraft(draft, CURRENCIES[0]);
+        savePageScroll(); formPages.push(new DailyBudgetPage(draft, draft));
+    }
+
+    /** Reads what is stored for one currency, so switching currency shows that currency's own plan. */
+    private void fillDailyBudgetDraft(Bundle draft, String code) {
+        DailyAllowance.Plan plan = DailySummary.plan(this, code);
+        long monthly = DailySummary.monthlySalary(this, code);
+        draft.putString("currency", code);
+        draft.putString("amount", plan == null ? "" : java.math.BigDecimal.valueOf(plan.limit, 2).toPlainString());
+        draft.putString("starts", (plan == null ? LocalDate.now() : plan.starts).toString());
+        draft.putString("salary", monthly == 0 ? "" : java.math.BigDecimal.valueOf(monthly, 2).toPlainString());
+        draft.putInt("salary_day", salarySelection(getSharedPreferences(DailySummary.SETTINGS, MODE_PRIVATE).getInt("salary_" + code, 0)));
+    }
+
+    private final class DailyBudgetPage extends DraftFormPage {
+        DailyBudgetPage(Bundle draft, Bundle original) { super("daily_budget", "ميزانية اليوم والراتب", draft, original); }
+        @Override void build(LinearLayout body, UiComponents components) {
+            body.addView(components.label("الميزانية اليومية ثابتة. الراتب الشهري للتخطيط فقط؛ لا يُسجّل كدخل تلقائيًا. كل عملة منفصلة.", UiTheme.BODY, MUTED));
+            components.caption("العملة", body);
+            components.choices(CURRENCIES, null, java.util.Arrays.asList(CURRENCIES).indexOf(text("currency")), i -> {
+                if (CURRENCIES[i].equals(text("currency"))) return;
+                fillDailyBudgetDraft(draft, CURRENCIES[i]); formPages.rebuild();
+            }, body).setTag("daily_budget_currency");
+            amountField("الحد اليومي (اختياري)", "amount", body);
+            dateField("بداية الخطة", "starts", body);
+            amountField("الراتب الشهري (اختياري)", "salary", body);
+            String[] days = salaryDayLabels();
+            LinearLayout salaryDay = new LinearLayout(MainActivity.this); salaryDay.setOrientation(LinearLayout.VERTICAL); body.addView(salaryDay);
+            drawSalaryDay(salaryDay, days);
+            body.addView(components.label("آخر يوم في الشهر يتبع 28/29/30/31. اليوم المحدد الذي لا يوجد في شهر قصير يُحسب آخر يوم فيه.", UiTheme.CAPTION, MUTED));
+            if (DailySummary.plan(MainActivity.this, text("currency")) != null) {
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(16);
+                Button remove = components.button("حذف الحد اليومي", false, true, () -> new ChoiceDialogBuilder().setTitle("حذف حد " + text("currency") + " اليومي؟")
+                        .setMessage("الراتب وميعاده والعمليات محفوظون؛ هنلغي الحد اليومي فقط.")
+                        .setPositiveButton("حذف", (confirm, w) -> { DailySummary.remove(MainActivity.this, text("currency")); formPages.finishThrough(route); })
+                        .setNegativeButton("إلغاء", null).show());
+                remove.setTextColor(uiTheme.danger); remove.setTag("daily_budget_remove"); body.addView(remove, lp);
+            }
+            errorLabel(body);
+        }
+        private void drawSalaryDay(LinearLayout container, String[] days) {
+            container.removeAllViews();
+            ui.choiceCard("ميعاد القبض المتوقع", days[draft.getInt("salary_day")], null, () -> chooseValue("ميعاد القبض المتوقع", days, days[draft.getInt("salary_day")], value -> {
+                draft.putInt("salary_day", java.util.Arrays.asList(days).indexOf(value)); drawSalaryDay(container, days);
+            }), container).setTag("daily_budget_salary_day");
+        }
+        @Override boolean save() {
+            String daily = text("amount").trim(), monthly = text("salary").trim(), code = text("currency");
+            if (ExpenseParser.manualAmountMisread(daily) || ExpenseParser.manualAmountMisread(monthly)) return fail("راجع المبلغ", ExpenseParser.manualAmountMisread(daily) ? "amount" : "salary");
+            long limit, salaryValue;
+            try { limit = optionalMinor(daily); } catch (IllegalArgumentException invalid) { return fail("راجع الحد اليومي", "amount"); }
+            try { salaryValue = optionalMinor(monthly); } catch (IllegalArgumentException invalid) { return fail("راجع الراتب الشهري", "salary"); }
+            if (text("starts").isEmpty()) return fail("اختار بداية الخطة", null);
+            int day = selectedSalaryDay(draft.getInt("salary_day"));
+            if (!daily.isEmpty()) DailySummary.save(MainActivity.this, new DailyAllowance.Plan(code, limit, LocalDate.parse(text("starts")), day));
+            else DailySummary.remove(MainActivity.this, code);
+            DailySummary.saveSalary(MainActivity.this, code, salaryValue, day);
+            return true;
+        }
+    }
+
+    private void commitmentFromTransaction(ExpenseDb.Transaction item) {
+        LocalDate day = Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate();
+        int anchor = day.getDayOfMonth(); LocalDate next = day.plusMonths(1);
+        while (next.isBefore(LocalDate.now())) { java.time.YearMonth m = java.time.YearMonth.from(next).plusMonths(1); next = m.atDay(Math.min(anchor, m.lengthOfMonth())); }
+        Bundle draft = new Bundle(); draft.putLong("transaction", item.id); draft.putString("currency", item.currency);
+        draft.putString("name", item.merchant); draft.putString("amount", minorText(item.amountMinor));
+        draft.putString("type", "فواتير".equals(item.category) ? "bill" : "subscription"); draft.putString("due", next.toString());
+        savePageScroll(); formPages.push(new CommitmentFromTransactionPage(draft, draft));
+    }
+
+    private final class CommitmentFromTransactionPage extends DraftFormPage {
+        CommitmentFromTransactionPage(Bundle draft, Bundle original) { super("commitment_from_transaction", "حوّلها لالتزام شهري", draft, original); }
+        @Override void build(LinearLayout body, UiComponents components) {
+            amountField("المبلغ", "amount", body);
+            body.addView(components.label(text("currency"), UiTheme.CAPTION, MUTED));
+            textField("اسم الالتزام", "name", body);
+            choiceField("النوع", "type", new String[]{"اشتراك", "فاتورة"}, new String[]{"subscription", "bill"}, null, body);
+            dateField("موعد الدفعة القادمة", "due", body);
+            body.addView(components.label("الموعد مقترح من آخر عملية؛ راجعه. إنشاء الالتزام لا يضيف مصروفًا أو يسجل سدادًا جديدًا.", UiTheme.CAPTION, MUTED));
+            errorLabel(body);
+        }
+        @Override String saveLabel() { return "حفظ الالتزام"; }
+        private long created = -1;
+        @Override boolean save() {
+            if (ExpenseParser.manualAmountMisread(text("amount"))) return fail("راجع المبلغ", "amount");
+            long minor = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
+            if (minor <= 0) return fail("راجع المبلغ", "amount");
+            String merchant = text("name").trim();
+            if (merchant.isEmpty()) return fail("اكتب اسم الالتزام", "name");
+            if (text("due").isEmpty() || LocalDate.parse(text("due")).isBefore(LocalDate.now())) return fail("اختار موعد قادم للدفعة", null);
+            long id;
+            try { id = db.putCommitmentFromTransaction(draft.getLong("transaction"), merchant, minor, text("currency"), LocalDate.parse(text("due")), text("type")); }
+            catch (RuntimeException failed) { return fail("لم نحفظ الالتزام؛ راجع البيانات وحاول مرة أخرى", null); }
+            if (id < 0) return fail("التزام بنفس الاسم والمبلغ موجود بالفعل، أو العملية غير متاحة", null);
+            created = id; return true;
+        }
+        @Override void onSaved() {
+            selectedCommitmentId = created; selectedTab = 11; ReminderReceiver.schedule(MainActivity.this); askNotificationPermission(); render();
+        }
+    }
+
+    private void splitBillDialog() {
+        Bundle draft = new Bundle(); draft.putString("merchant", ""); draft.putString("total", ""); draft.putString("people", "");
+        draft.putString("currency", CURRENCIES[0]); draft.putString("category", CATEGORIES[0]); draft.putLong("source", -1);
+        savePageScroll(); formPages.push(new SplitBillPage(draft, draft));
+    }
+
+    private final class SplitBillPage extends DraftFormPage {
+        SplitBillPage(Bundle draft, Bundle original) { super("split_bill", "قسم فاتورة", draft, original); }
+        @Override void build(LinearLayout body, UiComponents components) {
+            amountField("إجمالي الفاتورة", "total", body);
+            choiceField("العملة", "currency", CURRENCIES, CURRENCIES, null, body);
+            textField("المكان أو الفاتورة", "merchant", body);
+            EditText people = textField("عدد الأشخاص معاك", "people", body); people.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            int[] icons = new int[CATEGORIES.length];
+            for (int i = 0; i < CATEGORIES.length; i++) icons[i] = categoryStyle(CATEGORIES[i])[2];
+            choiceField("التصنيف", "category", CATEGORIES, CATEGORIES, icons, body);
+            LinearLayout account = new LinearLayout(MainActivity.this); account.setOrientation(LinearLayout.VERTICAL); body.addView(account);
+            drawSource(account);
+            errorLabel(body);
+        }
+        private void drawSource(LinearLayout container) {
+            container.removeAllViews(); List<ExpenseDb.PaymentSource> sources = db.selectableSources();
+            ExpenseDb.PaymentSource picked = null; for (ExpenseDb.PaymentSource source : sources) if (source.id == draft.getLong("source")) picked = source;
+            String[] names = sourceNames(sources);
+            ui.choiceCard("وسيلة دفع حصتك", picked == null ? names[0] : db.sourceLabel(picked.id), picked == null ? null : sourceBadge(picked, 40), () ->
+                    chooseValue("وسيلة دفع حصتك", names, null, value -> {
+                        int at = java.util.Arrays.asList(names).indexOf(value);
+                        draft.putLong("source", at <= 0 ? -1 : sources.get(at - 1).id); drawSource(container);
+                    }), container).setTag("split_bill_source");
+        }
+        @Override String saveLabel() { return "سجل حصتي"; }
+        /** Shown only after a refused duplicate; the page stays so nothing typed is lost. */
+        @Override boolean save() {
+            if (ExpenseParser.manualAmountMisread(text("total"))) return fail("راجع المبلغ", "total");
+            long amount = ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("total")));
+            if (amount <= 0) return fail("راجع إجمالي الفاتورة", "total");
+            int count;
+            try { count = Integer.parseInt(ExpenseParser.normalizeDigits(text("people").trim())); } catch (NumberFormatException invalid) { count = 0; }
+            if (count < 2) return fail("عدد الأشخاص لازم يكون 2 أو أكتر", "people");
+            if (text("merchant").trim().isEmpty()) return fail("اكتب المكان أو الفاتورة", "merchant");
+            long source = draft.getLong("source", -1);
+            boolean added = db.addSplitShare(System.currentTimeMillis(), amount, count, text("currency"), text("merchant"), text("category"),
+                    source < 0 ? null : source, "حصتي من فاتورة " + money(amount, text("currency")) + " مقسمة على " + count + " أشخاص");
+            if (!added) {
+                new ChoiceDialogBuilder().setTitle("الفاتورة دي مسجلة بالفعل")
+                        .setMessage("إضافة حصتك هنا هتعمل مصروف مكرر فوق الدفع الأصلي. لم نحفظ أي مبلغ جديد ولم نغير العملية المسجلة. " +
+                                "ربط الحصة بالدفع والمستحقات غير متاح حاليًا.")
+                        .setPositiveButton("رجوع", null).show();
+                return false;
+            }
+            return true;
+        }
+    }
+
+    private void confirmInstallmentDialog(RepairRules.RepeatingTransfer pattern) {
+        savePageScroll();
+        formPages.push(new DraftFormPage("installment", "سجّله كقسط", installmentDraft(pattern), installmentDraft(pattern)) {
+            @Override void build(LinearLayout body, UiComponents components) {
+                body.addView(components.label(money(pattern.amountMinor, pattern.currency) + " كل شهر من " + db.sourceLabel(pattern.sourceId), UiTheme.BODY, INK));
+                textField("اسم القسط (مثلًا: قسط الشقة)", "name", body);
+                dateField("تاريخ آخر قسط", "last", body);
+                EditText paid = textField("اتدفع كام قسط لحد دلوقتي", "paid", body); paid.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                body.addView(components.label("لقينا " + pattern.ids.size() + " دفعة في رسايلك. لو فيه دفعات قبل كده من غير رسايل عدّل الرقم.", UiTheme.CAPTION, MUTED));
+                errorLabel(body);
+            }
+            @Override boolean save() {
+                String title = text("name").trim();
+                if (title.isEmpty()) return fail("اكتب اسم القسط", "name");
+                if (text("last").isEmpty()) return fail("اختار تاريخ آخر قسط", null);
+                int paidSoFar;
+                try { paidSoFar = Integer.parseInt(ExpenseParser.normalizeDigits(text("paid").trim())); } catch (NumberFormatException invalid) { return fail("اكتب عدد الأقساط المدفوعة", "paid"); }
+                try { db.confirmRepeatingTransfer(pattern, title, LocalDate.parse(text("last")), paidSoFar, LocalDate.now()); }
+                catch (RuntimeException failed) { return fail("لم نسجل القسط؛ راجع البيانات وحاول مرة أخرى", null); }
+                toast("اتسجل " + title + " · دفعاته القديمة اتنقلت للأقساط"); return true;
+            }
+            // The detected pattern is not part of the draft, so this page is not rebuilt after process death.
+            @Override boolean restoreAfterRecreation() { return false; }
+        });
+    }
+
+    private static Bundle installmentDraft(RepairRules.RepeatingTransfer pattern) {
+        Bundle draft = new Bundle(); draft.putString("name", ""); draft.putString("last", ""); draft.putString("paid", Integer.toString(pattern.ids.size()));
+        return draft;
     }
 
     private String[] salaryDayLabels() {
@@ -6998,30 +7115,6 @@ public final class MainActivity extends Activity {
         addChip(actions, "مش قسط", false, () -> { db.dismissRepeatingTransfer(pattern); render(); });
     }
 
-    private void confirmInstallmentDialog(RepairRules.RepeatingTransfer pattern) {
-        LinearLayout form = form();
-        form.addView(label(money(pattern.amountMinor, pattern.currency) + " كل شهر من " + db.sourceLabel(pattern.sourceId), 14, INK, true));
-        EditText name = input("اسم القسط (مثلًا: قسط الشقة)", form);
-        EditText last = dateInput("تاريخ آخر قسط", form, null);
-        EditText paid = input("اتدفع كام قسط لحد دلوقتي", form);
-        paid.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        paid.setText(Integer.toString(pattern.ids.size()));
-        form.addView(label("لقينا " + pattern.ids.size() + " دفعة في رسايلك. لو فيه دفعات قبل كده من غير رسايل عدّل الرقم.", 12, MUTED, false));
-        AlertDialog dialog = new ChoiceDialogBuilder().setTitle("سجّله كقسط").setView(scrollForm(form))
-                .setPositiveButton("حفظ", null).setNegativeButton("إلغاء", null).create();
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            try {
-                LocalDate lastDue = java.util.Objects.requireNonNull(dateValue(last));
-                int paidSoFar = Integer.parseInt(ExpenseParser.normalizeDigits(paid.getText().toString().trim()));
-                String title = name.getText().toString().trim();
-                if (title.isEmpty()) throw new IllegalArgumentException("name");
-                db.confirmRepeatingTransfer(pattern, title, lastDue, paidSoFar, LocalDate.now());
-                dialog.dismiss(); toast("اتسجل " + title + " · دفعاته القديمة اتنقلت للأقساط"); render();
-            } catch (RuntimeException invalid) { toast("اكتب الاسم واختار تاريخ آخر قسط"); }
-        }));
-        dialog.show();
-    }
-
     private void purposeDialog(List<Long> ids) {
         String[] purposes = PURPOSES;
         new ChoiceDialogBuilder().setTitle("غرض التحويلات دي").setItems(purposes, (d, which) -> {
@@ -7190,7 +7283,9 @@ public final class MainActivity extends Activity {
         bar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> { selectedTab = 4; render(); }),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1); titleParams.setMarginStart(dp(10));
-        bar.addView(label(("بطاقة".equals(account.kind)?"حركة الكارت · ":"حركة الحساب · ") + flowPeriodName(), 18, INK, true), titleParams);
+        TextView accountTitle = label(("بطاقة".equals(account.kind)?"حركة الكارت · ":"حركة الحساب · ") + flowPeriodName(), UiTheme.TITLE, INK, true);
+        if (Build.VERSION.SDK_INT >= 28) accountTitle.setAccessibilityHeading(true);
+        bar.addView(accountTitle, titleParams);
         page.addView(bar);
         LinearLayout face = bankCard(account);
         LinearLayout.LayoutParams faceParams = new LinearLayout.LayoutParams(-1, dp(176)); faceParams.topMargin = dp(14);
@@ -7222,6 +7317,12 @@ public final class MainActivity extends Activity {
         miniStat(stats, "مصروف مسجل", totals.spent, CORAL);
         miniStat(stats, "تحويلات لناس", totals.sent, ORANGE);
         miniStat(stats, "وارد مسجل", totals.incoming, INCOME);
+        LinearLayout accountActions = new LinearLayout(this); accountActions.setGravity(Gravity.CENTER_VERTICAL);
+        accountActions.addView(ui.button("تحديث الرصيد", false, false, () -> manualBalanceDialog(selectedAccount)), new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams optionsParams = new LinearLayout.LayoutParams(0, -2, 1); optionsParams.setMarginStart(dp(8));
+        accountActions.addView(ui.button("إدارة الحساب", false, false, () -> sourceOptions(selectedAccount)), optionsParams);
+        LinearLayout.LayoutParams accountActionsParams = new LinearLayout.LayoutParams(-1, -2); accountActionsParams.topMargin = dp(10);
+        page.addView(accountActions, accountActionsParams);
         if(totals.withdrawn>0) note("سحب نقدي: "+money(totals.withdrawn,"EGP")+" · اتنقل من الحساب لكاش ومش مصروف.");
         List<ExpenseDb.PaymentSource> linked=db.linkedCards(account.id);
         if(!linked.isEmpty()) {
@@ -7229,8 +7330,8 @@ public final class MainActivity extends Activity {
             note("حركة الحساب تشمل الكروت المرتبطة: "+names);
         } else if("بطاقة".equals(account.kind)) {
             note("الكارت ده مش مرتبط بحساب. الوارد والتحويلات الظاهرة تخص رقم الكارت فقط؛ صفر مسجل مش معناه إن الحساب البنكي مفيهوش حركة.");
-            TextView link=label("اربط الكارت بحسابه",13,ACCENT,true);link.setPadding(0,dp(12),0,dp(12));page.addView(link);
-            link.setOnClickListener(v->linkSourceDialog(selectedAccount));
+            Button link=ui.button("اربط الكارت بحسابه",true,false,()->linkSourceDialog(selectedAccount));
+            LinearLayout.LayoutParams linkParams=new LinearLayout.LayoutParams(-1,-2);linkParams.topMargin=dp(8);page.addView(link,linkParams);
         }
         if(totals.ownIncoming+totals.ownOutgoing>0) note("تحويلات بين حساباتك: وارد "+money(totals.ownIncoming,"EGP")+" · خارج "+money(totals.ownOutgoing,"EGP")+"؛ مش محسوبة دخل أو مصروف.");
         note("الأرقام حركات البنك المسجلة؛ تشمل المشتريات والالتزامات والسحب والرسوم، ولا تخصم استردادًا من الحركة الأصلية. تحويلات الناس المحدد غرضها تظهر ضمن المصروف.");
@@ -7261,8 +7362,9 @@ public final class MainActivity extends Activity {
         box.setPadding(dp(6), dp(10), dp(6), dp(10));
         box.setBackground(rounded(SURFACE, 16));
         box.addView(centered(label(title, 11, MUTED, false)));
+        // Wraps instead of truncating so three tiles still show whole amounts at large font sizes.
         TextView amount = label(money(value, "EGP"), 13, color, true);
-        amount.setSingleLine(true);
+        amount.setTextDirection(View.TEXT_DIRECTION_LTR);
         box.addView(centered(amount));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1);
         if (row.getChildCount() > 0) params.setMarginStart(dp(8));
