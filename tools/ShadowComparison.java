@@ -246,7 +246,7 @@ public final class ShadowComparison {
         return out;
     }
 
-    static final String[] HELD_OUT_SETS = {"tools/fixtures/held-out-blind.tsv", "tools/fixtures/held-out-blind-2.tsv", "tools/fixtures/held-out-blind-3.tsv", "tools/fixtures/held-out-blind-4.tsv"};
+    static final String[] HELD_OUT_SETS = {"tools/fixtures/held-out-blind.tsv", "tools/fixtures/held-out-blind-2.tsv", "tools/fixtures/held-out-blind-3.tsv", "tools/fixtures/held-out-blind-4.tsv", "tools/fixtures/held-out-blind-5.tsv"};
 
     static ConfidenceScorer.Confidence confidence(MessageNormalizer.Raw raw, long receivedAt, TransactionExtractor.Extraction[] phase3) {
         MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);

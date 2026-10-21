@@ -414,7 +414,8 @@ final class TransactionExtractor {
         else if (name.find()) x.counterparty = f.display(name.start(1), name.end(1)).trim();
         else if (phone.find()) x.counterparty = f.display(phone.start(1), phone.end(1));
         else if (holder.find()) x.counterparty = f.display(holder.start(1), holder.end(1)).trim();
-        else if (digits.find()) x.counterparty = digits.group(1);
+        // The same "to account 1234" is the user's own account on an incoming movement, never the other party.
+        else if (!"in".equals(x.direction) && digits.find()) x.counterparty = digits.group(1);
     }
 
     // ---- Bank-supplied event time ------------------------------------------------------------------------------

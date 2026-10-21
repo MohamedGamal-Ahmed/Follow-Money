@@ -44,6 +44,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Held-out blind set 3 regressed' }
     & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.HeldOutBlind --require --file tools/fixtures/held-out-blind-4.tsv
     if ($LASTEXITCODE -ne 0) { throw 'Held-out blind set 4 regressed' }
+    & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.HeldOutBlind --require --file tools/fixtures/held-out-blind-5.tsv
+    if ($LASTEXITCODE -ne 0) { throw 'Held-out blind set 5 regressed' }
     & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.ConfidenceScorerTest
     if ($LASTEXITCODE -ne 0) { throw 'Confidence checks failed' }
     & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.LocalLearningTest

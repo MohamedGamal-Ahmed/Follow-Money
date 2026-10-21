@@ -29,3 +29,7 @@ Cells show the new pipeline's value; a miss is bold as `new ≠ expected`. Party
 | c5E08 | promo | IGNORE | \N | \N | \N | \N | \N | \N | ✓ | PROMOTIONAL_MESSAGE |  |  |
 | c5E09 | transaction | AUTO | 12000 | EGP | out | محطه وطنيه | 4450 | \N | ✓ | AMOUNT_UNAMBIGUOUS,COMPLETED_EVENT,DIRECTION_OUT |  | text only in textLines |
 | c5E10 | transaction | AUTO | 50000 | EGP | out | \N | 277000 | \N | ✓ | AMOUNT_UNAMBIGUOUS,COMPLETED_EVENT,DIRECTION_OUT | card 5521 |  |
+
+## After the owner's correction
+
+General rule: a bare `to account 1234` is the counterparty only on an outgoing movement; on an incoming one it is the user's own account (the account extraction already followed this). c5E02 now has account `8812` and no party. Set 5: **10/10**, frozen gate (`HeldOutBlind --require`). Corpus and sets 1-4 unchanged.
