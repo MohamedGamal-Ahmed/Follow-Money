@@ -26,3 +26,13 @@ Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade 
   - Anything else is `NEW`. Financial fields are never identity.
   - The verdict, the earlier row it points to, the identity and the content hash are stored on each `shadow_observations` row.
 - **Gate** (`ShadowDedupeTest`): the ten `dedupe_identity` corpus rows (p231-p240), replayed in order, match `expected_capture`, `expected_capture_reason` and `duplicate_of`. Probes cover the window edge (60 s in, 60 s + 1 ms out), source and content isolation, an identified delivery never being treated as a text candidate, a replay proven outside the window, and an identity conflict.
+
+## Debug screen (step 4)
+
+- **Opening it (no adb):** tap the version line `Follow Money · …` in Settings → المساعدة وعن التطبيق seven times. A new **إعدادات متقدمة** section then appears in Settings → البيانات والخصوصية, with the row **تشخيص المحلل (وضع الظل)**. Seven more taps hide it again. Debug builds always show it.
+- **Screen** (`ParserDebugActivity`, not exported, behind the app lock): the policy and contract versions, then a summary of the latest 300 live observations (agree / disagree by `ShadowDiff` outcome) and the number of learned rules. Three views:
+  - **الكل**: one card per message or notification, with the legacy decision and reason, its amount, direction and merchant; the new decision, score, type, movement kind, fields and reasons; the pre-learning decision when it differs; and the dedupe verdict.
+  - **الاختلافات**: disagreements only.
+  - **لم أفهمها**: the ununderstood messages, with their text opened on this device.
+- **Agreement** (`ShadowDiff`): legacy *recorded* means it wrote a ledger row, and the new pipeline *records* on AUTO or REVIEW. Two records agree only on the same amount and direction; a legacy own-account transfer fits either direction. The outcomes are BOTH_SKIP, BOTH_RECORD_SAME, BOTH_RECORD_DIFFERENT (AMOUNT / DIRECTION), LEGACY_ONLY and NEW_ONLY.
+- **Read-only and local:** a check (`ParserShadowTest`) rejects any database write, network class or share intent in the screen, and confirms it is not exported.

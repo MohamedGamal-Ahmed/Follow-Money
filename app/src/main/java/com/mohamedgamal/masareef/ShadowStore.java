@@ -144,6 +144,88 @@ final class ShadowStore {
                 "(SELECT message_hash FROM ununderstood_messages ORDER BY last_seen DESC LIMIT ?)", new Object[]{ParsingPolicy.UNUNDERSTOOD_MAX_ROWS});
     }
 
+    /** One stored observation, its sealed values opened on this device. */
+    static final class Stored {
+        long id, observedAt, receivedAt;
+        String channel, source, origin, legacyReason, legacyDecision, status, type, decision, scoredDecision, movementKind, reasons, dedupe, dedupeReason;
+        int score;
+        /** True when the sealed values exist but this device can no longer open them. */
+        boolean unreadable;
+        final java.util.Map<String, String> values = new java.util.LinkedHashMap<>(), legacy = new java.util.LinkedHashMap<>();
+
+        Long amount(java.util.Map<String, String> from) {
+            try { return from.containsKey("amount_minor") ? Long.valueOf(from.get("amount_minor")) : null; }
+            catch (NumberFormatException e) { return null; }
+        }
+
+        ShadowDiff.Result diff() {
+            return ShadowDiff.compare(ShadowDiff.legacyRecorded(legacyDecision), amount(legacy), legacy.get("direction"), decision, amount(values), values.get("direction"));
+        }
+    }
+
+    /** Newest first, at most limit rows of one origin ("live" or "rescan"). */
+    static List<Stored> recent(SQLiteDatabase sql, String origin, int limit) {
+        List<Stored> rows = new ArrayList<>();
+        try (Cursor c = sql.rawQuery("SELECT id, observed_at, received_at, channel, source, origin, legacy_reason, legacy_decision, status, type, " +
+                "decision, scored_decision, score, movement_kind, reasons, dedupe, dedupe_reason, encrypted_body FROM shadow_observations " +
+                "WHERE origin=? ORDER BY received_at DESC, id DESC LIMIT ?", new String[]{origin, Integer.toString(limit)})) {
+            while (c.moveToNext()) {
+                Stored s = new Stored();
+                s.id = c.getLong(0); s.observedAt = c.getLong(1); s.receivedAt = c.getLong(2); s.channel = c.getString(3); s.source = c.getString(4);
+                s.origin = c.getString(5); s.legacyReason = c.getString(6); s.legacyDecision = c.getString(7); s.status = c.getString(8);
+                s.type = c.getString(9); s.decision = c.getString(10); s.scoredDecision = c.getString(11); s.score = c.getInt(12);
+                s.movementKind = c.getString(13); s.reasons = c.getString(14); s.dedupe = c.getString(15); s.dedupeReason = c.getString(16);
+                EvidenceVault.Read body = EvidenceVault.read(c.getString(17));
+                s.unreadable = body.failed;
+                if (body.body != null) try {
+                    org.json.JSONObject json = new org.json.JSONObject(body.body);
+                    for (java.util.Iterator<String> k = json.keys(); k.hasNext(); ) {
+                        String key = k.next();
+                        if (!key.equals("legacy")) s.values.put(key, json.getString(key));
+                    }
+                    org.json.JSONObject legacy = json.optJSONObject("legacy");
+                    if (legacy != null) for (java.util.Iterator<String> k = legacy.keys(); k.hasNext(); ) {
+                        String key = k.next();
+                        s.legacy.put(key, legacy.getString(key));
+                    }
+                } catch (org.json.JSONException malformed) { s.unreadable = true; }
+                rows.add(s);
+            }
+        }
+        return rows;
+    }
+
+    /** A message the pipeline did not understand, its text opened on this device (null when unreadable). */
+    static final class Ununderstood {
+        long firstSeen, lastSeen;
+        int count;
+        String channel, source, reasons, text;
+    }
+
+    static List<Ununderstood> ununderstood(SQLiteDatabase sql, int limit) {
+        List<Ununderstood> rows = new ArrayList<>();
+        try (Cursor c = sql.rawQuery("SELECT first_seen, last_seen, seen_count, channel, source, reasons, encrypted_body FROM ununderstood_messages " +
+                "ORDER BY last_seen DESC LIMIT ?", new String[]{Integer.toString(limit)})) {
+            while (c.moveToNext()) {
+                Ununderstood u = new Ununderstood();
+                u.firstSeen = c.getLong(0); u.lastSeen = c.getLong(1); u.count = c.getInt(2); u.channel = c.getString(3);
+                u.source = c.getString(4); u.reasons = c.getString(5); u.text = EvidenceVault.decrypt(c.getString(6));
+                rows.add(u);
+            }
+        }
+        return rows;
+    }
+
+    /** Row counts: observations of the origin, ununderstood messages, learned shapes. */
+    static long[] counts(SQLiteDatabase sql, String origin) {
+        long[] out = new long[3];
+        String[] queries = {"SELECT COUNT(*) FROM shadow_observations WHERE origin=?", "SELECT COUNT(*) FROM ununderstood_messages",
+                "SELECT COUNT(*) FROM learning_rules"};
+        for (int i = 0; i < queries.length; i++)
+            try (Cursor c = sql.rawQuery(queries[i], i == 0 ? new String[]{origin} : null)) { if (c.moveToFirst()) out[i] = c.getLong(0); }
+        return out;
+    }
+
     private static volatile boolean learningLoaded;
 
     /** Loads the stored shape memory into the process model once; later calls do nothing. */

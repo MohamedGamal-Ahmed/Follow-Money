@@ -793,6 +793,10 @@ public final class MainActivity extends Activity {
                 // Keep access to existing records without promoting unused financial modules.
                 if(!db.assets().isEmpty())setting("الأصول المسجلة",()->{selectedTab=8;render();});
                 if(!db.debts().isEmpty())setting("الديون المسجلة",()->{selectedTab=9;render();});
+                if(BuildConfig.DEBUG||getPreferences(MODE_PRIVATE).getBoolean(ParserDebugActivity.ENABLED_KEY,false)){
+                    section("إعدادات متقدمة",null,null);
+                    setting("تشخيص المحلل (وضع الظل)",()->startActivity(new Intent(this,ParserDebugActivity.class)));
+                }
                 section("حذف البيانات",null,null);
         setting("حذف كل البيانات المحلية", () -> new ChoiceDialogBuilder()
                 .setTitle("حذف كل البيانات؟")
@@ -808,6 +812,7 @@ public final class MainActivity extends Activity {
                 break;
             default:
                 note("Follow Money · "+GitHubSupport.version(this));
+                parserDebugGesture(page.getChildAt(page.getChildCount()-1));
                 setting("ما الجديد",this::whatsNewDialog);
                 setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("الإبلاغ عن مشكلة",this::reportProblem);
@@ -2853,6 +2858,18 @@ public final class MainActivity extends Activity {
     }
 
     private void buttonStatus(String status) { toast(status); }
+
+    private int parserDebugTaps;
+    /** Hidden gesture: seven taps on the version line show or hide the parser diagnostics row in advanced settings. */
+    private void parserDebugGesture(View version) {
+        version.setOnClickListener(v->{
+            if(++parserDebugTaps<7)return;
+            parserDebugTaps=0;
+            boolean enabled=!getPreferences(MODE_PRIVATE).getBoolean(ParserDebugActivity.ENABLED_KEY,false);
+            getPreferences(MODE_PRIVATE).edit().putBoolean(ParserDebugActivity.ENABLED_KEY,enabled).apply();
+            toast(enabled?"ظهر «تشخيص المحلل» في البيانات والخصوصية ← إعدادات متقدمة":"تم إخفاء «تشخيص المحلل»");
+        });
+    }
     private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 

@@ -61,7 +61,7 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "ShadowDiff.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
@@ -97,6 +97,22 @@ public final class ParserShadowTest {
         String db = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
         check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner|TransactionExtractor|ConfidenceScorer|LocalLearning)\\b.*"), "Ledger storage never reads shadow output");
 
+        // Agreement used by the debug screen and the re-scan report.
+        same(ShadowDiff.compare(false, null, null, "IGNORE", null, null).toString(), "BOTH_SKIP", "Both skip");
+        same(ShadowDiff.compare(false, null, null, "UNUNDERSTOOD", null, null).toString(), "BOTH_SKIP", "Ununderstood records nothing");
+        same(ShadowDiff.compare(true, 4500L, "out", "AUTO", 4500L, "out").toString(), "BOTH_RECORD_SAME", "Same record");
+        same(ShadowDiff.compare(true, 4500L, "out", "REVIEW", 4500L, "out").agrees(), true, "Review still records");
+        same(ShadowDiff.compare(true, 4500L, "out", "AUTO", 450L, "in").toString(), "BOTH_RECORD_DIFFERENT:AMOUNT+DIRECTION", "Both fields differ");
+        same(ShadowDiff.compare(true, 4500L, "out", "AUTO", 4500L, "in").toString(), "BOTH_RECORD_DIFFERENT:DIRECTION", "Direction differs");
+        same(ShadowDiff.compare(true, 4500L, "transfer", "REVIEW", 4500L, "in").toString(), "BOTH_RECORD_SAME", "Own transfer has no in/out");
+        same(ShadowDiff.compare(true, 4500L, "out", "IGNORE", null, null).toString(), "LEGACY_ONLY", "Legacy only");
+        same(ShadowDiff.compare(false, null, null, "AUTO", 4500L, "out").toString(), "NEW_ONLY", "New only");
+        check(ShadowDiff.legacyRecorded("RECORDED_REVIEW") && !ShadowDiff.legacyRecorded("NOT_RECORDED"), "Legacy decision labels");
+        // The debug screen is read-only and local: no ledger write, no network, not exported.
+        String debug = Files.readString(source.resolve("ParserDebugActivity.java"), StandardCharsets.UTF_8);
+        check(!debug.matches("(?s).*(getWritableDatabase|\\.insert\\(|execSQL|\\.delete\\(|\\.update\\(|HttpURLConnection|java\\.net\\.|Intent\\.ACTION_SEND).*"), "Debug screen is read-only and offline");
+        String manifest = Files.readString(Path.of("app/src/main/AndroidManifest.xml"), StandardCharsets.UTF_8);
+        check(manifest.contains("<activity android:name=\".ParserDebugActivity\" android:exported=\"false\" />"), "Debug screen not exported");
         ParserShadow.clear();
         System.out.println("Parser shadow checks passed: " + checks + " (" + rows.size() + " corpus rows observed; legacy remains the only ledger authority).");
     }

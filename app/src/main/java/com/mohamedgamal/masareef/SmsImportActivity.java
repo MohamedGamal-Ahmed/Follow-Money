@@ -51,7 +51,7 @@ public final class SmsImportActivity extends Activity {
     private boolean dark;
     private int INK, MUTED, background, surface;
 
-    private static android.content.SharedPreferences mainPreferences(Context context){
+    static android.content.SharedPreferences mainPreferences(Context context){
         String name=MainActivity.class.getName(),prefix=context.getPackageName()+".";
         if(name.startsWith(prefix))name=name.substring(prefix.length());
         return context.getSharedPreferences(name,MODE_PRIVATE);
