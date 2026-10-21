@@ -51,7 +51,7 @@ final class SelectionUiTest {
     private void click(String text){
         List<AccessibilityNodeInfo> nodes=runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText(text);
         for(AccessibilityNodeInfo node:nodes){
-            if(node.isEditable()||node.getText()==null||!node.getText().toString().equals(text))continue;
+            if(node.isEditable()||(!plain(node.getText()).equals(plain(text))&&!plain(node.getContentDescription()).equals(plain(text))))continue;
             while(node!=null&&!node.isClickable())node=node.getParent();
             if(node!=null){node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());idle();node.refresh();}
             if(node!=null&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){idle();return;}
@@ -70,7 +70,9 @@ final class SelectionUiTest {
     private void visibleAction(String text) {
         AccessibilityNodeInfo root=runner.getUiAutomation().getRootInActiveWindow();
         for(AccessibilityNodeInfo node:root.findAccessibilityNodeInfosByText(text)) {
-            if(!plain(node.getText()).equals(plain(text))||!node.isVisibleToUser())continue;
+            // Fixed page-header actions expose their name as a content description, unlike footer text buttons.
+            if((!plain(node.getText()).equals(plain(text))&&!plain(node.getContentDescription()).equals(plain(text)))
+                    ||!node.isVisibleToUser()||!node.isClickable())continue;
             android.graphics.Rect bounds=new android.graphics.Rect();node.getBoundsInScreen(bounds);
             ok(bounds.height()>=Math.round(48*activity.getResources().getDisplayMetrics().density));return;
         }
