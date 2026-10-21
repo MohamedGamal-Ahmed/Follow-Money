@@ -19,12 +19,14 @@ public final class ParserShadowTest {
         long now = 1_792_600_000_000L;
         for (ParserCorpusFixture.Row row : rows) {
             ParserShadow.Observation seen = ParserShadow.observe(MessageNormalizerTest.raw(row), "LEGACY_REASON", null, now++);
-            check(seen != null && (seen.status.equals("NORMALIZED") || seen.status.equals("EMPTY")), "Shadow status " + row.get("id") + " " + seen);
+            check(seen != null && (seen.status.equals("CLASSIFIED") || seen.status.equals("EMPTY")), "Shadow status " + row.get("id") + " " + seen);
+            if (seen.status.equals("CLASSIFIED")) same(seen.type.toLowerCase(java.util.Locale.ROOT), row.get("expected_type"), "Shadow classification " + row.get("id"));
             check(seen.toString().contains(ParserShadow.NOT_IMPLEMENTED), "Unimplemented stages stated " + row.get("id"));
             // Only structure is retained: no fragment of the message text appears in the observation.
             for (String word : MessageNormalizer.normalize(MessageNormalizerTest.raw(row)).text.split("[^\\p{L}]+"))
                 if (word.length() >= 5 && !List.of("EMPTY", "SPACING", "NORMALIZED", "android", "title", "bigText", "textLines", "subText", "summaryText", "LEGACY", "REASON", "notImplemented", "CLASSIFICATION", "EXTRACTION", "CONFIDENCE", "LEARNING", "LOCAL", "policy", "normalization", "chars", "fields", "reasons", "legacy", "DIGITS", "FOLDED", "CONTROLS", "REMOVED", "TATWEEL", "GROUP", "SUMMARY", "DUPLICATE", "EXTRA", "OVERLAP", "COLLAPSED", "MESSAGE", "NOTIFICATION").contains(word))
-                    check(!seen.toString().contains(word), "Message text kept in observation " + row.get("id") + ": " + word);
+                    // The observation's own upper-case codes (PROMO, CLASSIFIED, ...) are vocabulary, not message text.
+                    check(!seen.toString().replaceAll("\\b[A-Z][A-Z_]+\\b", "").contains(word), "Message text kept in observation " + row.get("id") + ": " + word);
         }
         List<ParserShadow.Observation> recent = ParserShadow.recent();
         same(recent.size(), ParsingPolicy.SHADOW_BUFFER_SIZE, "Bounded in-memory buffer");
@@ -50,12 +52,12 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
                 String text = Files.readString(file, StandardCharsets.UTF_8).replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//[^\\n]*", "");
-                boolean uses = text.matches("(?s).*\\b(ParserShadow|MessageNormalizer|MerchantNormalizer|MerchantCatalogIndex|ParsingPolicy)\\b.*");
+                boolean uses = text.matches("(?s).*\\b(ParserShadow|MessageNormalizer|MerchantNormalizer|MerchantCatalogIndex|ParsingPolicy|AmountScanner|MessageClassifier)\\b.*");
                 check(!uses || allowed.contains(name), "Production class uses the shadow pipeline: " + name);
             }
         }
@@ -63,7 +65,7 @@ public final class ParserShadowTest {
         check(capture.matches("(?s).*try \\{\\s*ParserShadow\\.observe\\(.*catch \\(RuntimeException \\| LinkageError.*"), "Shadow call is isolated");
         check(!capture.matches("(?s).*=\\s*ParserShadow\\.observe.*"), "Shadow result is never used by capture");
         String db = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
-        check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex)\\b.*"), "Ledger storage never reads shadow output");
+        check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner)\\b.*"), "Ledger storage never reads shadow output");
 
         ParserShadow.clear();
         System.out.println("Parser shadow checks passed: " + checks + " (" + rows.size() + " corpus rows observed; legacy remains the only ledger authority).");

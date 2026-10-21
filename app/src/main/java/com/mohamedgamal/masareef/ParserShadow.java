@@ -14,25 +14,26 @@ import java.util.Set;
  */
 final class ParserShadow {
     /** Stages not implemented yet; every observation says so instead of inventing a decision. */
-    static final String NOT_IMPLEMENTED = "CLASSIFICATION|EXTRACTION|CONFIDENCE|LOCAL_LEARNING";
+    static final String NOT_IMPLEMENTED = "EXTRACTION|CONFIDENCE|LOCAL_LEARNING";
 
     static final class Observation {
         final long observedAt;
-        final String channel, legacyReason, status, merchantProposal, policy;
+        final String channel, legacyReason, status, merchantProposal, policy, type, stageDecision;
         final Set<String> reasons;
         final int fragments, normalizedChars;
         final List<String> fields;
 
         Observation(long observedAt, String channel, String legacyReason, String status, Set<String> reasons,
-                    int fragments, int normalizedChars, List<String> fields, String merchantProposal) {
+                    int fragments, int normalizedChars, List<String> fields, String merchantProposal, String type, String stageDecision) {
             this.observedAt = observedAt; this.channel = channel; this.legacyReason = legacyReason; this.status = status;
             this.reasons = Collections.unmodifiableSet(reasons); this.fragments = fragments; this.normalizedChars = normalizedChars;
             this.fields = Collections.unmodifiableList(fields); this.merchantProposal = merchantProposal;
-            this.policy = ParsingPolicy.POLICY_VERSION + "/" + ParsingPolicy.NORMALIZER_VERSION + "/" + ParsingPolicy.CORPUS_CONTRACT;
+            this.type = type; this.stageDecision = stageDecision;
+            this.policy = ParsingPolicy.POLICY_VERSION + "/" + ParsingPolicy.NORMALIZER_VERSION + "/" + ParsingPolicy.CLASSIFIER_VERSION + "/" + ParsingPolicy.CORPUS_CONTRACT;
         }
 
         @Override public String toString() {
-            return channel + " " + status + " legacy=" + legacyReason + " reasons=" + reasons + " fields=" + fields +
+            return channel + " " + status + (type == null ? "" : " type=" + type + "/" + stageDecision) + " legacy=" + legacyReason + " reasons=" + reasons + " fields=" + fields +
                     " chars=" + normalizedChars + (merchantProposal == null ? "" : " merchant=" + merchantProposal) +
                     " notImplemented=" + NOT_IMPLEMENTED + " policy=" + policy;
         }
@@ -50,6 +51,8 @@ final class ParserShadow {
         try {
             MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);
             Set<String> reasons = new LinkedHashSet<>(normalized.reasons);
+            MessageClassifier.Result classified = MessageClassifier.classify(normalized);
+            reasons.addAll(classified.reasons);
             String proposal = null;
             if (legacyMerchant != null && !legacyMerchant.isBlank()) {
                 MerchantCatalogIndex.Match match = MerchantCatalogIndex.standard().lookup(legacyMerchant);
@@ -57,12 +60,13 @@ final class ParserShadow {
                 String legacyIdentity = MerchantClassifier.category(legacyMerchant) == null ? null : MerchantClassifier.displayName(legacyMerchant);
                 reasons.add(java.util.Objects.equals(match.name, legacyIdentity) ? "MERCHANT_AGREES" : "MERCHANT_DIFFERS");
             }
-            observation = new Observation(now, raw.channel.name(), legacyReason, normalized.empty() ? "EMPTY" : "NORMALIZED",
-                    reasons, normalized.fragments.size(), normalized.text.length(), new ArrayList<>(normalized.fields), proposal);
+            observation = new Observation(now, raw.channel.name(), legacyReason, normalized.empty() ? "EMPTY" : "CLASSIFIED",
+                    reasons, normalized.fragments.size(), normalized.text.length(), new ArrayList<>(normalized.fields), proposal,
+                    classified.type.name(), classified.decision.name());
         } catch (RuntimeException | StackOverflowError failure) {
             // A shadow failure is itself a diagnostic; it never propagates to legacy capture.
             observation = new Observation(now, raw.channel.name(), legacyReason, "STAGE_FAILED:" + failure.getClass().getSimpleName(),
-                    new LinkedHashSet<>(), 0, 0, new ArrayList<>(), null);
+                    new LinkedHashSet<>(), 0, 0, new ArrayList<>(), null, null, null);
         }
         synchronized (RECENT) {
             RECENT.addLast(observation);
