@@ -75,3 +75,11 @@ Only base rows are counted. Generated variations, field-order permutations and p
 - `syn-vfcash-in` and variants: `expected_counterparty_token = 010XXXXX123`.
 - Dual currency (`syn-dual-*`, 7 rows): accounting amount EGP 495.25; `expected_original_amount_minor/currency` = 999 USD for display.
 - `--require-ready`: PASS, zero blockers. Approved v2 SHA-256 is the one in this report's header.
+
+## Corpus defect fixed during Normalization — 21 October 2026
+
+MerchantNormalizerTest found four synthetic merchant keys written without the corpus's own folding contract
+(`p107`/`p112`/`p113`: ta marbuta → ha, alef maqsura → ya, hamza alef → alef). Corrected bases and their
+variants (16 rows): `صيدليه النور`, `مخبز الامانه`, `متجر الهدي`, `سوبر ماركت الرحمه`. No other expectation changed.
+The implementation was not changed to fit them; the oracle contradicted the existing v1 normalization rows.
+`--require-ready`: PASS. Current v2 SHA-256: `6c8b865e47c8cb3535aa20974a2817ed12c7ab720c692e8a13e417a5d853778c`.
