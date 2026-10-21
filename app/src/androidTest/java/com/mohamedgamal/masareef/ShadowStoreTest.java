@@ -26,6 +26,12 @@ final class ShadowStoreTest {
         }
     }
 
+    private static void collect(android.view.View view, StringBuilder out) {
+        if (view instanceof android.widget.TextView) out.append(((android.widget.TextView) view).getText()).append('\n');
+        if (view instanceof android.view.ViewGroup)
+            for (int i = 0; i < ((android.view.ViewGroup) view).getChildCount(); i++) collect(((android.view.ViewGroup) view).getChildAt(i), out);
+    }
+
     private static long count(SQLiteDatabase sql, String query) {
         try (Cursor c = sql.rawQuery(query, null)) { return c.moveToFirst() ? c.getLong(0) : -1; }
     }
@@ -120,7 +126,27 @@ final class ShadowStoreTest {
             ShadowReport.Summary report = ShadowReport.build(new java.util.ArrayList<>(), scan.scanned, scan.skippedUnstored);
             check(report.scanned == scan.scanned, "Report built");
 
-            // 8. Delete all local data removes shadow data.
+            // 8. The hidden debug screen renders every view over the stored rows (live, differences, ununderstood, re-scan report).
+            android.content.Intent open = new android.content.Intent(target, ParserDebugActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            ParserDebugActivity screen = (ParserDebugActivity) runner.startActivitySync(open);
+            java.lang.reflect.Field viewField = ParserDebugActivity.class.getDeclaredField("view"), loadedField = ParserDebugActivity.class.getDeclaredField("loaded");
+            viewField.setAccessible(true); loadedField.setAccessible(true);
+            java.lang.reflect.Method show = ParserDebugActivity.class.getDeclaredMethod("show"), load = ParserDebugActivity.class.getDeclaredMethod("load");
+            show.setAccessible(true); load.setAccessible(true);
+            String[][] views = {{"all", "QABANK"}, {"diff", "إعادة الفحص"}, {"ununderstood", "Cafe Nine"}, {"rescan", "اتفاق:"}};
+            for (String[] v : views) {
+                runner.runOnMainSync(() -> { try { viewField.set(screen, v[0]); loadedField.set(screen, null); load.invoke(screen); show.invoke(screen); } catch (Exception e) { throw new RuntimeException(e); } });
+                String shown = "";
+                for (int i = 0; i < 100; i++) {
+                    Thread.sleep(100); runner.waitForIdleSync();
+                    StringBuilder all = new StringBuilder(); collect(screen.getWindow().getDecorView(), all); shown = all.toString();
+                    if (loadedField.get(screen) != null && shown.contains(v[1])) break;
+                }
+                check(shown.contains("تشخيص المحلل") && shown.contains(v[1]), "Debug view " + v[0] + " shows " + v[1]);
+            }
+            screen.finish(); runner.waitForIdleSync();
+
+            // 9. Delete all local data removes shadow data.
             db.clearAllData();
             check(count(sql, "SELECT (SELECT COUNT(*) FROM shadow_observations)+(SELECT COUNT(*) FROM ununderstood_messages)+(SELECT COUNT(*) FROM learning_rules)") == 0,
                     "Shadow data deleted with all data");

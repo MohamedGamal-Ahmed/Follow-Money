@@ -53,7 +53,7 @@ Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade 
 ## On-device verification and data deletion
 
 - **Delete all local data** (البيانات والخصوصية → حذف كل البيانات المحلية) now also removes `shadow_observations`, `ununderstood_messages`, `learning_rules`, the re-scan summary and the in-memory shadow copies. A check enforces it.
-- `tools/run-shadow-store.ps1` (disposable emulator, isolated `.shadowqa` app) runs `ShadowStoreTest`: **32 checks passed** on Medium_Phone_API_36.1, 21 October 2026. They cover:
+- `tools/run-shadow-store.ps1` (disposable emulator, isolated `.shadowqa` app) runs `ShadowStoreTest`: **36 checks passed** on Medium_Phone_API_36.1, 21 October 2026. They cover:
   - the v25 → v26 upgrade;
   - a live SMS capture whose shadow row is linked to the ledger row, with the ledger revision unchanged by the shadow write;
   - values and text sealed by the Keystore and opened again;
@@ -62,4 +62,6 @@ Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade 
   - learning rules stored as hashes;
   - a backup snapshot opening every shadow body and a restore re-sealing it, with the live database untouched;
   - a re-scan of real inbox SMS (sent through the emulator console) comparing the payment on both sides, with no ledger change, and a second re-scan replacing the first;
+  - the hidden debug screen rendering all four views (live, differences, ununderstood, re-scan report) over those rows;
   - delete-all emptying everything.
+- The test APK ``0.3.4- Test`` (Development build, same app ID and debug signer as v9) was installed over the v9 Development APK on the emulator. It updated in place, opened without a crash, and upgraded the database to schema 26 with the three shadow tables.
