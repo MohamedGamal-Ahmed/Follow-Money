@@ -14,3 +14,15 @@ Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade 
 - Failure isolation: the store call sits in the same guarded block as the shadow observation in `CaptureTransaction`; any exception is swallowed and the capture result is built before it runs.
 - Checks (`ParserShadowTest`, `LocalLearningTest`): the observation is used only by the store; both sealed columns go through `EvidenceVault.encrypt`; no shadow table is in `LedgerRevision`; the backup re-seals both; the tables exist on install and upgrade; learning export/restore keeps decisions and eviction order with hashes only.
 - Not verified on a device yet: the Keystore round trip and the upgrade from v25 run only on Android (step 6).
+
+## Listener and dedupe (step 3)
+
+- **Six fields:** the listener passes the six separate extras (`shadowInput`). A notification legacy never captures (a GROUP_SUMMARY, or no title/text, such as text only in `textLines`) is now observed in shadow with `legacy_reason` `LEGACY_GROUP_SUMMARY` or `LEGACY_NO_BODY`. Nothing is recorded for it, and the legacy capture call is unchanged.
+- **Identity first:** each delivery carries its identity (`MessageNormalizer.Raw.identity`): `notification:` plus the Android key and the original post time, or `sms:` plus the inbox ID where one exists (live SMS broadcasts have none). Identity never reaches the text or the parser.
+- **Dedupe** (`ShadowDedupe`, the corpus contract in [README.md](README.md#dedupe-contract-identity-first-60-seconds-only-for-candidates)):
+  - The same identity with the same normalized content is `REPLAY`.
+  - The same identity with other content is `REVIEW_DUPLICATE/IDENTITY_CONFLICT`.
+  - Without identity, the same source and normalized content within 60 s of any earlier identity-less delivery is `REVIEW_DUPLICATE/IDENTITY_UNAVAILABLE`, never dropped.
+  - Anything else is `NEW`. Financial fields are never identity.
+  - The verdict, the earlier row it points to, the identity and the content hash are stored on each `shadow_observations` row.
+- **Gate** (`ShadowDedupeTest`): the ten `dedupe_identity` corpus rows (p231-p240), replayed in order, match `expected_capture`, `expected_capture_reason` and `duplicate_of`. Probes cover the window edge (60 s in, 60 s + 1 ms out), source and content isolation, an identified delivery never being treated as a text candidate, a replay proven outside the window, and an identity conflict.

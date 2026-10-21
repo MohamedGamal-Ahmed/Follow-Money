@@ -107,19 +107,33 @@ public final class PaymentNotificationListener extends NotificationListenerServi
         return value == null ? "" : value.toString().trim();
     }
 
+    /** The shadow input with this delivery's identity (Android key + original post time), or null. */
+    private static MessageNormalizer.Raw shadowDelivery(StatusBarNotification item, String packageName) {
+        try {
+            MessageNormalizer.Raw raw = shadowInput(packageName, item.getNotification());
+            return raw == null ? null : raw.withIdentity(MessageNormalizer.Raw.notificationIdentity(item.getKey(), item.getPostTime()));
+        } catch (RuntimeException ignored) { return null; } // Shadow input must never block legacy capture.
+    }
+
     private static void process(Context context, StatusBarNotification item, String packageName) {
         try {
             String body = notificationBody(item.getNotification());
-            if (body == null) return;
             String label;
             try { label = context.getPackageManager().getApplicationLabel(
                     context.getPackageManager().getApplicationInfo(packageName, 0)).toString(); }
             catch (Exception ignored) { label = packageName; }
+            if (body == null) {
+                // Legacy skips it (group summary or no title/text); shadow still observes it and records nothing.
+                MessageNormalizer.Raw shadow = shadowDelivery(item, packageName);
+                if (shadow == null) return;
+                Notification n = item.getNotification();
+                String reason = n != null && (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0 ? "LEGACY_GROUP_SUMMARY" : "LEGACY_NO_BODY";
+                try (ExpenseDb db = new ExpenseDb(context)) { CaptureTransaction.observeWithoutCapture(db, shadow, label, item.getPostTime(), reason); }
+                return;
+            }
             try (ExpenseDb db = new ExpenseDb(context)) {
                 ExpenseDb.Transaction before = db.latestInserted();
-                MessageNormalizer.Raw shadow;
-                try { shadow = shadowInput(packageName, item.getNotification()); }
-                catch (RuntimeException ignored) { shadow = null; } // Shadow input must never block legacy capture.
+                MessageNormalizer.Raw shadow = shadowDelivery(item, packageName);
                 CaptureResult result = db.captureNotification(packageName, label, body, item.getPostTime(), shadow);
                 boolean added = result.dbChanged;
                 if (added)

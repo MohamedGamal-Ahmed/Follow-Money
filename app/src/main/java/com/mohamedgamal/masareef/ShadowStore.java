@@ -10,8 +10,9 @@ import java.util.List;
  * Persistent shadow storage (schema v26). Three tables, none tracked by LedgerRevision, so a write here never looks
  * like a ledger change:
  * shadow_observations: one row per observed message, beside the legacy record it describes (transaction_id /
- * unique_key / message_hash). Decision, reasons, score and kind are plain; field values (amounts, merchant, party)
- * and the legacy values are one JSON object sealed by EvidenceVault in encrypted_body.
+ * message_hash), with its delivery identity, content hash and ShadowDedupe verdict. Decision, reasons, score and kind
+ * are plain; field values (amounts, merchant, party) and the legacy values are one JSON object sealed by EvidenceVault
+ * in encrypted_body.
  * ununderstood_messages: "messages I did not understand", one row per distinct message, text sealed in encrypted_body.
  * learning_rules: the local-learning shape memory (hashes and counts, never text) and, later, user corrections.
  * Every write is diagnostics only: callers swallow failures and the legacy decision stays final.
@@ -20,11 +21,14 @@ final class ShadowStore {
     static void create(SQLiteDatabase sql) {
         sql.execSQL("CREATE TABLE IF NOT EXISTS shadow_observations(id INTEGER PRIMARY KEY, observed_at INTEGER NOT NULL, " +
                 "received_at INTEGER NOT NULL, channel TEXT NOT NULL, source TEXT, origin TEXT NOT NULL DEFAULT 'live', message_hash TEXT, " +
+                "delivery_identity TEXT, content_hash TEXT NOT NULL, dedupe TEXT NOT NULL, dedupe_reason TEXT, duplicate_of INTEGER, " +
                 "transaction_id INTEGER, legacy_reason TEXT, legacy_decision TEXT NOT NULL, status TEXT NOT NULL, type TEXT, " +
                 "stage_decision TEXT, scored_decision TEXT, decision TEXT, score INTEGER NOT NULL DEFAULT -1, movement_kind TEXT, " +
                 "reasons TEXT NOT NULL, policy TEXT NOT NULL, encrypted_body TEXT)");
         sql.execSQL("CREATE INDEX IF NOT EXISTS shadow_observed ON shadow_observations(observed_at DESC)");
         sql.execSQL("CREATE INDEX IF NOT EXISTS shadow_transaction ON shadow_observations(transaction_id)");
+        sql.execSQL("CREATE INDEX IF NOT EXISTS shadow_content ON shadow_observations(content_hash, received_at)");
+        sql.execSQL("CREATE INDEX IF NOT EXISTS shadow_identity ON shadow_observations(delivery_identity)");
         sql.execSQL("CREATE TABLE IF NOT EXISTS ununderstood_messages(message_hash TEXT PRIMARY KEY, first_seen INTEGER NOT NULL, " +
                 "last_seen INTEGER NOT NULL, seen_count INTEGER NOT NULL DEFAULT 1, channel TEXT NOT NULL, source TEXT, " +
                 "reasons TEXT NOT NULL, policy TEXT NOT NULL, encrypted_body TEXT)");
@@ -46,11 +50,12 @@ final class ShadowStore {
         return kind;
     }
 
-    /** Stores one live observation beside the legacy capture result. */
-    static void record(SQLiteDatabase sql, CaptureRequest request, CaptureResult result, ParserShadow.Observation o) {
-        ExpenseDb.Transaction t = result.transaction;
-        record(sql, "live", request.raw, request.body, request.label, request.captureAt, result.transactionId,
-                String.valueOf(result.reason), legacyDecision(result), t == null ? null : t.amountMinor, t == null ? null : t.currency,
+    /** Stores one live observation beside the legacy capture result; result is null when legacy never captured it. */
+    static void record(SQLiteDatabase sql, MessageNormalizer.Raw raw, String legacyBody, String source, long receivedAt,
+                       CaptureResult result, String legacyReason, ParserShadow.Observation o) {
+        ExpenseDb.Transaction t = result == null ? null : result.transaction;
+        record(sql, "live", raw, legacyBody, source, receivedAt, result == null ? null : result.transactionId,
+                legacyReason, result == null ? "NOT_RECORDED" : legacyDecision(result), t == null ? null : t.amountMinor, t == null ? null : t.currency,
                 t == null ? null : legacyDirection(t.kind), t == null ? null : t.merchant, o);
     }
 
@@ -69,6 +74,10 @@ final class ShadowStore {
             sealed.put("legacy", legacy);
         } catch (org.json.JSONException impossible) { /* string keys and values only */ }
         String hash = legacyBody == null ? null : CaptureIdentity.hash(legacyBody);
+        String content = ShadowDedupe.contentHash(raw == null ? source : raw.source, raw == null ? String.valueOf(legacyBody) : MessageNormalizer.normalize(raw).text);
+        String identity = raw == null ? null : raw.identity;
+        ShadowDedupe.Verdict dedupe = ShadowDedupe.decide(new ShadowDedupe.Delivery(-1, source, identity, receivedAt, content),
+                earlier(sql, origin, identity, content, receivedAt));
         ContentValues row = new ContentValues();
         row.put("observed_at", o.observedAt);
         row.put("received_at", receivedAt);
@@ -76,6 +85,11 @@ final class ShadowStore {
         row.put("source", source);
         row.put("origin", origin);
         row.put("message_hash", hash);
+        row.put("delivery_identity", identity);
+        row.put("content_hash", content);
+        row.put("dedupe", dedupe.capture);
+        row.put("dedupe_reason", dedupe.reason);
+        if (dedupe.duplicateOf >= 0) row.put("duplicate_of", dedupe.duplicateOf);
         if (transactionId != null) row.put("transaction_id", transactionId);
         row.put("legacy_reason", legacyReason);
         row.put("legacy_decision", legacyDecision);
@@ -92,7 +106,19 @@ final class ShadowStore {
         sql.insert("shadow_observations", null, row);
         sql.execSQL("DELETE FROM shadow_observations WHERE id <= (SELECT MAX(id) FROM shadow_observations) - ?",
                 new Object[]{ParsingPolicy.SHADOW_STORE_MAX_ROWS});
-        if ("UNUNDERSTOOD".equals(o.decision) && raw != null && hash != null) rememberUnunderstood(sql, raw, hash, source, o);
+        if ("UNUNDERSTOOD".equals(o.decision) && raw != null) rememberUnunderstood(sql, raw, content, source, o);
+    }
+
+    /** Earlier deliveries of the same origin that could matter: the same identity, or the same content near in time. */
+    private static List<ShadowDedupe.Delivery> earlier(SQLiteDatabase sql, String origin, String identity, String content, long receivedAt) {
+        List<ShadowDedupe.Delivery> found = new ArrayList<>();
+        long window = ParsingPolicy.DUPLICATE_CANDIDATE_WINDOW_MS;
+        try (Cursor c = sql.rawQuery("SELECT id, source, delivery_identity, received_at, content_hash FROM shadow_observations WHERE origin=? AND " +
+                        "(delivery_identity=? OR (content_hash=? AND received_at BETWEEN ? AND ?))",
+                new String[]{origin, identity == null ? "" : identity, content, Long.toString(receivedAt - window), Long.toString(receivedAt + window)})) {
+            while (c.moveToNext()) found.add(new ShadowDedupe.Delivery(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3), c.getString(4)));
+        }
+        return found;
     }
 
     private static void rememberUnunderstood(SQLiteDatabase sql, MessageNormalizer.Raw raw, String hash, String source, ParserShadow.Observation o) {

@@ -61,7 +61,7 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
@@ -75,7 +75,12 @@ public final class ParserShadowTest {
         check(capture.matches("(?s).*try \\{[^}]*db\\.merchantRules\\(\\)[^}]*ParserShadow\\.observe\\([^}]*ShadowStore\\.record\\([^}]*\\} catch \\(RuntimeException \\| LinkageError.*"), "Shadow call and store are isolated");
         // The observation goes only to the shadow store: declared once, read once, inside the guarded block.
         same(capture.split("\\bobservation\\b", -1).length - 1, 2, "Shadow result is never used by capture");
-        check(capture.contains("ShadowStore.record(sql, request, result, observation);"), "Observation stored beside the legacy result");
+        check(capture.contains("ShadowStore.record(sql, raw, legacyBody, label, receivedAt, result, legacyReason, observation);"), "Observation stored beside the legacy result");
+        // A notification legacy skips is observed in shadow only: that branch returns before any capture call.
+        String listener = Files.readString(source.resolve("PaymentNotificationListener.java"), StandardCharsets.UTF_8);
+        check(listener.matches("(?s).*if \\(body == null\\) \\{[^}]*CaptureTransaction\\.observeWithoutCapture\\([^}]*\\}\\s*return;\\s*\\}.*"), "Body-less notification observed, never captured");
+        check(listener.contains("raw.withIdentity(MessageNormalizer.Raw.notificationIdentity(item.getKey(), item.getPostTime()))"), "Notification identity is key plus original post time");
+        check(listener.contains("captureNotification(packageName, label, body, item.getPostTime(), shadow)"), "Legacy capture unchanged");
         // Storage: sealed values, outside the ledger revision, created on install and upgrade.
         String store = Files.readString(source.resolve("ShadowStore.java"), StandardCharsets.UTF_8);
         same(store.split("put\\(\"encrypted_body\", EvidenceVault\\.encrypt\\(", -1).length - 1, 2, "Observation values and ununderstood text are sealed");

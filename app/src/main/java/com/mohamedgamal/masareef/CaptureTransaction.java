@@ -19,12 +19,21 @@ final class CaptureTransaction {
         finish(request, write);
         CaptureResult result = new CaptureResult(write, capturedId,
                 write.rowId < 0 ? null : db.transactionById(write.rowId), pending, before, db.changes());
-        shadow(request, result);
+        shadow(db, request.raw, request.label, request.body, request.captureAt, result, String.valueOf(result.reason));
         return result;
     }
 
+    /**
+     * A notification the legacy path never captures (a group summary, or text only in extras it does not read) is
+     * still observed in shadow. Nothing is recorded; legacyReason says why legacy skipped it.
+     */
+    static void observeWithoutCapture(ExpenseDb db, MessageNormalizer.Raw raw, String label, long receivedAt, String legacyReason) {
+        shadow(db, raw, label, null, receivedAt, null, legacyReason);
+    }
+
     /** Runs after the legacy decision is final; a shadow failure must never change or fail the capture. */
-    private void shadow(CaptureRequest request, CaptureResult result) {
+    private static void shadow(ExpenseDb db, MessageNormalizer.Raw raw, String label, String legacyBody, long receivedAt,
+                               CaptureResult result, String legacyReason) {
         try {
             // The user's merchant rules, read only, after the legacy decision is final.
             java.util.List<LocalLearning.MerchantRule> rules = new java.util.ArrayList<>();
@@ -32,10 +41,10 @@ final class CaptureTransaction {
             ParserShadow.learning().setMerchantRules(rules);
             android.database.sqlite.SQLiteDatabase sql = db.getWritableDatabase();
             ShadowStore.loadLearningOnce(sql, ParserShadow.learning());
-            ParserShadow.Observation observation = ParserShadow.observe(request.raw, String.valueOf(result.reason),
-                    result.transaction == null ? null : result.transaction.merchant, request.captureAt, System.currentTimeMillis());
+            ParserShadow.Observation observation = ParserShadow.observe(raw, legacyReason,
+                    result == null || result.transaction == null ? null : result.transaction.merchant, receivedAt, System.currentTimeMillis());
             // Stored beside the legacy record; these tables are outside LedgerRevision, so the ledger sees no change.
-            ShadowStore.record(sql, request, result, observation);
+            ShadowStore.record(sql, raw, legacyBody, label, receivedAt, result, legacyReason, observation);
         } catch (RuntimeException | LinkageError ignored) {
             // Diagnostics only.
         }

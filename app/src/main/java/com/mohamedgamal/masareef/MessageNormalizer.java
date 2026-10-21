@@ -21,9 +21,32 @@ final class MessageNormalizer {
         final String source, body;
         final String[] extras;
         final int flags;
+        /**
+         * Delivery identity, or null when unavailable: "sms:" + inbox ID, or "notification:" + Android key + "@" +
+         * original post time. Never derived from financial fields; normalization ignores it (ShadowDedupe reads it).
+         */
+        final String identity;
 
         private Raw(Channel channel, String source, String body, String[] extras, int flags) {
+            this(channel, source, body, extras, flags, null);
+        }
+
+        private Raw(Channel channel, String source, String body, String[] extras, int flags, String identity) {
             this.channel = channel; this.source = source; this.body = body; this.extras = extras; this.flags = flags;
+            this.identity = identity == null || identity.isEmpty() ? null : identity;
+        }
+
+        /** The same delivery with its identity attached. */
+        Raw withIdentity(String identity) {
+            return new Raw(channel, source, body, extras, flags, identity);
+        }
+
+        static String smsIdentity(String inboxId) {
+            return inboxId == null || inboxId.isEmpty() ? null : "sms:" + inboxId;
+        }
+
+        static String notificationIdentity(String key, long postTime) {
+            return key == null || key.isEmpty() ? null : "notification:" + key + "@" + postTime;
         }
 
         static Raw sms(String source, String body) {
