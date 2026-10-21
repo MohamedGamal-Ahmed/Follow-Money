@@ -40,7 +40,7 @@ public final class HeldOutBlind {
     /** The new pipeline's eight compared values for one held-out message. */
     static Map<String, String> run(Map<String, String> row, long receivedAt) {
         MessageNormalizer.Raw raw = "sms".equals(row.get("channel")) ? MessageNormalizer.Raw.sms("held-out", row.get("body")) :
-                MessageNormalizer.Raw.notification("held-out", 0, row.get("android.title"), row.get("android.text"), null,
+                MessageNormalizer.Raw.notification("held-out", 0, row.get("android.title"), row.get("android.text"), row.get("android.bigText"),
                         row.get("android.textLines"), null, null);
         MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);
         MessageClassifier.Result classified = MessageClassifier.classify(normalized);
@@ -78,7 +78,9 @@ public final class HeldOutBlind {
     }
 
     public static void main(String[] args) throws Exception {
-        List<Map<String, String>> rows = read(Path.of("tools/fixtures/held-out-blind.tsv"));
+        int fileArg = List.of(args).indexOf("--file");
+        String file = fileArg >= 0 ? args[fileArg + 1] : "tools/fixtures/held-out-blind.tsv";
+        List<Map<String, String>> rows = read(Path.of(file));
         long receivedAt = java.time.LocalDateTime.of(2026, 10, 22, 12, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
         int hits = 0;
         int[] fieldHits = new int[FIELDS.length];
@@ -110,7 +112,7 @@ public final class HeldOutBlind {
         out.addAll(table);
         String report = String.join("\n", out) + "\n";
         if (args.length > 1 && args[0].equals("--write")) Files.writeString(Path.of(args[1]), report, StandardCharsets.UTF_8);
-        System.out.println("Held-out blind set: " + hits + "/" + rows.size() + " messages fully correct; misses " + failures);
+        System.out.println("Held-out blind set " + Path.of(file).getFileName() + ": " + hits + "/" + rows.size() + " messages fully correct; misses " + failures);
         if (List.of(args).contains("--require") && hits != rows.size()) throw new AssertionError("Held-out blind regressions: " + failures);
     }
 

@@ -1,0 +1,28 @@
+# HELD-OUT BLIND SET 2, owner-written 22 October 2026. Separate from the corpus and from set 1. Never use these messages to develop or tune rules.
+# Raw first run on unchanged code (a0dd42d) and owner verdict: decision 20/25, full row 17/25. Party = merchant key, else normalized counterparty; '|' separates accepted alternatives.
+id	channel	body	android.title	android.text	android.bigText	android.textLines	expected_type	expected_decision	expected_amount_minor	expected_currency	expected_direction	expected_party_key	expected_balance_minor	expected_fee_minor	note
+b01	sms	تم خصم 89.90 ج.م من بطاقتك المنتهية بـ 2210 لدى talabat بتاريخ 22/10/2026 20:15. الرصيد المتاح 4,110.10 ج.م	\N	\N	\N	\N	transaction	AUTO	8990	EGP	out	talabat	411010	\N	
+b02	sms	عزيزي العميل، تم إضافة مبلغ 3,000.00 جنيه إلى حسابكم المنتهي بـ 5566 تحويل لحظي وارد من أحمد م. بتاريخ 22/10/2026 الساعة 09:40	\N	\N	\N	\N	transaction	AUTO	300000	EGP	in	احمد م	\N	\N	transfer party, accepted as party until movement kind is extracted
+b03	sms	731204 is your one-time password to confirm a payment of EGP 1,999.00 to JUMIA. Valid for 2 minutes.	\N	\N	\N	\N	otp	IGNORE	\N	\N	\N	\N	\N	\N	
+b04	sms	ادفع 500 جنيه أو أكثر ببطاقتك هذا الأسبوع واحصل على 50 جنيه كاش باك فورًا. العرض ساري حتى 28/10.	\N	\N	\N	\N	promo	IGNORE	\N	\N	\N	\N	\N	\N	
+b05	sms	تم خصم قسط شهري بقيمة 1,120.00 جنيه من حسابكم المنتهي بـ 9090 سدادًا لبرنامج التقسيط رقم 44871 (القسط 5 من 24)	\N	\N	\N	\N	transaction	AUTO	112000	EGP	out	\N	\N	\N	
+b06	sms	تم تحويل 2,500.00 جنيه من حسابكم الجاري المنتهي بـ 1122 إلى حساب التوفير الخاص بكم المنتهي بـ 3344 بتاريخ 22/10/2026	\N	\N	\N	\N	transaction	REVIEW	250000	EGP	out	\N	\N	\N	POSSIBLE_INTERNAL_TRANSFER: savings account of the user
+b07	sms	Your credit card ending with#7001 was charged USD 15.00 at APPLE.COM/BILL on 22/10/26 at 06:01. Available limit EGP 9,000.00.	\N	\N	\N	\N	transaction	AUTO	1500	USD	out	apple	\N	\N	
+b08	sms	Your credit card ending with#7001 was charged USD 11.25 (EGP 540.00) at CARREFOUR MAADI on 22/10/26 at 18:30.	\N	\N	\N	\N	transaction	AUTO	54000	EGP	out	carrefour maadi	\N	\N	accounting amount EGP 540.00, original USD 11.25; parenthesized equivalent without the word
+b09	sms	العملية مرفوضة: محاولة شراء بمبلغ 275.00 جنيه لدى سبينس باستخدام البطاقة المنتهية بـ 2210 بسبب رقم سري خاطئ. إذا لم تكن أنت، اتصل بـ 19666	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+b10	sms	A refund of EGP 250.00 from NOON has been posted to your card ending 4321 on 22/10/2026.	\N	\N	\N	\N	transaction	AUTO	25000	EGP	in	noon	\N	\N	expense_offset
+b11	sms	رصيدك المتاح 8,450.00 جنيه ورصيد دفتر الأستاذ 8,650.00 جنيه بتاريخ 22/10/2026 الساعة 07:00	\N	\N	\N	\N	balance_inquiry	IGNORE	\N	\N	\N	\N	\N	\N	
+b12	sms	Cash withdrawal of EGP 1,000.00 from another bank's ATM using card ending 8877 on 22/10/2026 21:05. ATM fee EGP 20.00. Balance EGP 2,980.00.	\N	\N	\N	\N	transaction	AUTO	100000	EGP	out	\N	298000	2000	cash withdrawal; an ATM phrase is not a merchant
+b13	sms	تذكير: قسط التمويل الشخصي بقيمة 2,000.00 جنيه مستحق غدًا 23/10/2026. يرجى توفير الرصيد في حسابكم المنتهي بـ 9090	\N	\N	\N	\N	reminder	IGNORE	\N	\N	\N	\N	\N	\N	due tomorrow
+b14	sms	فودافون كاش: تم دفع 320.50 جنيه لـ Seoudi Market. رصيدك 179.50 جنيه. رقم العملية 998877665.	\N	\N	\N	\N	transaction	AUTO	32050	EGP	out	seoudi market	17950	\N	
+b15	notification	\N	Telda			تم دفع 70 ج.م. في "Uber"\nرصيدك: 246.5 ج.م.	transaction	AUTO	7000	EGP	out	uber	24650	\N	text only in textLines; text and bigText present but empty
+b16	sms	تم إيداع راتب شهر أكتوبر بمبلغ 12,500.00 جنيه من شركة النور للتجارة في حسابكم المنتهي بـ 5566	\N	\N	\N	\N	transaction	AUTO	1250000	EGP	in	شركه النور للتجاره	\N	\N	
+b17	sms	عزيزي العميل، تم إيقاف بطاقتكم المنتهية بـ 2210 مؤقتًا للاشتباه في عمليات غير معتادة. للتفعيل اتصل بـ 19666 من رقمكم المسجل.	\N	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	
+b18	sms	تم سداد فاتورة إنترنت WE بمبلغ 199.00 جنيه. رسوم الخدمة 2.00 جنيه. الإجمالي 201.00 جنيه. رقم المرجع FW55443322	\N	\N	\N	\N	transaction	AUTO	19900	EGP	out	we	\N	200	brand after the service name
+b19	sms	تم خصم ٤٥٫٠٠ جنيهاً من بطاقتكم المنتهية بـ ٢٢١٠ لدى مطعم أبو شقرة بتاريخ ٢٢/١٠/٢٠٢٦	\N	\N	\N	\N	transaction	AUTO	4500	EGP	out	مطعم ابو شقره	\N	\N	
+b20	sms	Paid EGP 60.00 at CILANTRO and EGP 90.00 at GAD using card ending 2210 on 22/10/2026.	\N	\N	\N	\N	transaction	UNUNDERSTOOD	\N	\N	\N	\N	\N	\N	MULTIPLE_EVENTS: two events joined by and
+b21	sms	Orange Cash: تم تحويل 500.00 جنيه إلى 01112223334. رسوم التحويل 2.50 جنيه. رصيدك الحالي 97.50 جنيه.	\N	\N	\N	\N	transaction	AUTO	50000	EGP	out	01112223334	9750	250	
+b22	sms	مبروك! تم ترقية بطاقتك الائتمانية إلى الفئة البلاتينية بحد ائتماني 50,000 جنيه. استمتع بمزايا جديدة من اليوم.	\N	\N	\N	\N	promo	IGNORE	\N	\N	\N	\N	\N	\N	
+b23	sms	Dear Customer, your debit card ending with#2210 was used for EGP 2,200.00 at IKEA EGYPT on 22/10/26 at 23:59. Available balance EGP 1,910.10.	\N	\N	\N	\N	transaction	AUTO	220000	EGP	out	ikea	191010	\N	"was used for" is a completed purchase
+b24	notification	\N	تم استلام 800.00 جنيه من Mona K. عبر إنستاباي			\N	transaction	AUTO	80000	EGP	in	mona k	\N	\N	title only
+b25	sms	مبروك! تم إضافة كاش باك بقيمة 350 جنيه إلى حسابكم المنتهي بـ 5566. صالح للاستخدام حتى 30/11/2026.	\N	\N	\N	\N	transaction	REVIEW	35000	EGP	in	\N	\N	\N	EXPIRING_CREDIT: valid-until credit
