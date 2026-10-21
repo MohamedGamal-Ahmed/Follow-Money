@@ -13,7 +13,11 @@ public final class TransactionExtractorTest {
     private static void same(Object actual, Object expected, String why) { check(Objects.equals(actual, expected), why + ": <" + actual + "> != <" + expected + ">"); }
 
     /** Fields where the extractor and the corpus disagree, left for the owner; the corpus is never edited to match code. */
-    static final Map<String, String> KNOWN_DISAGREEMENTS = Map.of(); // p011, p146, p136 resolved by the owner on 21 Oct 2026.
+    // p011, p146, p136 resolved by the owner on 21 Oct 2026. Open (22 Oct): the owner's الاسترداد rule (and blind h21) makes a
+    // refund an expense_offset, but the v2 refund rows expect no accounting effect.
+    static final Map<String, String> KNOWN_DISAGREEMENTS = Map.of(
+            "pub-cib-refund", "expected_accounting_effect", "pub-cib-refund-digits", "expected_accounting_effect",
+            "pub-cib-refund-spaces", "expected_accounting_effect");
 
     static final String[] FIELDS = {"expected_amount_minor", "expected_currency", "expected_direction", "expected_merchant_key",
             "expected_balance_minor", "expected_balance_currency", "expected_card_last4", "expected_datetime", "expected_time_precision"};
@@ -36,6 +40,9 @@ public final class TransactionExtractorTest {
             Map<String, String> got = new LinkedHashMap<>();
             for (String field : FIELDS) got.put(field, value(x, field));
             if (!"legacy-v1".equals(row.get("source_evidence_id"))) for (String field : V2_FIELDS) got.put(field, value(x, field));
+            // Accounting effect: only expense_offset is extracted so far; pending/pending_internal rows are not compared yet.
+            if (!"legacy-v1".equals(row.get("source_evidence_id")) && (row.get("expected_accounting_effect") == null || "expense_offset".equals(row.get("expected_accounting_effect"))))
+                got.put("expected_accounting_effect", x.accountingEffect);
             for (var entry : got.entrySet()) {
                 boolean equal = Objects.equals(entry.getValue(), row.get(entry.getKey()));
                 if (entry.getKey().equals(KNOWN_DISAGREEMENTS.get(id))) { check(!equal, "Listed disagreement now agrees; remove it: " + id); listed++; continue; }

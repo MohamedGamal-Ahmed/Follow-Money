@@ -83,14 +83,18 @@ final class TransactionExtractor {
     private static final Pattern EXPIRY = Pattern.compile(ParsingPolicy.EXPIRY, FLAGS);
     private static final Pattern HEADER = Pattern.compile("^\\s*from\\s+[^:\\n]{1,30}:", FLAGS);
     private static final Pattern INSTAPAY = Pattern.compile("[a-z0-9._-]+@instapay", FLAGS);
-    private static final Pattern CARD = Pattern.compile("(?:card|بطاقه|بطاقتك|بطاقتكم|كارت)[^.;\\n]{0,40}?(?:ending(?: with)?\\s*#?|المنتهيه(?: ب)?|رقم|#|[*x]+)\\s*[*x]*(\\d{4})(?!\\d)", FLAGS);
-    private static final Pattern ACCOUNT = Pattern.compile("(?:account|acct|حساب|لحسابكم|حسابكم|لحسابك)\\s*(?:رقم\\s*)?(?:ending(?: with)?\\s*|المنتهي ب\\s*)?[*x#]*\\s*(\\d{4})(?!\\d)", FLAGS);
+    /** A whole mask token ("****4321", "1234XXXX5678"); last four digits only when the token ends in four digits. */
+    private static final String MASK_TOKEN = "((?:\\d*[x*#]+)*\\d{4})(?![\\dx*#])";
+    private static final Pattern CARD = Pattern.compile("(?:card|بطاقه|بطاقتك|بطاقتكم|كارت)[^.;\\n]{0,40}?(?:ending(?: with)?\\s*#?|المنتهيه(?: ب)?|رقم|#|(?=[*x]))\\s*" + MASK_TOKEN, FLAGS);
+    private static final Pattern ACCOUNT = Pattern.compile("(?:account|acct|(?<!\\p{L})(?:ل|ب)?حساب(?:ك|كم|ي)?)(?:\\s+ال\\p{L}+)?\\s*(?:رقم\\s*)?(?:ending(?: with)?\\s*|المنتهي ب\\s*)?" + MASK_TOKEN, FLAGS);
     private static final Pattern TOWARD = Pattern.compile("(?:\\bto|(?<!\\p{L})الي)\\s+$", FLAGS);
     private static final Pattern IPN_ACCOUNT_IN = Pattern.compile("\\b(?:received|credited)\\b[^\\n]{0,60}? on [*]*(\\d{4})(?!\\d)", FLAGS);
     private static final Pattern IPN_ACCOUNT_OUT = Pattern.compile("\\bsent\\b[^\\n]{0,60}? from [*]*(\\d{4})(?!\\d)", FLAGS);
     private static final Pattern TRUNCATED_CLOCK = Pattern.compile(ParsingPolicy.TRUNCATED_CLOCK, FLAGS);
     private static final Pattern COUNTERPARTY_DIGITS = Pattern.compile("(?:\\bto|(?<!\\p{L})الي)\\s+(?:account\\s+|حساب رقم\\s+|حساب\\s+)?[*x#]*(\\d{4})(?!\\d)", FLAGS);
-    private static final Pattern COUNTERPARTY_PHONE = Pattern.compile("(?:من|الي|to|from) رقم ([0-9x*]{8,})", FLAGS);
+    private static final Pattern COUNTERPARTY_PHONE = Pattern.compile(ParsingPolicy.COUNTERPARTY_PHONE, FLAGS);
+    private static final Pattern COUNTERPARTY_NAME = Pattern.compile(ParsingPolicy.COUNTERPARTY_NAME, FLAGS);
+    private static final Pattern EXPENSE_OFFSET = Pattern.compile(ParsingPolicy.EXPENSE_OFFSET, FLAGS);
     private static final String MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|يناير|فبراير|مارس|ابريل|مايو|يونيو|يوليو|اغسطس|سبتمبر|اكتوبر|نوفمبر|ديسمبر";
     private static final Pattern DATE = Pattern.compile(
             "(?<!\\d)(\\d{4})-(\\d{2})-(\\d{2})(?!\\d)" +
@@ -256,14 +260,14 @@ final class TransactionExtractor {
     private static void identities(Folded f, Extraction x) {
         String t = f.text;
         Matcher card = CARD.matcher(t);
-        if (card.find()) x.cardLast4 = card.group(1);
+        if (card.find()) x.cardLast4 = last4(card.group(1));
         // "to account 1234" names the recipient of an outgoing transfer, but the user's own account on an incoming one.
         Matcher account = ACCOUNT.matcher(t);
         boolean found = false;
         while (account.find()) {
             boolean toward = TOWARD.matcher(t.substring(Math.max(0, account.start() - 6), account.start())).find();
             if (toward && "out".equals(x.direction)) continue;
-            x.accountLast4 = account.group(1); found = true; break;
+            x.accountLast4 = last4(account.group(1)); found = true; break;
         }
         if (!found) {
             Matcher ipn = ("in".equals(x.direction) ? IPN_ACCOUNT_IN : IPN_ACCOUNT_OUT).matcher(t);
@@ -274,7 +278,11 @@ final class TransactionExtractor {
         Matcher digits = COUNTERPARTY_DIGITS.matcher(t);
         if (instapay.find()) x.counterparty = f.display(instapay.start(), instapay.end());
         else if (phone.find()) x.counterparty = f.display(phone.start(1), phone.end(1));
-        else if (digits.find()) x.counterparty = digits.group(1);
+        else {
+            Matcher name = COUNTERPARTY_NAME.matcher(t);
+            if (name.find()) x.counterparty = f.display(name.start(1), name.end(1)).trim();
+            else if (digits.find()) x.counterparty = digits.group(1);
+        }
     }
 
     // ---- Bank-supplied event time ------------------------------------------------------------------------------
@@ -322,6 +330,8 @@ final class TransactionExtractor {
         }
     }
 
+    private static String last4(String token) { return token.substring(token.length() - 4); }
+
     private static int i(String s) { return Integer.parseInt(s); }
     private static int year(String s) { return s.length() == 2 ? 2000 + i(s) : i(s); }
     private static int month(String name) {
@@ -333,7 +343,7 @@ final class TransactionExtractor {
     // ---- Provisional decision (rules, no scoring) --------------------------------------------------------------
 
     private static void decide(String t, MessageClassifier.Result classified, Extraction x) {
-        if (REFUND.matcher(t).find() && t.matches("(?s).*(?:عكس|reversal|reversed|اعاده المبلغ|credited back).*")) x.accountingEffect = "expense_offset";
+        if ("in".equals(x.direction) && EXPENSE_OFFSET.matcher(t).find()) x.accountingEffect = "expense_offset";
         for (String code : new String[]{"MISSING_AMOUNT", "AMBIGUOUS_CURRENCY", "INVALID_SIGNED_AMOUNT", "AMBIGUOUS_NUMBER_FORMAT", "NON_POSITIVE_AMOUNT"})
             if (x.reasons.contains(code)) { x.decision = "UNUNDERSTOOD"; return; }
         if (x.direction == null) {
