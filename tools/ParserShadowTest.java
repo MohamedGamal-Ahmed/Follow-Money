@@ -61,7 +61,7 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "ShadowDiff.java", "ShadowOffset.java", "ShadowReport.java", "ShadowRescan.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "DecisionSwitch.java", "PipelineDecider.java", "ShadowDiff.java", "ShadowOffset.java", "ShadowReport.java", "ShadowRescan.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
@@ -73,8 +73,19 @@ public final class ParserShadowTest {
         String capture = Files.readString(source.resolve("CaptureTransaction.java"), StandardCharsets.UTF_8);
         // The rules read and the shadow call sit in one guarded block (no nested braces) that ends in the shared catch.
         check(capture.matches("(?s).*try \\{[^}]*db\\.merchantRules\\(\\)[^}]*ParserShadow\\.observe\\([^}]*ShadowStore\\.record\\([^}]*\\} catch \\(RuntimeException \\| LinkageError.*"), "Shadow call and store are isolated");
-        // The observation goes only to the shadow store: declared once, read once, inside the guarded block.
-        same(capture.split("\\bobservation\\b", -1).length - 1, 2, "Shadow result is never used by capture");
+        // Step 7: capture uses the new pipeline's decision only when DecisionSwitch says it decides this message; otherwise
+        // the legacy write path runs exactly as before (no decision passed) and the observation goes to the shadow store.
+        check(capture.contains("PipelineDecider.Decided decided = DecisionSwitch.decides(db.appContext(), request.captureAt) ? PipelineDecider.decide(db, request) : null;"),
+                "The new pipeline decides only when the switch says so");
+        check(capture.contains("db.addAutomaticCapture(request, decided == null ? null : decided.decision)"), "Without a decision the legacy write path runs unchanged");
+        String decider = Files.readString(source.resolve("PipelineDecider.java"), StandardCharsets.UTF_8);
+        check(decider.matches("(?s).*catch \\(RuntimeException \\| LinkageError failed\\) \\{\\s*return null;.*"), "A pipeline failure hands the message back to legacy");
+        String sw = Files.readString(source.resolve("DecisionSwitch.java"), StandardCharsets.UTF_8);
+        check(sw.contains("receivedAt >= prefs(context).getLong(SINCE, Long.MAX_VALUE)"), "Only messages after activation follow the new pipeline");
+        check(sw.contains("BuildConfig.DEBUG ? ParsingPolicy.NEW_PIPELINE_DECIDES_TEST_BUILD : ParsingPolicy.NEW_PIPELINE_DECIDES_RELEASE_BUILD"), "Test build on, release build off by default");
+        check(ParsingPolicy.NEW_PIPELINE_DECIDES_TEST_BUILD && !ParsingPolicy.NEW_PIPELINE_DECIDES_RELEASE_BUILD && ParsingPolicy.LEGACY_OPINION_DAYS == 30, "Owner flag values");
+        String ledger = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
+        check(ledger.contains("if (existing >= 0 && decided == null) syncAutomatic("), "Nothing recorded earlier is changed when the new pipeline decides");
         check(capture.contains("ShadowStore.record(sql, raw, legacyBody, label, receivedAt, result, legacyReason, observation);"), "Observation stored beside the legacy result");
         // A notification legacy skips is observed in shadow only: that branch returns before any capture call.
         String listener = Files.readString(source.resolve("PaymentNotificationListener.java"), StandardCharsets.UTF_8);
@@ -138,6 +149,6 @@ public final class ParserShadowTest {
         String manifest = Files.readString(Path.of("app/src/main/AndroidManifest.xml"), StandardCharsets.UTF_8);
         check(manifest.contains("<activity android:name=\".ParserDebugActivity\" android:exported=\"false\" />"), "Debug screen not exported");
         ParserShadow.clear();
-        System.out.println("Parser shadow checks passed: " + checks + " (" + rows.size() + " corpus rows observed; legacy remains the only ledger authority).");
+        System.out.println("Parser shadow checks passed: " + checks + " (" + rows.size() + " corpus rows observed; legacy decides unless the step-7 switch says the new pipeline does).");
     }
 }

@@ -35,8 +35,8 @@ final class ShadowDiff {
         return new Result(Outcome.BOTH_RECORD_DIFFERENT, !amount && !direction ? "AMOUNT+DIRECTION" : !amount ? "AMOUNT" : "DIRECTION");
     }
 
-    /** Legacy decisions stored by ShadowStore: RECORDED and RECORDED_REVIEW wrote a ledger row. */
-    static boolean legacyRecorded(String legacyDecision) { return legacyDecision != null && legacyDecision.startsWith("RECORDED"); }
+    /** Legacy decisions stored by ShadowStore: RECORDED and RECORDED_REVIEW wrote a ledger row; WOULD_RECORD is its opinion after step 7. */
+    static boolean legacyRecorded(String legacyDecision) { return legacyDecision != null && (legacyDecision.startsWith("RECORDED") || legacyDecision.equals("WOULD_RECORD")); }
 
     private ShadowDiff() {}
 }

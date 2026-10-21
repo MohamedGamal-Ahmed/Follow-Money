@@ -32,9 +32,15 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
     static final int SCHEMA_VERSION = 26;
 
+    /** For DecisionSwitch only (which parser decides a live message); null in no other path. */
+    private final Context appContext;
+
     public ExpenseDb(Context context) {
         super(context, DATABASE_NAME, null, SCHEMA_VERSION);
+        appContext = context.getApplicationContext() != null ? context.getApplicationContext() : context;
     }
+
+    Context appContext() { return appContext; }
 
     /**
      * Backup: writes a consistent copy of the whole database to a temporary file (VACUUM INTO where SQLite supports it,
@@ -451,8 +457,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     /** Storage seam for CaptureTransaction; the connection and transaction policy stay here. */
     CaptureResult.Write addAutomaticCapture(CaptureRequest request) {
+        return addAutomaticCapture(request, null);
+    }
+
+    /**
+     * decided: the new pipeline's decision (step 7), or null when the legacy parser decides. With a decision, the ledger
+     * row and its fields come from it; an earlier matching row only gains evidence and is never changed; the legacy
+     * non-ledger paths (excluded messages, notices, hints, balances, commitments) still run when it records nothing.
+     */
+    CaptureResult.Write addAutomaticCapture(CaptureRequest request, PipelineDecision decided) {
         return addAutomaticCapture(request.sourceKey, request.label, request.body, request.captureAt,
-                request.channel, request.legacyReceivedAt, true);
+                request.channel, request.legacyReceivedAt, true, decided);
     }
 
     private long lastCapturedId = -1;
@@ -464,9 +479,15 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public Transaction lastCaptured() { return lastCapturedId < 0 ? null : transactionById(lastCapturedId); }
 
     private CaptureResult.Write addAutomaticCapture(String sourceKey,String label,String body,long receivedAt,String channel,long legacyReceivedAt,boolean automaticCancellation){
+        return addAutomaticCapture(sourceKey,label,body,receivedAt,channel,legacyReceivedAt,automaticCancellation,null);
+    }
+
+    private CaptureResult.Write addAutomaticCapture(String sourceKey,String label,String body,long receivedAt,String channel,long legacyReceivedAt,boolean automaticCancellation,PipelineDecision decided){
         CaptureResult.Write result=new CaptureResult.Write();
+        // With a new-pipeline decision that records, its reading wins over the legacy skip/notice checks below.
+        boolean newRecords = decided != null && decided.records;
         if (body == null) {result.reason=CaptureResult.Reason.MISSING_BODY;return result;}
-        if (ExpenseParser.isVerificationMessage(body)) {result.reason=CaptureResult.Reason.VERIFICATION;return result;}
+        if (!newRecords && ExpenseParser.isVerificationMessage(body)) {result.reason=CaptureResult.Reason.VERIFICATION;return result;}
         SQLiteDatabase writable = getWritableDatabase();
         writable.beginTransaction();
         try {
@@ -478,13 +499,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             String hash = sha256(sourceKey + "\n" + body.trim());
             ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(body,receivedAt);
             long eventAt = event.when;
-            if (ExpenseParser.isFutureOnly(body)) {
+            if (!newRecords && ExpenseParser.isFutureOnly(body)) {
                 result.reason=CaptureResult.Reason.FUTURE_ONLY;
                 result.rowId=markRejectedCaptureForReview(hash, eventAt);
                 writable.setTransactionSuccessful();
                 return result;
             }
-            if (ExpenseParser.isUnsuccessful(body) || CaptureNotice.parse(label,body)!=null) {
+            if (!newRecords && (ExpenseParser.isUnsuccessful(body) || CaptureNotice.parse(label,body)!=null)) {
                 result.rowId=markRejectedCaptureForReview(hash, eventAt);
                 CaptureNotice notice=CaptureNotice.parse(label,body);
                 if(notice!=null)result.event=new CaptureEvents(this).record(label,channel,body,receivedAt,key,notice,automaticCancellation);
@@ -501,6 +522,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             ExpenseParser.Parsed parsed = ExpenseParser.parse(label, body);
             String direction = "expense";
             if (parsed == null) { parsed = ExpenseParser.parseIncome(label, body); direction = "income"; }
+            if (decided != null) {
+                // Step 7: the new pipeline decides whether there is a ledger row and what it says.
+                transfer = null;
+                parsed = decided.records ? new ExpenseParser.Parsed(decided.amountMinor, decided.currency, decided.merchant, decided.category, decided.cardLast4) : null;
+                direction = decided.records ? decided.kind() : direction;
+            }
             if (transfer != null) {
                 direction = transfer.incoming ? "income" : "expense";
                 parsed = new ExpenseParser.Parsed(transfer.amountMinor, "EGP", transfer.counterpart,
@@ -514,9 +541,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     result.added=result.reason==CaptureResult.Reason.SERVICE_MATCH_ACCEPTED||result.reason==CaptureResult.Reason.COMMITMENT_REVIEW_REQUIRED;
                     if(result.added)result.evidence=CaptureResult.Evidence.PROVIDER_BODY;
                 }
+                if (decided != null && result.reason == CaptureResult.Reason.NO_LEDGER_CANDIDATE) result.reason=CaptureResult.Reason.NEW_PIPELINE_SKIPPED;
                 writable.setTransactionSuccessful(); return result;
             }
-            if(CaptureNotice.cardRepayment(body))parsed=new ExpenseParser.Parsed(parsed.amountMinor,parsed.currency,parsed.merchant,parsed.category,ExpenseParser.debitAccountLast4(body));
+            if(decided==null&&CaptureNotice.cardRepayment(body))parsed=new ExpenseParser.Parsed(parsed.amountMinor,parsed.currency,parsed.merchant,parsed.category,ExpenseParser.debitAccountLast4(body));
             Long account = autoSource(label, parsed.cardLast4, body);
             String normalized = CaptureIdentity.normalized(label, body);
             String reference = CaptureIdentity.reference(label, body);
@@ -529,13 +557,14 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     existing = prefixRow;
             }
             boolean added = false;
-            if (existing >= 0) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision);
+            // Nothing recorded earlier is changed when the new pipeline decides: a match only gains this evidence.
+            if (existing >= 0 && decided == null) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision);
             else {
                 String kind = transfer != null && isOwnHandle(transfer.counterpart) ? "transfer" : direction;
                 // A debit to one of the user's own credit cards keeps that card as destination (the statement treats it as
                 // internal); the settlement dialog stays optional for allocating it to purchases.
                 Long destination = "transfer".equals(kind) && "income".equals(direction) ? account :
-                        "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
+                        decided == null && "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
                 added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
                         "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
                         "transfer".equals(kind) && "income".equals(direction) ? null : account, kind,
@@ -543,7 +572,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 if (added) {
                     existing = latestInserted().id;
                     ContentValues precision=new ContentValues();precision.put("time_precision",event.precision);
+                    // A new-pipeline REVIEW (or a return with no expense to link) waits for the user; its reason is on the observation.
+                    if (decided != null && decided.review) precision.put("needs_review",1);
                     writable.update("transactions",precision,"id=?",new String[]{Long.toString(existing)});
+                    // A return of an earlier charge is an expense offset: an income linked to that expense.
+                    if (decided != null && decided.offsetOfTransactionId != null && "income".equals(kind)) linkReimbursement(existing, decided.offsetOfTransactionId);
                 }
             }
             if (existing >= 0) {

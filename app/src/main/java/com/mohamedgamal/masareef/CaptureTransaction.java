@@ -14,13 +14,45 @@ final class CaptureTransaction {
         boolean pending = db.getWritableDatabase().inTransaction();
         long before = db.changes();
         db.rememberCapture(-1, null);
-        CaptureResult.Write write = db.addAutomaticCapture(request);
+        // Step 7: the new pipeline decides messages that arrive after it was switched on; a pipeline failure falls back to legacy.
+        PipelineDecider.Decided decided = DecisionSwitch.decides(db.appContext(), request.captureAt) ? PipelineDecider.decide(db, request) : null;
+        CaptureResult.Write write = db.addAutomaticCapture(request, decided == null ? null : decided.decision);
         long capturedId = write.rowId;
         finish(request, write);
         CaptureResult result = new CaptureResult(write, capturedId,
                 write.rowId < 0 ? null : db.transactionById(write.rowId), pending, before, db.changes());
-        shadow(db, request.raw, request.label, request.body, request.captureAt, result, String.valueOf(result.reason));
+        if (decided != null) recordDecided(db, request, result, decided);
+        else shadow(db, request.raw, request.label, request.body, request.captureAt, result, String.valueOf(result.reason));
         return result;
+    }
+
+    /**
+     * The new pipeline decided: its observation is stored beside the ledger row, with the legacy parser's opinion
+     * (computed, never written) for LEGACY_OPINION_DAYS after the first activation, so the debug screen keeps showing
+     * the differences as they happen.
+     */
+    private static void recordDecided(ExpenseDb db, CaptureRequest request, CaptureResult result, PipelineDecider.Decided decided) {
+        try {
+            String legacyDecision = "LEGACY_OFF", legacyReason = "LEGACY_OPINION_ENDED", legacyCurrency = null, legacyDirection = null, legacyMerchant = null;
+            Long legacyAmount = null;
+            if (request.body != null && DecisionSwitch.legacyOpinion(db.appContext(), request.captureAt)) {
+                SmsPreview preview = SmsPreview.parse(request.label, request.body, request.captureAt, request.captureAt);
+                boolean would = preview != null && preview.isTransaction();
+                legacyDecision = would ? "WOULD_RECORD" : "WOULD_SKIP";
+                legacyReason = "LEGACY_OPINION/" + (preview == null ? "NOT_CANDIDATE" : "PREVIEW_" + preview.kind.toUpperCase(java.util.Locale.ROOT));
+                if (would) {
+                    legacyAmount = preview.amountMinor; legacyCurrency = preview.currency; legacyMerchant = preview.title;
+                    if ("transfer".equals(preview.kind)) {
+                        ExpenseParser.Transfer t = ExpenseParser.parseTransfer(request.body);
+                        legacyDirection = t == null ? "transfer" : t.incoming ? "in" : "out";
+                    } else legacyDirection = ShadowStore.legacyDirection(preview.kind);
+                }
+            }
+            ShadowStore.record(db.getWritableDatabase(), "live", request.raw, request.body, request.label, request.captureAt,
+                    result.transactionId, legacyReason, legacyDecision, legacyAmount, legacyCurrency, legacyDirection, legacyMerchant, decided.observation);
+        } catch (RuntimeException | LinkageError ignored) {
+            // Diagnostics only; the decision is already recorded.
+        }
     }
 
     /**

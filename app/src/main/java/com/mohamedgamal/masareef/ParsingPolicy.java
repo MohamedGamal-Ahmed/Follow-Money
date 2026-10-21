@@ -14,6 +14,14 @@ final class ParsingPolicy {
 
     // Shadow mode.
     static final boolean SHADOW_ENABLED = true;
+    /**
+     * Step 7 (owner approval, 21 Oct 2026): the new pipeline decides what is recorded in the test build and not in the
+     * release build. Advanced settings switch it back at once (DecisionSwitch); only messages after activation follow it.
+     */
+    static final boolean NEW_PIPELINE_DECIDES_TEST_BUILD = true;
+    static final boolean NEW_PIPELINE_DECIDES_RELEASE_BUILD = false;
+    /** After the switch, the legacy parser's opinion is still computed (never written) for this many days. */
+    static final int LEGACY_OPINION_DAYS = 30;
     /** In-memory observations kept for the current process; nothing is uploaded. */
     static final int SHADOW_BUFFER_SIZE = 50;
     /** Stored observations (ShadowStore, values sealed by EvidenceVault); the oldest are removed first. */

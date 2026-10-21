@@ -120,7 +120,7 @@ final class ShadowStore {
     }
 
     /** The earlier recorded charge from the same source this return offsets (ShadowOffset), or -1. Opens only rows in the window. */
-    private static long offsetOf(SQLiteDatabase sql, String origin, String source, long receivedAt, ParserShadow.Observation o) {
+    static long offsetOf(SQLiteDatabase sql, String origin, String source, long receivedAt, ParserShadow.Observation o) {
         Long amount;
         try { amount = o.values.containsKey("amount_minor") ? Long.valueOf(o.values.get("amount_minor")) : null; } catch (NumberFormatException e) { return -1; }
         boolean party = o.values.containsKey("merchant_key") || o.values.containsKey("counterparty");
@@ -145,6 +145,20 @@ final class ShadowStore {
             }
         }
         return ShadowOffset.match(current, refund, earlier, claimed);
+    }
+
+    /** The ledger row an observation was stored beside, or null. */
+    static Long transactionOf(SQLiteDatabase sql, long observationId) {
+        try (Cursor c = sql.rawQuery("SELECT transaction_id FROM shadow_observations WHERE id=? AND transaction_id IS NOT NULL", new String[]{Long.toString(observationId)})) {
+            return c.moveToFirst() ? c.getLong(0) : null;
+        }
+    }
+
+    /** The reasons of the latest observation stored beside this ledger row (for its review explanation), or null. */
+    static String reasonsOf(SQLiteDatabase sql, long transactionId) {
+        try (Cursor c = sql.rawQuery("SELECT reasons FROM shadow_observations WHERE transaction_id=? ORDER BY id DESC LIMIT 1", new String[]{Long.toString(transactionId)})) {
+            return c.moveToFirst() ? c.getString(0) : null;
+        }
     }
 
     /** Earlier deliveries of the same origin that could matter: the same identity, or the same content near in time. */

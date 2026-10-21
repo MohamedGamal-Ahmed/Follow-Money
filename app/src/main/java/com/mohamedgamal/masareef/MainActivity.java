@@ -95,6 +95,8 @@ public final class MainActivity extends Activity {
     private ExpenseDb.Recurring editingCommitment;
     private String transactionKindFilter = "";
     private String transactionCategoryFilter = "";
+    /** Pseudo-category behind «عملية محتاجة تصنيف»: uncategorized expenses and every row waiting for review. */
+    private static final String NEEDS_ATTENTION_FILTER = "محتاجة تصنيف أو مراجعة";
     private Long transactionSourceFilter;
     private String transactionSearch = "";
     private boolean searchOpen;
@@ -795,7 +797,14 @@ public final class MainActivity extends Activity {
                 if(!db.debts().isEmpty())setting("الديون المسجلة",()->{selectedTab=9;render();});
                 if(BuildConfig.DEBUG||getPreferences(MODE_PRIVATE).getBoolean(ParserDebugActivity.ENABLED_KEY,false)){
                     section("إعدادات متقدمة",null,null);
-                    setting("تشخيص المحلل (وضع الظل)",()->startActivity(new Intent(this,ParserDebugActivity.class)));
+                    // Step 7: which parser records new messages; switching back to the old one takes effect at once, no update.
+                    setting(DecisionSwitch.on(this)?"المحلل الجديد هو اللي بيسجّل: مفعّل · اضغط للرجوع للقديم":"المحلل القديم هو اللي بيسجّل · اضغط لتفعيل الجديد",()->{
+                        boolean on=!DecisionSwitch.on(this);DecisionSwitch.set(this,on);
+                        toast(on?"المحلل الجديد هيسجّل الرسائل الجديدة من دلوقتي":"رجعنا للمحلل القديم فورًا؛ اللي اتسجل قبل كده زي ما هو");render();
+                    });
+                    setting("رسائل لم أفهمها",()->startActivity(new Intent(this,ParserDebugActivity.class).putExtra(ParserDebugActivity.VIEW_EXTRA,"ununderstood")));
+                    setting("رسائل لم تُسجَّل (للمعلومة)",()->startActivity(new Intent(this,ParserDebugActivity.class).putExtra(ParserDebugActivity.VIEW_EXTRA,"unrecorded")));
+                    setting("تشخيص المحلل (الفروق أولًا بأول)",()->startActivity(new Intent(this,ParserDebugActivity.class)));
                 }
                 section("حذف البيانات",null,null);
         setting("حذف كل البيانات المحلية", () -> new ChoiceDialogBuilder()
@@ -3512,7 +3521,7 @@ public final class MainActivity extends Activity {
         List<ExpenseDb.Transaction> month = transactionPeriod==null ? db.transactionsForMonth(selectedMonth) : db.transactionsBetween(transactionPeriod[0],transactionPeriod[1]);
         int uncategorized = 0;
         for (ExpenseDb.Transaction item : month)
-            if ("expense".equals(item.kind) && "غير مصنف".equals(item.category)) {
+            if ("expense".equals(item.kind) && "غير مصنف".equals(item.category) || item.needsReview) {
                 uncategorized++;
             }
         if (uncategorized > 0) {
@@ -3525,7 +3534,8 @@ public final class MainActivity extends Activity {
             banner.addView(label(uncategorized == 1 ? "عملية محتاجة تصنيف" : uncategorized + " عمليات محتاجة تصنيف", 13, ink, false), textParams);
             banner.addView(label("عرض الكل", 13, ink, true));
             banner.setOnClickListener(v -> {
-                transactionCategoryFilter = "غير مصنف"; transactionKindFilter = "expense";
+                // Uncategorized expenses and everything waiting for review (the new parser's REVIEW with its reason).
+                transactionCategoryFilter = NEEDS_ATTENTION_FILTER; transactionKindFilter = "";
                 transactionBucketFilter = ""; transactionCurrencyFilter = ""; transactionSourceFilter = null;
                 transactionExcludeTransfers = false; transactionSearch = ""; searchOpen = false;
                 bulkMode = false; bulkSelected.clear(); render();
@@ -3913,7 +3923,13 @@ public final class MainActivity extends Activity {
         String origin = "SMS".equals(item.source) ? "رسالة البنك تلقائيًا" : "يدوي".equals(item.source) ? "إضافة يدوية" :
                 "CSV".equals(item.source) ? "ملف CSV" : item.source;
         detailRow(details, "اتسجلت من", label(origin, 14, INK, true));
-        if(item.needsReview) detailRow(details,"حالة المراجعة",label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?"تحويل محتاج ربط؛ الخصم ما زال محسوبًا لحين مراجعتك":"مصدر العملية يحتاج مراجعة؛ المبلغ ما زال محسوبًا",12,CORAL,false));
+        if(item.needsReview) {
+            // The new parser's own reasons, in the user's language, when it decided this row; otherwise the legacy wording.
+            String why=ShadowStore.reasonsOf(db.getReadableDatabase(),item.id);
+            if(why!=null&&!why.isEmpty())
+                detailRow(details,"حالة المراجعة",label(String.join("\n",ReviewReasons.text(java.util.Arrays.asList(why.split(",")))),12,CORAL,false));
+            else detailRow(details,"حالة المراجعة",label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?"تحويل محتاج ربط؛ الخصم ما زال محسوبًا لحين مراجعتك":"مصدر العملية يحتاج مراجعة؛ المبلغ ما زال محسوبًا",12,CORAL,false));
+        }
         TextView original=label("عرض الرسالة الأصلية",14,ACCENT,true);
         original.setOnClickListener(v -> showOriginalMessages(db.sourceEvidence(item.id)));
         detailRow(details,"مصدر الرقم",original);
@@ -4005,7 +4021,8 @@ public final class MainActivity extends Activity {
     }
     private boolean matchesTransactionFilters(ExpenseDb.Transaction tx,String text){
         return (transactionKindFilter.isEmpty()||transactionKindFilter.equals(tx.kind))
-                &&(transactionCategoryFilter.isEmpty()||transactionCategoryFilter.equals(tx.category))
+                &&(transactionCategoryFilter.isEmpty()||transactionCategoryFilter.equals(tx.category)||
+                   NEEDS_ATTENTION_FILTER.equals(transactionCategoryFilter)&&("expense".equals(tx.kind)&&MoneyFlow.UNCATEGORIZED.equals(tx.category)||tx.needsReview))
                 &&(!transactionExcludeTransfers||!isSentTransfer(tx))
                 &&MoneyFlow.matchesFilter(transactionBucketFilter,bucketOf(tx))
                 &&(!transactionStatementList||!ExpenseDb.paidFromCash(tx,sourceKinds()))
@@ -4015,7 +4032,7 @@ public final class MainActivity extends Activity {
     }
     private boolean matchesCaptureFilters(CaptureEvents.Event event,String text){
         // Canceled attempts are audit history, not active expenses awaiting classification.
-        if ("غير مصنف".equals(transactionCategoryFilter)) return false;
+        if ("غير مصنف".equals(transactionCategoryFilter)||NEEDS_ATTENTION_FILTER.equals(transactionCategoryFilter)) return false;
         // The list behind the home number holds only the rows that add up to it; no cancelled attempts beside them.
         if (!MoneyFlow.listsCaptureHistory(transactionBucketFilter)) return false;
         if(event.original!=null){

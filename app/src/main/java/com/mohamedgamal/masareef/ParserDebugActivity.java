@@ -22,6 +22,8 @@ import java.util.Locale;
  */
 public final class ParserDebugActivity extends Activity {
     static final String ENABLED_KEY = "parser_debug_enabled";
+    /** Opens the screen on one view: all, diff, ununderstood, unrecorded, rescan. */
+    static final String VIEW_EXTRA = "view";
     private static final int LIMIT = 300;
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT);
 
@@ -64,6 +66,7 @@ public final class ParserDebugActivity extends Activity {
         ui = new UiComponents(this, theme, font);
         getWindow().setStatusBarColor(theme.background); getWindow().setNavigationBarColor(theme.background);
         if (state != null) view = state.getString("view", "all");
+        else if (getIntent() != null && getIntent().getStringExtra(VIEW_EXTRA) != null) view = getIntent().getStringExtra(VIEW_EXTRA);
         show();
         load();
     }
@@ -114,13 +117,18 @@ public final class ParserDebugActivity extends Activity {
         tab(tabs, "الكل", "all"); tab(tabs, "الاختلافات", "diff"); tab(tabs, "لم أفهمها (" + s.counts[1] + ")", "ununderstood");
         page.addView(tabs);
         LinearLayout tabs2 = new LinearLayout(this); tabs2.setOrientation(LinearLayout.HORIZONTAL);
+        tab(tabs2, "لم تُسجَّل", "unrecorded");
         tab(tabs2, "إعادة الفحص (بدون تسجيل)", "rescan");
         page.addView(tabs2);
         if (view.equals("rescan")) { rescanView(s); return; }
         if (view.equals("ununderstood")) { for (ShadowStore.Ununderstood u : s.ununderstood) ununderstoodCard(u); if (s.ununderstood.isEmpty()) line("لا توجد رسائل.", UiTheme.BODY, theme.muted); return; }
+        line(DecisionSwitch.on(this) ? "المحلل الجديد هو اللي بيسجّل الرسائل اللي توصل بعد التفعيل؛ القديم رأيه بس." :
+                "المحلل القديم هو اللي بيسجّل؛ الجديد في الظل.", UiTheme.CAPTION, theme.muted);
         int shown = 0;
         for (ShadowStore.Stored row : s.live) {
             if (view.equals("diff") && row.diff().agrees()) continue;
+            // Not recorded by the new parser, each with its reason (INFO_ONLY, UNUNDERSTOOD, promo, OTP, ...).
+            if (view.equals("unrecorded") && (ShadowDiff.newRecords(row.decision) || "EMPTY".equals(row.status))) continue;
             observationCard(row); shown++;
         }
         if (shown == 0) line("لا توجد ملاحظات بعد.", UiTheme.BODY, theme.muted);

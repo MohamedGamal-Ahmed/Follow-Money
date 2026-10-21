@@ -46,6 +46,8 @@ final class ShadowStoreTest {
         try {
             if (!target.getPackageName().endsWith(".shadowqa") || !"ranchu".equals(android.os.Build.HARDWARE)) throw new SecurityException("Isolated emulator required");
             db = new ExpenseDb(target); check(db.transactionCount() == 0, "Existing ledger retained; empty fixture required"); owned = true;
+            // Sections 1-8 check shadow mode: the legacy parser decides. Step 7 is checked in section 10.
+            DecisionSwitch.set(target, false);
             SQLiteDatabase sql = db.getWritableDatabase();
 
             // 1. Upgrade from schema 25 creates the shadow tables.
@@ -153,6 +155,40 @@ final class ShadowStoreTest {
                 check(shown.contains("تشخيص المحلل") && shown.contains(v[1]), "Debug view " + v[0] + " shows " + v[1]);
             }
             screen.finish(); runner.waitForIdleSync();
+
+            // 10. Step 7: the new pipeline decides messages that arrive after it is switched on; the switch rolls back at once.
+            long beforeSwitch = System.currentTimeMillis();
+            DecisionSwitch.set(target, true);
+            check(DecisionSwitch.on(target) && DecisionSwitch.since(target) >= beforeSwitch, "Switch on, activation time stored");
+            long t = DecisionSwitch.since(target) + 1000;
+            CaptureResult early = db.captureSms("QABANK", "Paid EGP 33.00 at \"OLD SHOP\". Card ****1234.", DecisionSwitch.since(target) - 60_000L);
+            check(early.transaction != null && early.transaction.amountMinor == 3300, "A message from before activation is decided by legacy");
+            CaptureResult glued = db.captureSms("BankMisr", "شكرًا لاستخدامك بطاقة بنك مصر ***4636، تم الآن خصم EGP 149.98عند KASHIER*BUTLERS & CO C يوم 20/10/2026 ، الرصيد المتاح EGP 2139.44", t);
+            check(glued.transaction != null && glued.transaction.amountMinor == 14998 && "expense".equals(glued.transaction.kind) && !glued.transaction.needsReview,
+                    "New pipeline records the purchase with its piasters: " + (glued.transaction == null ? glued.reason : glued.transaction.amountMinor));
+            check(glued.transaction.merchant.toUpperCase(java.util.Locale.ROOT).contains("BUTLERS"), "Merchant from the new pipeline: " + glued.transaction.merchant);
+            String opinion = first(sql, "SELECT legacy_decision || '/' || legacy_reason FROM shadow_observations WHERE transaction_id=" + glued.transaction.id);
+            check(opinion != null && opinion.startsWith("WOULD_RECORD/LEGACY_OPINION"), "Legacy opinion kept with the message: " + opinion);
+            CaptureResult inferred = db.captureSms("BankMisr", "تم تنفيذ تحويل لحظي من بطاقة رقم 1234 بمبلغ 2000 رقم مرجعي 123456789يوم 24/07/2026 الساعه 20:53", t + 1000);
+            check(inferred.transaction != null && inferred.transaction.needsReview && inferred.transaction.amountMinor == 200000, "REVIEW is recorded and waits for the user");
+            String why = ShadowStore.reasonsOf(sql, inferred.transaction.id);
+            check(why != null && why.contains("CURRENCY_INFERRED") && ReviewReasons.text(java.util.Arrays.asList(why.split(","))).get(0).contains("العملة"), "Review reason in the user's language");
+            long rows = db.transactionCount();
+            CaptureResult info = db.captureSms("7030", "Dear Customer, You have successfully renewed 1 GB subscription from Orange and 39 Egyptian pound has been deducted from your line", t + 2000);
+            CaptureResult unclear = db.captureSms("QABANK", "Paid EUR 1.250 at Cafe Nine", t + 3000);
+            check(db.transactionCount() == rows && info.transaction == null && unclear.transaction == null, "INFO_ONLY and UNUNDERSTOOD record nothing");
+            check(info.reason == CaptureResult.Reason.NEW_PIPELINE_SKIPPED || info.reason == CaptureResult.Reason.NO_LEDGER_CANDIDATE, "Skipped by the new pipeline: " + info.reason);
+            CaptureResult charge = db.captureSms("BankMisr", "شكرًا لاستخدامك بطاقة بنك مصر ***4636، تم الآن خصم EGP 5.00عند FAWRY يوم 20/10/2026 ، الرصيد المتاح EGP 100.00", t + 4000);
+            CaptureResult back = db.captureSms("BankMisr", "تم اعادة قيد معاملتك ل EGP 5.00 التي تمت علي البطاقة 1234*4636يوم 20/10/2026 عندFAWRY ، لمزيد من المعلومات. تفضل بالاتصال ب 19888", t + 4000 + 5 * 60_000L);
+            check(charge.transaction != null && back.transaction != null && "income".equals(back.transaction.kind), "Charge and its return recorded");
+            check(db.reimbursedExpense(back.transaction.id) != null && db.reimbursedExpense(back.transaction.id).id == charge.transaction.id, "The return is linked to its charge (expense offset)");
+            long kept = glued.transaction.id; long keptAmount = glued.transaction.amountMinor;
+            db.captureSms("BankMisr", "شكرًا لاستخدامك بطاقة بنك مصر ***4636، تم الآن خصم EGP 149.98عند KASHIER*BUTLERS & CO C يوم 20/10/2026 ، الرصيد المتاح EGP 2139.44", t);
+            check(db.transactionById(kept).amountMinor == keptAmount && db.transactionCount() == rows + 2, "A repeated message changes nothing recorded");
+            DecisionSwitch.set(target, false);
+            CaptureResult after = db.captureSms("QABANK", "Paid EGP 44.00 at \"QA Kiosk\". Card ****1234.", t + 3_600_000L);
+            check(after.transaction != null && first(sql, "SELECT legacy_decision FROM shadow_observations WHERE transaction_id=" + after.transaction.id).startsWith("RECORDED"), "Rollback: legacy decides the next message at once");
+            check(db.transactionById(kept) != null, "Rollback leaves what the new pipeline recorded");
 
             // 9. Delete all local data removes shadow data.
             db.clearAllData();
