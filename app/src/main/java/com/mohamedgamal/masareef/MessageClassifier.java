@@ -1,0 +1,116 @@
+package com.mohamedgamal.masareef;
+
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.regex.Pattern;
+
+/**
+ * Pipeline stage 2: what kind of message is this? Non-transactions stop here (IGNORE); several completed events in
+ * one message stop as UNUNDERSTOOD; everything else continues to extraction. Generic wording rules only: no
+ * per-bank templates, and the sender never decides the type. Shadow mode only.
+ */
+final class MessageClassifier {
+    enum Type { TRANSACTION, PROMO, OTP, VERIFICATION, BALANCE_INQUIRY, REMINDER, OTHER }
+    /** Stage decision: EXTRACT continues to extraction; the others are final for this message. */
+    enum Decision { EXTRACT, IGNORE, UNUNDERSTOOD }
+
+    static final class Result {
+        final Type type;
+        final Decision decision;
+        final Set<String> reasons;
+        /** Completed money events found; more than one is MULTIPLE_EVENTS. */
+        final int events;
+        Result(Type type, Decision decision, Set<String> reasons, int events) {
+            this.type = type; this.decision = decision; this.reasons = Collections.unmodifiableSet(reasons); this.events = events;
+        }
+        /** Corpus spelling of the type. */
+        String corpusType() { return type.name().toLowerCase(java.util.Locale.ROOT); }
+    }
+
+    private static final Pattern VERIFICATION = compile(ParsingPolicy.VERIFICATION);
+    private static final Pattern SECURITY_REQUEST = compile(ParsingPolicy.SECURITY_REQUEST);
+    private static final Pattern BALANCE_INQUIRY = compile(ParsingPolicy.BALANCE_INQUIRY);
+    private static final Pattern BALANCE_WORDS = compile(ParsingPolicy.BALANCE_WORDS);
+    private static final Pattern PROMOTION = compile(ParsingPolicy.PROMOTION);
+    private static final Pattern FUTURE = compile(ParsingPolicy.FUTURE_OR_REQUEST);
+    private static final Pattern UNSUCCESSFUL = compile(ParsingPolicy.UNSUCCESSFUL);
+    private static final Pattern REFUND = compile(ParsingPolicy.REFUND_OR_REVERSAL);
+    private static final Pattern COMPLETED = compile(ParsingPolicy.COMPLETED_EVENT);
+    private static final Pattern CONDITIONAL = compile(ParsingPolicy.CONDITIONAL);
+    private static final Pattern COMPLETED_WITHOUT_AMOUNT = compile(ParsingPolicy.COMPLETED_WITHOUT_AMOUNT);
+    private static final Pattern CARD = compile(ParsingPolicy.CARD_CONTEXT);
+    private static final Pattern MERCHANT_MARKER = compile(ParsingPolicy.MERCHANT_MARKER);
+    private static final Pattern CLAUSE = compile(ParsingPolicy.CLAUSE_BOUNDARY);
+
+    static Result classify(MessageNormalizer.Normalized message) {
+        Set<String> reasons = new LinkedHashSet<>();
+        String text = message.matchText;
+        if (message.empty()) return result(Type.OTHER, reasons, 0, "EMPTY_MESSAGE");
+        boolean anyAmount = !AmountScanner.scan(text).isEmpty();
+        if (!anyAmount) reasons.add("MISSING_AMOUNT");
+        if (SECURITY_REQUEST.matcher(text).find() && !VERIFICATION.matcher(text).find())
+            return result(Type.VERIFICATION, reasons, 0, "VERIFICATION_MESSAGE");
+        if (VERIFICATION.matcher(text).find()) return result(Type.OTP, reasons, 0, "VERIFICATION_MESSAGE");
+        if (BALANCE_INQUIRY.matcher(text).find()) return result(Type.BALANCE_INQUIRY, reasons, 0, "BALANCE_ONLY");
+
+        int events = 0;
+        boolean signed = false, refund = REFUND.matcher(text).find();
+        // One event per clause that pairs an amount with a completed verb, a refund, or a signed (+/-) amount.
+        for (String clause : clauses(text)) {
+            java.util.List<AmountScanner.Money> amounts = AmountScanner.scan(clause);
+            if (amounts.isEmpty() || CONDITIONAL.matcher(clause).find()) continue;
+            boolean clauseSigned = false;
+            for (AmountScanner.Money money : amounts) clauseSigned |= money.trailingSign != 0;
+            signed |= clauseSigned;
+            if (clauseSigned || COMPLETED.matcher(clause).find() || REFUND.matcher(clause).find()) events++;
+        }
+        boolean completed = events > 0 || COMPLETED_WITHOUT_AMOUNT.matcher(text).find();
+        boolean promo = PROMOTION.matcher(text).find();
+        if (promo && !completed) return result(Type.PROMO, reasons, 0, "PROMOTIONAL_MESSAGE");
+        if (FUTURE.matcher(text).find() && !completed) return result(Type.REMINDER, reasons, 0, "FUTURE_ONLY");
+        if (UNSUCCESSFUL.matcher(text).find() && !refund) return result(Type.OTHER, reasons, events, "UNSUCCESSFUL_EVENT");
+        if (!completed && anyAmount && CARD.matcher(text).find() && MERCHANT_MARKER.matcher(text).find()) {
+            reasons.add("CARD_MERCHANT_CONTEXT");
+            completed = true;
+        }
+        if (completed) {
+            if (promo) reasons.add("PROMO_SIGNALS");
+            if (refund) reasons.add("REFUND_OR_REVERSAL");
+            if (signed) reasons.add("SIGNED_AMOUNT");
+            if (message.groupSummary) reasons.add("GROUP_SUMMARY");
+            if (events > 1) { reasons.add("MULTIPLE_EVENTS"); return new Result(Type.TRANSACTION, Decision.UNUNDERSTOOD, reasons, events); }
+            reasons.add("COMPLETED_EVENT");
+            return new Result(Type.TRANSACTION, Decision.EXTRACT, reasons, events);
+        }
+        if (anyAmount && BALANCE_WORDS.matcher(text).find()) return result(Type.BALANCE_INQUIRY, reasons, 0, "BALANCE_ONLY");
+        return result(Type.OTHER, reasons, 0, "NO_COMPLETED_EVENT");
+    }
+
+    /** Splits at clause boundaries, except inside a money mention ("15 ج.م." and "L.E. 250" keep their dots). */
+    static java.util.List<String> clauses(String text) {
+        java.util.List<AmountScanner.Money> money = AmountScanner.scan(text);
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        java.util.regex.Matcher boundary = CLAUSE.matcher(text);
+        int from = 0;
+        while (boundary.find()) {
+            boolean inside = false;
+            // The closing dot of "ج.م." may also end the sentence; only dots strictly inside a mention are protected.
+            for (AmountScanner.Money m : money) inside |= boundary.start() >= m.start && boundary.start() < m.end - 1;
+            if (inside) continue;
+            parts.add(text.substring(from, boundary.start()));
+            from = boundary.end();
+        }
+        parts.add(text.substring(from));
+        return parts;
+    }
+
+    private static Result result(Type type, Set<String> reasons, int events, String reason) {
+        reasons.add(reason);
+        return new Result(type, Decision.IGNORE, reasons, events);
+    }
+
+    private static Pattern compile(String regex) { return Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE); }
+
+    private MessageClassifier() {}
+}
