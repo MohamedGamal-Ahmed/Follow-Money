@@ -61,7 +61,7 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
@@ -72,8 +72,23 @@ public final class ParserShadowTest {
         }
         String capture = Files.readString(source.resolve("CaptureTransaction.java"), StandardCharsets.UTF_8);
         // The rules read and the shadow call sit in one guarded block (no nested braces) that ends in the shared catch.
-        check(capture.matches("(?s).*try \\{[^}]*db\\.merchantRules\\(\\)[^}]*ParserShadow\\.observe\\([^}]*\\} catch \\(RuntimeException \\| LinkageError.*"), "Shadow call is isolated");
-        check(!capture.matches("(?s).*=\\s*ParserShadow\\.observe.*"), "Shadow result is never used by capture");
+        check(capture.matches("(?s).*try \\{[^}]*db\\.merchantRules\\(\\)[^}]*ParserShadow\\.observe\\([^}]*ShadowStore\\.record\\([^}]*\\} catch \\(RuntimeException \\| LinkageError.*"), "Shadow call and store are isolated");
+        // The observation goes only to the shadow store: declared once, read once, inside the guarded block.
+        same(capture.split("\\bobservation\\b", -1).length - 1, 2, "Shadow result is never used by capture");
+        check(capture.contains("ShadowStore.record(sql, request, result, observation);"), "Observation stored beside the legacy result");
+        // Storage: sealed values, outside the ledger revision, created on install and upgrade.
+        String store = Files.readString(source.resolve("ShadowStore.java"), StandardCharsets.UTF_8);
+        same(store.split("put\\(\"encrypted_body\", EvidenceVault\\.encrypt\\(", -1).length - 1, 2, "Observation values and ununderstood text are sealed");
+        check(!store.matches("(?s).*\\.put\\(\"(?!encrypted_body)[a-z_]+\", (?:raw|legacyBody|o\\.values).*"), "No message text or value outside encrypted_body");
+        String revision = Files.readString(source.resolve("LedgerRevision.java"), StandardCharsets.UTF_8);
+        String vault = Files.readString(source.resolve("EvidenceVault.java"), StandardCharsets.UTF_8);
+        for (String table : List.of("shadow_observations", "ununderstood_messages", "learning_rules")) {
+            check(!revision.contains("\"" + table + "\""), "Shadow table outside the ledger revision: " + table);
+            check(store.contains("CREATE TABLE IF NOT EXISTS " + table + "("), "Shadow table created: " + table);
+        }
+        for (String table : List.of("shadow_observations", "ununderstood_messages")) check(vault.contains("\"" + table + "\""), "Backup re-seals " + table);
+        String schema = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
+        check(schema.contains("ShadowStore.create(db);\n    }") && schema.contains("if(oldVersion<26)ShadowStore.create(db);"), "Shadow tables on install and upgrade");
         String db = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
         check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner|TransactionExtractor|ConfidenceScorer|LocalLearning)\\b.*"), "Ledger storage never reads shadow output");
 

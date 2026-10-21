@@ -33,8 +33,19 @@ final class LocalLearning {
 
     private static final class ShapeMemory {
         int dismissed, confirmed;
-        String direction;
+        String source, direction;
         boolean conflicting;
+    }
+
+    /** One remembered shape as ShadowStore keeps it in learning_rules: a hash and counts, never message text. */
+    static final class ShapeRule {
+        final String key, source, direction;
+        final int dismissed, confirmed;
+        final boolean conflicting;
+        ShapeRule(String key, String source, int dismissed, int confirmed, String direction, boolean conflicting) {
+            this.key = key; this.source = source; this.dismissed = dismissed; this.confirmed = confirmed;
+            this.direction = direction; this.conflicting = conflicting;
+        }
     }
 
     private final List<MerchantRule> merchantRules = new ArrayList<>();
@@ -64,6 +75,27 @@ final class LocalLearning {
     }
 
     synchronized int shapeCount() { return shapes.size(); }
+
+    /** Every remembered shape, least recently updated first. */
+    synchronized List<ShapeRule> exportShapes() {
+        List<ShapeRule> rules = new ArrayList<>();
+        for (Map.Entry<String, ShapeMemory> e : shapes.entrySet()) {
+            ShapeMemory m = e.getValue();
+            rules.add(new ShapeRule(e.getKey(), m.source, m.dismissed, m.confirmed, m.direction, m.conflicting));
+        }
+        return rules;
+    }
+
+    /** Replaces the shape memory with stored rules, in the order given (least recently updated first). */
+    synchronized void restoreShapes(List<ShapeRule> rules) {
+        shapes.clear();
+        for (ShapeRule rule : rules) {
+            ShapeMemory m = new ShapeMemory();
+            m.source = rule.source; m.dismissed = rule.dismissed; m.confirmed = rule.confirmed;
+            m.direction = rule.direction; m.conflicting = rule.conflicting;
+            shapes.put(rule.key, m);
+        }
+    }
 
     synchronized Learned apply(String source, String normalizedText, ConfidenceScorer.Confidence scored, TransactionExtractor.Extraction x) {
         Set<String> reasons = new LinkedHashSet<>(scored.reasons);
@@ -103,7 +135,9 @@ final class LocalLearning {
     }
 
     private ShapeMemory memory(String source, String normalizedText) {
-        return shapes.computeIfAbsent(key(source, normalizedText), k -> new ShapeMemory());
+        ShapeMemory memory = shapes.computeIfAbsent(key(source, normalizedText), k -> new ShapeMemory());
+        memory.source = source;
+        return memory;
     }
 
     /** Hash of source and structural shape: the same template with another amount or date shares a key; no text is kept. */

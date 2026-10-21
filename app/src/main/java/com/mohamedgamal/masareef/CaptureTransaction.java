@@ -30,8 +30,12 @@ final class CaptureTransaction {
             java.util.List<LocalLearning.MerchantRule> rules = new java.util.ArrayList<>();
             for (ExpenseDb.MerchantRule rule : db.merchantRules()) rules.add(new LocalLearning.MerchantRule(rule.matchText, rule.category, rule.ignored));
             ParserShadow.learning().setMerchantRules(rules);
-            ParserShadow.observe(request.raw, String.valueOf(result.reason),
+            android.database.sqlite.SQLiteDatabase sql = db.getWritableDatabase();
+            ShadowStore.loadLearningOnce(sql, ParserShadow.learning());
+            ParserShadow.Observation observation = ParserShadow.observe(request.raw, String.valueOf(result.reason),
                     result.transaction == null ? null : result.transaction.merchant, request.captureAt, System.currentTimeMillis());
+            // Stored beside the legacy record; these tables are outside LedgerRevision, so the ledger sees no change.
+            ShadowStore.record(sql, request, result, observation);
         } catch (RuntimeException | LinkageError ignored) {
             // Diagnostics only.
         }

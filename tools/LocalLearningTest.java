@@ -107,6 +107,21 @@ public final class LocalLearningTest {
         check(LocalLearning.key("BankMisr", text("u01")).matches("[0-9a-f]{64}"), "Shape key is a hash");
         check(!bounded.toString().contains("حساب"), "Model holds no message text");
 
+        // Persistence (ShadowStore.learning_rules): export and restore keep decisions and least-recently-updated order.
+        List<LocalLearning.ShapeRule> stored = dismiss.exportShapes();
+        LocalLearning reloaded = new LocalLearning();
+        reloaded.restoreShapes(stored);
+        same(learn(reloaded, "u01").decision, "IGNORE", "Restored dismissals still ignore the shape");
+        same(learn(reloaded, "u02").decision, "AUTO", "Restored model leaves other templates alone");
+        for (LocalLearning.ShapeRule rule : stored) {
+            check(rule.key.matches("[0-9a-f]{64}"), "Stored rule key is a hash");
+            same(rule.source, source("u01"), "Stored rule keeps the source label only");
+        }
+        List<LocalLearning.ShapeRule> order = bounded.exportShapes();
+        LocalLearning reorder = new LocalLearning();
+        reorder.restoreShapes(order);
+        same(reorder.exportShapes().get(0).key, order.get(0).key, "Restore keeps eviction order");
+
         System.out.println("Local learning checks passed: " + checks + " (" + rows.size() + " corpus rows + 50 held-out unchanged by an empty model).");
     }
 }

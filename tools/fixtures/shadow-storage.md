@@ -1,0 +1,16 @@
+# Shadow storage (step 2 of the device phase)
+
+Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade from any older schema. None of them is tracked by `LedgerRevision`, so a shadow write never counts as a ledger change and recording behaviour is unchanged. Legacy remains the only decision-maker.
+
+| Table | One row per | Plain columns | Sealed by EvidenceVault (`encrypted_body`) |
+| --- | --- | --- | --- |
+| `shadow_observations` | observed message (live capture now; the rescan of step 5 uses `origin='rescan'`) | time, channel, source label, message hash, legacy `transaction_id`, legacy reason and decision (`RECORDED` / `RECORDED_REVIEW` / `NOT_RECORDED`), status, type, stage/scored/final decision, score, movement kind, reasons, policy | JSON of the new pipeline's field values (amount, currency, direction, merchant, party, balance, fee, card, account, time, accounting effect, learned category) and the legacy values (amount, currency, direction, merchant) |
+| `ununderstood_messages` ("رسائل لم أفهمها") | distinct message (hash) the pipeline decided UNUNDERSTOOD | first/last seen, count, channel, source, reasons, policy | the normalized message text |
+| `learning_rules` | learned shape (and, after the flip, user corrections) | shape hash, source label, dismissed / confirmed counts, direction, conflicting, merchant, category | nothing: no message text is stored |
+
+- Bounds: `SHADOW_STORE_MAX_ROWS` = 5000 observations (oldest removed first), `UNUNDERSTOOD_MAX_ROWS` = 500 messages (least recently seen removed first), `LEARN_MAX_SHAPES` = 500 shapes.
+- Backup and restore: both sealed tables are in `EvidenceVault.ENCRYPTED_TABLES`, so a backup opens them on this device and a restore re-seals them with the new device's key, the same rule as capture evidence.
+- The local-learning model loads its stored shapes once per process before the first observation (`ShadowStore.loadLearningOnce`); `saveLearning` writes them back and will be called by the correction UI (step 8). Nothing records dismissals or confirmations before then.
+- Failure isolation: the store call sits in the same guarded block as the shadow observation in `CaptureTransaction`; any exception is swallowed and the capture result is built before it runs.
+- Checks (`ParserShadowTest`, `LocalLearningTest`): the observation is used only by the store; both sealed columns go through `EvidenceVault.encrypt`; no shadow table is in `LedgerRevision`; the backup re-seals both; the tables exist on install and upgrade; learning export/restore keeps decisions and eviction order with hashes only.
+- Not verified on a device yet: the Keystore round trip and the upgrade from v25 run only on Android (step 6).

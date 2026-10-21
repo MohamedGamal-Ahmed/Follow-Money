@@ -237,7 +237,7 @@ final class BackupRestoreTest {
             char[] password = "backup-qa-2026".toCharArray();
             byte[] file = LocalBackup.export(target, db, password.clone());
             BackupVault.Header header = BackupVault.header(file);
-            ok(header.schemaVersion == 25 && header.versionCode > 0, "backup header carries the schema and app version");
+            ok(header.schemaVersion == ExpenseDb.SCHEMA_VERSION && header.versionCode > 0, "backup header carries the schema and app version");
             ok(!new String(file, java.nio.charset.StandardCharsets.ISO_8859_1).contains("QA BACKUP SHOP"), "message text is not visible in the file");
             File[] leftovers = target.getCacheDir().listFiles((dir, name) -> new File(dir, name).isFile() && (name.startsWith("backup-") || name.startsWith("restore-")));
             ok(leftovers == null || leftovers.length == 0, "no temporary snapshot is left in the app folder after export");

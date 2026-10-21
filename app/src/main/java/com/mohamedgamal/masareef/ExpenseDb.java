@@ -30,7 +30,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     static final String DATABASE_NAME = "masareef.db";
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
-    static final int SCHEMA_VERSION = 25;
+    static final int SCHEMA_VERSION = 26;
 
     public ExpenseDb(Context context) {
         super(context, DATABASE_NAME, null, SCHEMA_VERSION);
@@ -166,6 +166,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         db.execSQL("ALTER TABLE recurring ADD COLUMN last_paid_due TEXT");
         CardSettlements.create(db);CaptureEvents.create(db);createImportReceipts(db);
         CommitmentPayments.create(db);LedgerRevision.create(db);
+        ShadowStore.create(db);
     }
 
     /** v20: an incoming payment that returns money spent on someone else's behalf, linked to that purchase. */
@@ -300,6 +301,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             LedgerRevision.create(db);
         }
         if(oldVersion==24)LedgerRevision.create(db);
+        if(oldVersion<26)ShadowStore.create(db);
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
