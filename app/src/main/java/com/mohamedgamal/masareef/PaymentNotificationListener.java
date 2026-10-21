@@ -81,6 +81,27 @@ public final class PaymentNotificationListener extends NotificationListenerServi
         return text.isEmpty() || title.equals(text) ? title : title + " " + text;
     }
 
+    /** The six separate extras for the shadow pipeline; absent stays null, empty stays "". Legacy uses notificationBody. */
+    static MessageNormalizer.Raw shadowInput(String packageName, Notification notification) {
+        if (notification == null || notification.extras == null) return null;
+        CharSequence[] lines = notification.extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+        String joined = null;
+        if (lines != null) {
+            StringBuilder out = new StringBuilder();
+            for (CharSequence line : lines) { if (out.length() > 0) out.append('\n'); out.append(line == null ? "" : line); }
+            joined = out.toString();
+        }
+        return MessageNormalizer.Raw.notification(packageName, notification.flags,
+                extra(notification, Notification.EXTRA_TITLE), extra(notification, Notification.EXTRA_TEXT),
+                extra(notification, Notification.EXTRA_BIG_TEXT), joined,
+                extra(notification, Notification.EXTRA_SUB_TEXT), extra(notification, Notification.EXTRA_SUMMARY_TEXT));
+    }
+
+    private static String extra(Notification notification, String key) {
+        CharSequence value = notification.extras.getCharSequence(key);
+        return value == null ? null : value.toString();
+    }
+
     private static String notificationText(Notification notification, String key) {
         CharSequence value = notification.extras.getCharSequence(key);
         return value == null ? "" : value.toString().trim();
@@ -96,7 +117,10 @@ public final class PaymentNotificationListener extends NotificationListenerServi
             catch (Exception ignored) { label = packageName; }
             try (ExpenseDb db = new ExpenseDb(context)) {
                 ExpenseDb.Transaction before = db.latestInserted();
-                CaptureResult result = db.captureNotification(packageName, label, body, item.getPostTime());
+                MessageNormalizer.Raw shadow;
+                try { shadow = shadowInput(packageName, item.getNotification()); }
+                catch (RuntimeException ignored) { shadow = null; } // Shadow input must never block legacy capture.
+                CaptureResult result = db.captureNotification(packageName, label, body, item.getPostTime(), shadow);
                 boolean added = result.dbChanged;
                 if (added)
                     SmsReceiver.notifyDataChanged(context);

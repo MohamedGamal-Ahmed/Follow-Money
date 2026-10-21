@@ -17,8 +17,20 @@ final class CaptureTransaction {
         CaptureResult.Write write = db.addAutomaticCapture(request);
         long capturedId = write.rowId;
         finish(request, write);
-        return new CaptureResult(write, capturedId,
+        CaptureResult result = new CaptureResult(write, capturedId,
                 write.rowId < 0 ? null : db.transactionById(write.rowId), pending, before, db.changes());
+        shadow(request, result);
+        return result;
+    }
+
+    /** Runs after the legacy decision is final; a shadow failure must never change or fail the capture. */
+    private static void shadow(CaptureRequest request, CaptureResult result) {
+        try {
+            ParserShadow.observe(request.raw, String.valueOf(result.reason),
+                    result.transaction == null ? null : result.transaction.merchant, System.currentTimeMillis());
+        } catch (RuntimeException | LinkageError ignored) {
+            // Diagnostics only.
+        }
     }
 
     /** Boolean compatibility path; acceptance keeps its historical meaning. */

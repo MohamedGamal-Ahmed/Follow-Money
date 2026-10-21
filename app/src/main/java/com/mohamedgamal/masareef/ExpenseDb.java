@@ -442,6 +442,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return capture.execute(CaptureRequest.notification(packageName, appLabel, body, when));
     }
 
+    /** Same legacy capture; shadow carries the separate extras for the shadow pipeline only. */
+    CaptureResult captureNotification(String packageName, String appLabel, String body, long when, MessageNormalizer.Raw shadow) {
+        return capture.execute(CaptureRequest.notification(packageName, appLabel, body, when, shadow));
+    }
+
     /** Storage seam for CaptureTransaction; the connection and transaction policy stay here. */
     CaptureResult.Write addAutomaticCapture(CaptureRequest request) {
         return addAutomaticCapture(request.sourceKey, request.label, request.body, request.captureAt,
