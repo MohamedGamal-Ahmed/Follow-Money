@@ -86,6 +86,17 @@ final class MerchantClassifier {
     private static String withoutProcessor(String raw) {
         return raw==null?"":raw.trim().replaceFirst("(?i)^(?:KASHIER|PAYMOB)\\s*\\*\\s*", "");
     }
+    /** Read-only catalog view for the shadow MerchantCatalogIndex: {name, "branches"|"whole", textKey aliases...}. */
+    static java.util.List<String[]> catalog() {
+        java.util.List<String[]> rows=new java.util.ArrayList<>();
+        for(Entry entry:ENTRIES){
+            String[] row=new String[entry.aliases.length+2];
+            row[0]=entry.name; row[1]=entry.branches?"branches":"whole";
+            System.arraycopy(entry.aliases,0,row,2,entry.aliases.length);
+            rows.add(row);
+        }
+        return rows;
+    }
     static String category(String raw) { Entry entry=find(raw); return entry==null?null:entry.category; }
     static String identity(String raw) { return textKey(displayName(raw)); }
     static boolean sameMerchant(String first, String second) {

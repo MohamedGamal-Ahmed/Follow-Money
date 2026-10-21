@@ -9,7 +9,7 @@ final class ParsingPolicy {
     static final String POLICY_VERSION = "2026-10-21.1";
     static final String NORMALIZER_VERSION = "normalization-1";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
-    static final String CORPUS_CONTRACT = "v2:cc75ee3c";
+    static final String CORPUS_CONTRACT = "v2:6c8b865e";
 
     // Shadow mode.
     static final boolean SHADOW_ENABLED = true;
@@ -30,8 +30,11 @@ final class ParsingPolicy {
     static final String[] STARRED_PROCESSORS = {"KASHIER", "PAYMOB", "FAWRY", "SQ", "PAYPAL", "GEIDEA", "STRIPE", "PAYSKY"};
     /** Removed before a space-separated merchant only: "Kashier Butlers". A lone token stays (PAYPAL). */
     static final String[] BARE_PROCESSORS = {"KASHIER", "PAYMOB"};
-    /** Trailing country/city descriptors removed from the end of a merchant, never from its start (CAIRO BOOKS). */
-    static final String[] TRAILING_LOCATIONS = {"EG", "EGY", "EGYPT", "CAIRO", "GIZA", "ALEXANDRIA", "مصر", "القاهرة", "الجيزة"};
+    /**
+     * Trailing Latin country/city descriptors of card terminals, removed from the end only (CAIRO BOOKS keeps CAIRO).
+     * Arabic place names are excluded: they are usually part of the name itself (بنك مصر, جامعة القاهرة).
+     */
+    static final String[] TRAILING_LOCATIONS = {"EG", "EGY", "EGYPT", "CAIRO", "GIZA", "ALEXANDRIA"};
 
     // Catalog lookup: exact, then branch prefix, then conservative fuzzy.
     /** A known alias accepts a following branch/location suffix only from this length. */
