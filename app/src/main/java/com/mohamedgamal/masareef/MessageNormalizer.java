@@ -95,14 +95,14 @@ final class MessageNormalizer {
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);
             if (Character.isDigit(c) && (c < '0' || c > '9')) { out.append((char) ('0' + Character.digit(c, 10))); reasons.add("DIGITS_FOLDED"); }
-            else if (c == '٫') out.append('.');
-            else if (c == '٬') out.append(',');
+            else if (c == '\u066b') out.append('.');
+            else if (c == '\u066c') out.append(',');
             else if (invisibleControl(c)) reasons.add("CONTROLS_REMOVED");
-            else if (c == 'ـ') reasons.add("TATWEEL_REMOVED");
+            else if (c == '\u0640') reasons.add("TATWEEL_REMOVED");
             else out.append(c);
         }
         String value = Normalizer.normalize(out, Normalizer.Form.NFKC)
-                .replace("\r\n", "\n").replace('\r', '\n').replace(' ', '\n').replace(' ', '\n');
+                .replace("\r\n", "\n").replace('\r', '\n').replace('\u2028', '\n').replace('\u2029', '\n');
         StringBuilder lines = new StringBuilder(value.length());
         for (String line : value.split("\n", -1)) {
             String clean = line.replaceAll("[\\t\\x0B\\f\\p{Zs}]+", " ").trim();
@@ -120,13 +120,13 @@ final class MessageNormalizer {
         String value = Normalizer.normalize(text, Normalizer.Form.NFD).replaceAll("\\p{M}+", "");
         value = Normalizer.normalize(value, Normalizer.Form.NFC).toLowerCase(Locale.ROOT)
                 .replace('ٱ', 'ا').replace('ى', 'ي').replace('ة', 'ه')
-                .replace("‌", "").replace("‍", "");
+                .replace("\u200c", "").replace("\u200d", "");
         return value;
     }
 
     private static boolean invisibleControl(char c) {
-        return c == '​' || c == '‎' || c == '‏' || (c >= '‪' && c <= '‮') ||
-                (c >= '⁦' && c <= '⁩') || c == '؜' || c == '⁠' || c == '﻿';
+        return c == '\u200b' || c == '\u200e' || c == '\u200f' || (c >= '\u202a' && c <= '\u202e') ||
+                (c >= '\u2066' && c <= '\u2069') || c == '\u061c' || c == '\u2060' || c == '\ufeff';
     }
 
     private static String boundaryKey(String value) {

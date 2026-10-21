@@ -76,7 +76,7 @@ public final class MessageNormalizerTest {
         same(bounded.fragments.size(), 2, "Containment respects word boundaries");
         String longText = "a ".repeat(ParsingPolicy.MAX_INPUT_CHARS);
         check(MessageNormalizer.normalize(MessageNormalizer.Raw.sms("x", longText)).reasons.contains("TRUNCATED"), "Bounded input");
-        same(MessageNormalizer.text("A  B\r\nC D"), "A B\nC\nD", "Line separators and nonbreaking spaces");
+        same(MessageNormalizer.text("A\u00a0\u202fB\r\nC\u2028D"), "A B\nC\nD", "Line separators and nonbreaking spaces");
 
         System.out.println("Message normalizer checks passed: " + checks + " (" + rows.size() + " corpus v2 rows, " + variantsCompared + " mechanical variants matched their base).");
     }
