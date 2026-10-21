@@ -24,6 +24,7 @@ public final class ParserShadowTest {
             if (seen.status.equals("EXTRACTED")) same(seen.type.toLowerCase(java.util.Locale.ROOT), row.get("expected_type"), "Shadow classification " + row.get("id"));
             same(seen.decision, ShadowComparison.expectedDecision(row), "Shadow scored decision " + row.get("id"));
             check(!"AUTO".equals(seen.decision) || seen.score >= ParsingPolicy.AUTO_THRESHOLD, "Shadow AUTO carries its score " + row.get("id"));
+            same(seen.decision, seen.scoredDecision, "Without user data, learning leaves the scored decision " + row.get("id"));
             check(seen.toString().contains(ParserShadow.NOT_IMPLEMENTED), "Unimplemented stages stated " + row.get("id"));
             // Only structure is retained: no fragment of the message text appears in the observation.
             for (String word : MessageNormalizer.normalize(MessageNormalizerTest.raw(row)).text.split("[^\\p{L}]+"))
@@ -44,6 +45,11 @@ public final class ParserShadowTest {
         same(differs.merchantProposal, "FUZZY:STARBUCKS~1", "Fuzzy proposal");
         check(differs.reasons.contains("MERCHANT_DIFFERS"), "Disagreement recorded, legacy untouched");
         same(ParserShadow.observe(null, "INSERTED", null, now), null, "No input, no observation");
+        // The user's merchant rules reach the shadow decision; the legacy result is untouched (observe returns only a record).
+        ParserShadow.learning().setMerchantRules(List.of(new LocalLearning.MerchantRule("Nova Market", "بقالة", true)));
+        ParserShadow.Observation learnedIgnore = ParserShadow.observe(MessageNormalizer.Raw.sms("BANK", "Paid EGP 45 at \"Nova Market\"."), "INSERTED", null, now);
+        same(learnedIgnore.decision + "/" + learnedIgnore.scoredDecision, "IGNORE/AUTO", "Ignored-merchant rule in shadow");
+        ParserShadow.learning().setMerchantRules(List.of());
 
         // A failing stage is an observation, never an exception.
         var constructor = MessageNormalizer.Raw.class.getDeclaredConstructor(MessageNormalizer.Channel.class, String.class, String.class, String[].class, int.class);
@@ -55,20 +61,21 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
                 String text = Files.readString(file, StandardCharsets.UTF_8).replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//[^\\n]*", "");
-                boolean uses = text.matches("(?s).*\\b(ParserShadow|MessageNormalizer|MerchantNormalizer|MerchantCatalogIndex|ParsingPolicy|AmountScanner|MessageClassifier|TransactionExtractor|ConfidenceScorer)\\b.*");
+                boolean uses = text.matches("(?s).*\\b(ParserShadow|MessageNormalizer|MerchantNormalizer|MerchantCatalogIndex|ParsingPolicy|AmountScanner|MessageClassifier|TransactionExtractor|ConfidenceScorer|LocalLearning)\\b.*");
                 check(!uses || allowed.contains(name), "Production class uses the shadow pipeline: " + name);
             }
         }
         String capture = Files.readString(source.resolve("CaptureTransaction.java"), StandardCharsets.UTF_8);
-        check(capture.matches("(?s).*try \\{\\s*ParserShadow\\.observe\\(.*catch \\(RuntimeException \\| LinkageError.*"), "Shadow call is isolated");
+        // The rules read and the shadow call sit in one guarded block (no nested braces) that ends in the shared catch.
+        check(capture.matches("(?s).*try \\{[^}]*db\\.merchantRules\\(\\)[^}]*ParserShadow\\.observe\\([^}]*\\} catch \\(RuntimeException \\| LinkageError.*"), "Shadow call is isolated");
         check(!capture.matches("(?s).*=\\s*ParserShadow\\.observe.*"), "Shadow result is never used by capture");
         String db = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
-        check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner|TransactionExtractor|ConfidenceScorer)\\b.*"), "Ledger storage never reads shadow output");
+        check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner|TransactionExtractor|ConfidenceScorer|LocalLearning)\\b.*"), "Ledger storage never reads shadow output");
 
         ParserShadow.clear();
         System.out.println("Parser shadow checks passed: " + checks + " (" + rows.size() + " corpus rows observed; legacy remains the only ledger authority).");

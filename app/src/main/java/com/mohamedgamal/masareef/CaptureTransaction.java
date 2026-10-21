@@ -24,8 +24,12 @@ final class CaptureTransaction {
     }
 
     /** Runs after the legacy decision is final; a shadow failure must never change or fail the capture. */
-    private static void shadow(CaptureRequest request, CaptureResult result) {
+    private void shadow(CaptureRequest request, CaptureResult result) {
         try {
+            // The user's merchant rules, read only, after the legacy decision is final.
+            java.util.List<LocalLearning.MerchantRule> rules = new java.util.ArrayList<>();
+            for (ExpenseDb.MerchantRule rule : db.merchantRules()) rules.add(new LocalLearning.MerchantRule(rule.matchText, rule.category, rule.ignored));
+            ParserShadow.learning().setMerchantRules(rules);
             ParserShadow.observe(request.raw, String.valueOf(result.reason),
                     result.transaction == null ? null : result.transaction.merchant, request.captureAt, System.currentTimeMillis());
         } catch (RuntimeException | LinkageError ignored) {

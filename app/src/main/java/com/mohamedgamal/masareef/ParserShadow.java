@@ -14,11 +14,17 @@ import java.util.Set;
  */
 final class ParserShadow {
     /** Stages not implemented yet; every observation says so instead of inventing a decision. */
-    static final String NOT_IMPLEMENTED = "LOCAL_LEARNING";
+    static final String NOT_IMPLEMENTED = "LEARNING_FEEDBACK_UI|PERSISTENT_STORE";
+    /** Process-level learning model: fed by the user's merchant rules now; dismissals/confirmations need the pending UI. */
+    private static final LocalLearning LEARNING = new LocalLearning();
+
+    static LocalLearning learning() { return LEARNING; }
 
     static final class Observation {
         final long observedAt;
         final String channel, legacyReason, status, merchantProposal, policy, type, stageDecision, decision;
+        /** The stage-4 decision before local learning; equal to decision unless the user's own data changed it. */
+        String scoredDecision;
         final Set<String> reasons;
         final int fragments, normalizedChars;
         /** Stage-4 confidence 0..100, or -1 when the message was not scored (IGNORE / multiple events / failure). */
@@ -35,12 +41,14 @@ final class ParserShadow {
             this.type = type; this.stageDecision = stageDecision; this.decision = decision;
             this.extracted = Collections.unmodifiableList(extracted);
             this.policy = ParsingPolicy.POLICY_VERSION + "/" + ParsingPolicy.NORMALIZER_VERSION + "/" + ParsingPolicy.CLASSIFIER_VERSION +
-                    "/" + ParsingPolicy.EXTRACTOR_VERSION + "/" + ParsingPolicy.CONFIDENCE_VERSION + "/" + ParsingPolicy.CORPUS_CONTRACT;
+                    "/" + ParsingPolicy.EXTRACTOR_VERSION + "/" + ParsingPolicy.CONFIDENCE_VERSION + "/" + ParsingPolicy.LEARNING_VERSION +
+                    "/" + ParsingPolicy.CORPUS_CONTRACT;
         }
 
         @Override public String toString() {
             return channel + " " + status + (type == null ? "" : " type=" + type + "/" + stageDecision) +
-                    (decision == null ? "" : " decision=" + decision + (score < 0 ? "" : " score=" + score) + " found=" + extracted) +
+                    (decision == null ? "" : " decision=" + decision + (decision.equals(scoredDecision) ? "" : " (scored " + scoredDecision + ")") +
+                            (score < 0 ? "" : " score=" + score) + " found=" + extracted) +
                     " legacy=" + legacyReason + " reasons=" + reasons + " fields=" + fields +
                     " chars=" + normalizedChars + (merchantProposal == null ? "" : " merchant=" + merchantProposal) +
                     " notImplemented=" + NOT_IMPLEMENTED + " policy=" + policy;
@@ -67,7 +75,8 @@ final class ParserShadow {
             MessageClassifier.Result classified = MessageClassifier.classify(normalized);
             TransactionExtractor.Extraction extraction = TransactionExtractor.extract(normalized, classified, receivedAt);
             ConfidenceScorer.Confidence confidence = ConfidenceScorer.score(classified, extraction);
-            reasons.addAll(confidence.reasons);
+            LocalLearning.Learned learned = LEARNING.apply(raw.source, normalized.text, confidence, extraction);
+            reasons.addAll(learned.reasons);
             List<String> extracted = new ArrayList<>();
             String[] names = {"AMOUNT", "CURRENCY", "DIRECTION", "MERCHANT", "BALANCE", "FEE", "CREDIT_LIMIT", "ORIGINAL_AMOUNT", "CARD", "ACCOUNT", "COUNTERPARTY", "DATETIME"};
             Object[] values = {extraction.amountMinor, extraction.currency, extraction.direction, extraction.merchantKey, extraction.balanceMinor,
@@ -83,7 +92,8 @@ final class ParserShadow {
             }
             observation = new Observation(now, raw.channel.name(), legacyReason, normalized.empty() ? "EMPTY" : "EXTRACTED",
                     reasons, normalized.fragments.size(), normalized.text.length(), new ArrayList<>(normalized.fields), proposal,
-                    classified.type.name(), classified.decision.name(), confidence.decision, extracted);
+                    classified.type.name(), classified.decision.name(), learned.decision, extracted);
+            observation.scoredDecision = confidence.decision;
             if (!confidence.components.isEmpty()) observation.score = confidence.score;
         } catch (RuntimeException | StackOverflowError failure) {
             // A shadow failure is itself a diagnostic; it never propagates to legacy capture.
