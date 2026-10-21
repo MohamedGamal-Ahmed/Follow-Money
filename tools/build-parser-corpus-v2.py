@@ -365,6 +365,20 @@ for identifier, source, text in [
                 note=SHAPE_NOTE + "Owner decision: an installment message from the provider that names no debited account, card or wallet belongs to the commitments path, not the ledger."))
 
 
+family(case("bm07", "BankMisr", "Deposit of EGP 60.00 was made to your credit card ending 1234 on 01/05/2025.Your current balance is EGP 940.00.To know more, visit bnkmsr.com/online.",
+            amount=6000, direction="in", card="1234", movement="possible_internal_transfer", decision="REVIEW", reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_IN|POSSIBLE_INTERNAL_TRANSFER",
+            expected_credit_limit_minor=94000, expected_credit_limit_currency="EGP", dt="2025-05-01", precision="date", expected_accounting_effect="pending",
+            tags="credit_card_repayment|deposit_of|internal_candidate",
+            note=SHAPE_NOTE + "3 messages: a deposit onto the user's credit card is incoming and possibly from the user's own account (card repayment); legacy read it as income."), count=2)
+family(case("bdc01", "BDC", "Thank you for your payment of EGP 15.00 to your card ****5678",
+            amount=1500, direction="out", card="5678", movement="possible_internal_transfer", decision="REVIEW", reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_OUT|POSSIBLE_INTERNAL_TRANSFER",
+            expected_accounting_effect="pending", tags="credit_card_repayment|thank_you_for_payment|internal_candidate",
+            note=SHAPE_NOTE + "A payment to the user's own card: completed, possibly between own accounts; 'for your' after 'thank you' is courtesy, not a reference."), count=2)
+family(case("pc02", "Premiumcard", "مبروك تم تفعيل كارت بريميوم الخاص بك ب حد ائتماني 20000 جنيه، يمكنك البدء في التسوق. معلومات عن بطاقتك: نوع البطاقة : جولد رسوم التجديد السنوية: 240 جنيه مصاريف ادارية ثابته: 7000 جنيه لكل عملية شراء",
+            kind="other", decision="IGNORE", reasons="NO_NEW_MOVEMENT", tags="card_activation|fees_listed_not_charged|no_new_movement",
+            note=SHAPE_NOTE + "A card activation notice that lists the limit and fees; no money moved (legacy recorded the fee figure)."))
+
+
 def measured_language(row):
     text = row["body"] if row["channel"] == "sms" else "\n".join(row[col] or "" for col in ORIGINAL if col.startswith("android."))
     text = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))

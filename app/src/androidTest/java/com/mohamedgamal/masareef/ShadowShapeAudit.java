@@ -29,7 +29,8 @@ final class ShadowShapeAudit {
     static final String TEMPLATE = "egp|usd|eur|le|pounds?|piasters?|slot|dear|customer|valued|your|you|our|we|has|have|had|been|is|are|was|were|be|will|the|a|an|of|for|to|from|with|by|on|at|in|and|or|not|no|" +
             "successfully|successful|renewed|renewal|subscribed|subscription|package|bundle|plan|recharged?|charged|deducted|debited|credited|paid|payment|balance|" +
             "remaining|available|amount|fees?|price|cost|monthly|daily|weekly|valid|validity|until|till|expires?|expiry|date|days?|month|mb|gb|minutes?|units?|" +
-            "thank|thanks|please|call|dial|visit|more|info|details|account|number|card|bill|invoice|due|total|new|current|request|requested|activated|cancel|stop";
+            "thank|thanks|please|call|dial|visit|more|info|details|account|number|card|bill|invoice|due|total|new|current|request|requested|activated|cancel|stop|" +
+            "refund|refunded|added|deposit|deposited|transfer|transferred|transfers?|withdrawal|withdrawn|cash|atm|returned|reversed|reversal|purchase|purchases?|reference|ref|debit|credit|pos|online|merchant|received|sent";
 
     static String masked(String text) {
         String shape = SmsPreview.shape(text);
@@ -53,6 +54,21 @@ final class ShadowShapeAudit {
             case "no_direction": return m.preview.isTransaction() && "UNUNDERSTOOD".equals(decision) && m.score.reasons.contains("AMBIGUOUS_DIRECTION");
             case "two_amount_income": return "income".equals(kind) && m.score.reasons.contains("UNASSIGNED_SECOND_AMOUNT");
             case "commitment_recorded": return "commitment".equals(kind) && ShadowDiff.newRecords(decision);
+            case "unexplained": {
+                // A disagreement not already explained by a reviewed group (balance-worded debits, two-amount deposits,
+                // provider top-ups, reversals, balance-only messages, commitments).
+                boolean legacyRecords = m.preview.isTransaction();
+                String legacyDirection = "income".equals(kind) ? "in" : "expense".equals(kind) ? "out" : "transfer";
+                ShadowDiff.Result d = ShadowDiff.compare(legacyRecords, legacyRecords ? m.preview.amountMinor : null, legacyRecords ? legacyDirection : null,
+                        decision, m.x.amountMinor, m.x.direction);
+                if (d.agrees()) return false;
+                String newKind = m.x.movementKind;
+                boolean explained = "balance".equals(kind) && ("card_purchase".equals(newKind) || "cash_withdrawal".equals(newKind)) ||
+                        m.score.reasons.contains("UNASSIGNED_SECOND_AMOUNT") && "income".equals(kind) ||
+                        "service_topup".equals(newKind) || "reversal".equals(newKind) || "refund".equals(newKind) ||
+                        m.score.reasons.contains("BALANCE_ONLY") || m.score.reasons.contains("COMMITMENT_PATH");
+                return !explained;
+            }
             case "fee_refund": return !m.preview.isTransaction() && ShadowDiff.newRecords(decision) && "in".equals(m.x.direction);
             default: throw new IllegalArgumentException("Unknown shape_group " + group);
         }
@@ -88,6 +104,9 @@ final class ShadowShapeAudit {
                 String key = masked(m.body);
                 StringBuilder note = new StringBuilder(String.join(",", m.score.reasons)).append(" | amounts scanned: ").append(m.amounts.size())
                         .append(" | new amount is scanned #").append(m.amounts.indexOf(m.x.amountMinor) + 1);
+                if (group.equals("unexplained"))
+                    note.append(" | legacy ").append(m.preview == null ? "none" : m.preview.kind).append(" amount #").append(m.preview == null ? 0 : m.amounts.indexOf(m.preview.amountMinor) + 1)
+                        .append(" | new ").append(m.score.decision).append(" ").append(m.x.direction).append(" kind ").append(m.x.movementKind);
                 if (group.equals("two_amount_income") && m.preview != null)
                     note.append(" | legacy amount is scanned #").append(m.amounts.indexOf(m.preview.amountMinor) + 1);
                 if (group.equals("balance_as_expense")) {
