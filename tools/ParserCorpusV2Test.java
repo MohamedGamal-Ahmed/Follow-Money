@@ -187,7 +187,9 @@ public final class ParserCorpusV2Test {
                 expect(row,"expected_accounting_effect","expense_offset");
                 check(List.of(row.get("feature_tags").split("\\|")).contains("expense_offset"),"Reversal without expense_offset tag "+id);
             }
-            if("expense_offset".equals(row.get("expected_accounting_effect")))check("in".equals(row.get("expected_direction"))&&"reversal".equals(row.get("expected_movement_kind")),"expense_offset only for incoming reversals "+id);
+            // Owner decision 22 Oct 2026: every incoming refund is an expense_offset too.
+            if("refund".equals(row.get("expected_movement_kind"))&&!"legacy-v1".equals(row.get("source_evidence_id")))expect(row,"expected_accounting_effect","expense_offset");
+            if("expense_offset".equals(row.get("expected_accounting_effect")))check("in".equals(row.get("expected_direction"))&&Set.of("reversal","refund").contains(row.get("expected_movement_kind")),"expense_offset only for incoming reversals and refunds "+id);
             for(String prefix:new String[]{"expected_fee","expected_equivalent","expected_credit_limit","expected_original_amount"}){
                 String amount=row.get(prefix+"_minor"),currency=row.get(prefix.replace("_amount","")+"_currency");
                 check((amount==null)==(currency==null),"Optional amount/currency pair "+id+" "+prefix);

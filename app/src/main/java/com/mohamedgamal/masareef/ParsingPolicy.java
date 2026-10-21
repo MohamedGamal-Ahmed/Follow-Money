@@ -10,7 +10,7 @@ final class ParsingPolicy {
     static final String NORMALIZER_VERSION = "normalization-1";
     static final String CLASSIFIER_VERSION = "classification-1";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
-    static final String CORPUS_CONTRACT = "v2:24b5d663";
+    static final String CORPUS_CONTRACT = "v2:bcf53eb0";
 
     // Shadow mode.
     static final boolean SHADOW_ENABLED = true;

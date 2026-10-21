@@ -13,11 +13,8 @@ public final class TransactionExtractorTest {
     private static void same(Object actual, Object expected, String why) { check(Objects.equals(actual, expected), why + ": <" + actual + "> != <" + expected + ">"); }
 
     /** Fields where the extractor and the corpus disagree, left for the owner; the corpus is never edited to match code. */
-    // p011, p146, p136 resolved by the owner on 21 Oct 2026. Open (22 Oct): the owner's الاسترداد rule (and blind h21) makes a
-    // refund an expense_offset, but the v2 refund rows expect no accounting effect.
-    static final Map<String, String> KNOWN_DISAGREEMENTS = Map.of(
-            "pub-cib-refund", "expected_accounting_effect", "pub-cib-refund-digits", "expected_accounting_effect",
-            "pub-cib-refund-spaces", "expected_accounting_effect");
+    // p011, p146, p136 resolved by the owner on 21 Oct 2026; refunds as expense_offset resolved on 22 Oct 2026.
+    static final Map<String, String> KNOWN_DISAGREEMENTS = Map.of();
 
     static final String[] FIELDS = {"expected_amount_minor", "expected_currency", "expected_direction", "expected_merchant_key",
             "expected_balance_minor", "expected_balance_currency", "expected_card_last4", "expected_datetime", "expected_time_precision"};

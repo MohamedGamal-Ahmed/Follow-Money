@@ -89,3 +89,7 @@ The implementation was not changed to fit them; the oracle contradicted the exis
 - p011, p146: the account mask moves from `expected_card_last4` to `expected_account_last4` (card `\N`). p011 is a protected v1 row; only this one cell is an explicit owner exception, recorded in the builder and the audit.
 - p136: `expected_currency = \N`, consistent with p014/p135 (a two-event message has no amount and no currency).
 - `--require-ready`: PASS. v2 SHA-256: `24b5d66318facd7278532bbb6aeaeaf89463008d09e9dc6bd32c502362817501`. `KNOWN_DISAGREEMENTS` is empty.
+
+## Owner decision on refunds — 22 October 2026
+
+Every incoming refund is `expense_offset` (owner rule for الاسترداد). `pub-cib-refund` and its two variants now expect it; the audit enforces it for v2 refund rows (v1 p151 leaves the field unspecified). `KNOWN_DISAGREEMENTS` is empty. `--require-ready`: PASS. v2 SHA-256: `bcf53eb083c20ddfcfc91dd4240395ee19a2c19bece8541c252351f17f6ddcd9`.
