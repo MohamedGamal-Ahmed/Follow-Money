@@ -354,9 +354,9 @@ family(case("bm06", "BankMisr", "شكرا لاستخدامكم بطاقة بنك
             expected_credit_limit_minor=861783, expected_credit_limit_currency="EGP", tags="credit_card_deposit|available_now_is_limit",
             note=SHAPE_NOTE + "11 messages: the deposit is the first amount; 'متاح الان' on a credit card is the available limit (legacy took it as the income)."))
 family(case("op01", "7030", "Dear Customer, You have successfully renewed 1 GB subscription - 1 month (Super Plan) from Orange and 39 Egyptian pound has been deducted from your line",
-            amount=3900, direction="out", merchant="orange", movement="service_charge", decision="REVIEW", reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_OUT|PREPAID_CREDIT",
+            amount=3900, direction="out", merchant="orange", movement="service_charge", decision="IGNORE", reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_OUT|PREPAID_CREDIT|INFO_ONLY",
             tags="service_charge|prepaid_credit|egyptian_pound|operator_subscription",
-            note=SHAPE_NOTE + "65 messages: a subscription paid from the line's prepaid credit; recording it after the line top-up may double count, so it waits for the owner (PREPAID_CREDIT)."))
+            note=SHAPE_NOTE + "65 messages: a subscription paid from the line's prepaid credit. Owner decision: information only (INFO_ONLY), never the ledger or review; the money was recorded at the line top-up."))
 for identifier, source, text in [
     ("pc01", "Premiumcard", "لقد تم السداد للقسط الشهري الخاص ببريميوم كارد بقيمة 245.00 جنيه القيمة المستحقة علي حسابك الان هي 1200.00 جنيه"),
     ("tru01", "TRU", "عميل ترو العزيز، تمت عملية الشراء من عند BTECH 12 بنجاح في 26/09/2026. اجمالي المبلغ الممول 6636.00، قسطك بقيمة 553.00 شهريا، لمدة 12 شهر."),

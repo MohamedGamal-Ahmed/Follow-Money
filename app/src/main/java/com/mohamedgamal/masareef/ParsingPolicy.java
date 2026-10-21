@@ -10,7 +10,7 @@ final class ParsingPolicy {
     static final String NORMALIZER_VERSION = "normalization-2";
     static final String CLASSIFIER_VERSION = "classification-3";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
-    static final String CORPUS_CONTRACT = "v2:e8d1e108";
+    static final String CORPUS_CONTRACT = "v2:3e51e960";
 
     // Shadow mode.
     static final boolean SHADOW_ENABLED = true;
@@ -345,7 +345,7 @@ final class ParsingPolicy {
     static final String[] HARD_FAILURES = {"MISSING_AMOUNT", "AMBIGUOUS_CURRENCY", "INVALID_SIGNED_AMOUNT", "AMBIGUOUS_NUMBER_FORMAT",
             "NON_POSITIVE_AMOUNT", "AMBIGUOUS_DIRECTION"};
     /** Any of these caps the decision at REVIEW: the user must confirm ownership, expiry, merchant or direction. */
-    static final String[] REVIEW_CAPS = {"TRANSFER_REQUESTED", "PREPAID_CREDIT", "CURRENCY_INFERRED", "PAYER_UNKNOWN", "POSSIBLE_INTERNAL_TRANSFER", "EXPIRING_CREDIT", "MISSING_MERCHANT", "INFERRED_OUTGOING_DIRECTION",
+    static final String[] REVIEW_CAPS = {"TRANSFER_REQUESTED", "CURRENCY_INFERRED", "PAYER_UNKNOWN", "POSSIBLE_INTERNAL_TRANSFER", "EXPIRING_CREDIT", "MISSING_MERCHANT", "INFERRED_OUTGOING_DIRECTION",
             "UNASSIGNED_SECOND_AMOUNT", "COMMITMENT_EVENT", "RETAINED_FEE", "ADJUSTED_EVENT"};
 
     // Local learning (stage 5): on-device only, from the user's own actions; never uploaded.
@@ -357,6 +357,11 @@ final class ParsingPolicy {
     /** Shapes remembered; the least recently updated is forgotten first. */
     static final int LEARN_MAX_SHAPES = 500;
     /** Review caps the user's own confirmation can resolve (ownership of the other account, the direction). */
+    /**
+     * Owner decision (21 Oct 2026): kept as information only, never the ledger or review; the observation and its reason
+     * stay in the log of unrecorded messages. A subscription paid from prepaid line credit (PREPAID_CREDIT) is one.
+     */
+    static final String[] INFO_ONLY_REASONS = {"INFO_ONLY"};
     static final String[] LEARNABLE_CAPS = {"POSSIBLE_INTERNAL_TRANSFER", "INFERRED_OUTGOING_DIRECTION", "CURRENCY_INFERRED"};
 
     // Later stages: defined by the approved corpus, not yet used by any implemented stage.

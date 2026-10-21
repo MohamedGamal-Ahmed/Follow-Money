@@ -528,12 +528,13 @@ final class TransactionExtractor {
         // A provider's top-up confirmation that names no payer may repeat a payment already recorded from the bank or wallet.
         if ("service_topup".equals(x.movementKind)) x.reasons.add("PAYER_UNKNOWN");
         // A subscription paid from the line's prepaid credit may repeat money recorded at the top-up.
-        if ("service_charge".equals(x.movementKind)) x.reasons.add("PREPAID_CREDIT");
+        if ("service_charge".equals(x.movementKind)) { x.reasons.add("PREPAID_CREDIT"); x.reasons.add("INFO_ONLY"); }
         // A transfer the user requested is not confirmed as executed: the user confirms it.
         if (REQUESTED.matcher(t).find()) x.reasons.add("TRANSFER_REQUESTED");
         // Every review cap the policy names applies here too, so the provisional and scored decisions cannot disagree.
         for (String cap : ParsingPolicy.REVIEW_CAPS) review |= x.reasons.contains(cap);
         x.decision = review ? "REVIEW" : "AUTO";
+        if (x.reasons.contains("INFO_ONLY")) x.decision = "IGNORE";
     }
 
     /** The corpus movement kind, most specific first (ParsingPolicy.MOVEMENT_KINDS gives the order). */

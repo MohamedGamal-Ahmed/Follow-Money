@@ -46,6 +46,8 @@ final class ConfidenceScorer {
         else if (score < ParsingPolicy.AUTO_THRESHOLD) { decision = "REVIEW"; reasons.add("LOW_CONFIDENCE"); }
         else decision = "AUTO";
         if (decision.equals("AUTO") && any(reasons, ParsingPolicy.REVIEW_CAPS)) decision = "REVIEW";
+        // Owner decision: information only (a subscription paid from prepaid line credit) never enters the ledger or review.
+        if (!decision.equals("UNUNDERSTOOD") && any(reasons, ParsingPolicy.INFO_ONLY_REASONS)) decision = "IGNORE";
         return new Confidence(score, decision, parts, reasons);
     }
 
