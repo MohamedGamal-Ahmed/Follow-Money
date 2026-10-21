@@ -188,6 +188,8 @@ public final class MainActivity extends Activity {
             setTheme(R.style.AppTheme_Dark);
         }
         super.onCreate(state);
+        // Step 7: the activation time starts when the app is first opened with the switch on (test build), not at the next capture.
+        DecisionSwitch.on(this);
         uiTheme = new UiTheme(this, dark);
         INK=uiTheme.ink; MUTED=uiTheme.muted; BACKGROUND=uiTheme.background; ACCENT=uiTheme.accent;
         BRAND=uiTheme.brand; BRAND_SOFT=uiTheme.brandSoft; EMERALD=uiTheme.emerald; LIME=uiTheme.lime;
