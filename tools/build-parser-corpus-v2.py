@@ -378,6 +378,13 @@ family(case("pc02", "Premiumcard", "مبروك تم تفعيل كارت بريم
             kind="other", decision="IGNORE", reasons="NO_NEW_MOVEMENT", tags="card_activation|fees_listed_not_charged|no_new_movement",
             note=SHAPE_NOTE + "A card activation notice that lists the limit and fees; no money moved (legacy recorded the fee figure)."))
 
+family(case("bdc02", "BDC", "Your Visa credit card balance statement for November is EGP 10.14 .Your minimum payment is EGP 10.14 to be paid before 25/12/2022",
+            kind="reminder", decision="IGNORE", reasons="FUTURE_ONLY", tags="card_statement|minimum_payment|future_obligation",
+            note=SHAPE_NOTE + "A credit-card statement with the minimum payment to be paid: a future obligation, no movement (the one case where legacy was right and the new parser recorded an expense)."), count=2)
+family(case("bm08", "BankMisr", "Thank you for using card 1234 the amount EGP 59.99 was deducted in AMAZON on 14/04/2025,the available EGP 940.01.for more call 19888",
+            amount=5999, direction="out", merchant="amazon", balance=94001, dt="2025-04-14", precision="date", tags="card_purchase|deducted_in_merchant",
+            note=SHAPE_NOTE + "A purchase legacy did not preview: 'deducted in <merchant>'."), count=2)
+
 
 def measured_language(row):
     text = row["body"] if row["channel"] == "sms" else "\n".join(row[col] or "" for col in ORIGINAL if col.startswith("android."))

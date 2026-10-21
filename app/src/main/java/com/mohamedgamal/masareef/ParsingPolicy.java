@@ -6,11 +6,11 @@ package com.mohamedgamal.masareef;
  * The pipeline runs in shadow mode only: the legacy ExpenseParser path remains the sole ledger authority.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-28.2";
+    static final String POLICY_VERSION = "2026-10-28.3";
     static final String NORMALIZER_VERSION = "normalization-2";
     static final String CLASSIFIER_VERSION = "classification-3";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
-    static final String CORPUS_CONTRACT = "v2:c03273d9";
+    static final String CORPUS_CONTRACT = "v2:c255dd31";
 
     // Shadow mode.
     static final boolean SHADOW_ENABLED = true;
@@ -129,6 +129,8 @@ final class ParsingPolicy {
             "(?:يرجي|برجاء) (?:دفع|سداد)|طلب سداد|في انتظار موافقتك|" +
             "\\bwill (?:be )?(?:debit|debited|charge|charged|deduct|deducted|processed|paid|transferred|apply)\\b|" +
             "\\bis due\\b|\\bdue (?:on|tomorrow|today|date|before|by)\\b|\\b(?:payment|amount|minimum) due\\b|please pay|" +
+            // Statement and due wording: a future obligation, never a movement ("Your minimum payment is … to be paid by …").
+            "\\bto be paid\\b|\\bminimum (?:amount|payment)\\b|\\bstatement balance\\b|الحد الادني (?:للسداد|المطلوب)|تاريخ (?:ال)?استحقاق|" +
             "\\bscheduled\\b|\\bpending\\b|payment request|accept or decline|" +
             "(?<!\\p{L})مستحق(?:ه)? (?:غدا|اليوم|في|بتاريخ|خلال)|تاريخ الاستحقاق|(?<!\\p{L})يستحق";
     static final String UNSUCCESSFUL = "declined|\\bfailed\\b|unsuccessful|could not|insufficient funds|\\bcancel(?:l)?ed\\b|" +
@@ -273,7 +275,7 @@ final class ParsingPolicy {
     static final String PURCHASE = "(?<!\\p{L})تم\\s+(?:الان\\s+)?(?:ال)?(?:دفع|شراء|خصم)|\\b(?:paid|purchased|charged)\\b|\\bwas used (?:for|at)\\b";
     static final String NOT_A_PURCHASE = "تحويل|transfer|سحب|withdraw|\\batm\\b|اله رقم|صراف|قسط|installment|فاتوره|\\bbill\\b|refund|reversal|عكس|اعاده|محفظه|wallet|instapay|ipn";
     static final String QUOTED_MERCHANT = "[\"“«]([^\"”»\\n]{1,60})[\"”»]";
-    static final String MERCHANT_MARKER_STRONG = "\\bat\\b|@(?=\\s)|(?<!\\p{IsArabic})(?:لدي|عند)|(?<=\\d)\\s+علي(?=\\s)|(?<!\\p{L})(?:في|فى)(?!\\p{L})";
+    static final String MERCHANT_MARKER_STRONG = "\\bat\\b|(?<=deducted |spent |paid |charged )in\\b|@(?=\\s)|(?<!\\p{IsArabic})(?:لدي|عند)|(?<=\\d)\\s+علي(?=\\s)|(?<!\\p{L})(?:في|فى)(?!\\p{L})";
     /** A glued لـ after a payment noun names the payee ("قيمة مصروفات مدرسية لمدارس النيل"). */
     static final String MERCHANT_GLUED_LAM = "(?<!\\p{L})(?:قيمه|مصروفات|ثمن|مستحقات)(?:\\s+\\p{L}+){0,2}\\s+ل(?=[^\\sل]\\p{L})";
     static final String MERCHANT_MARKER_PARTY = "\\bfrom\\b|\\bto\\b|(?<!\\p{L})(?:من|الي)(?!\\p{L})|(?<!\\p{L})ل(?= )|(?<!\\p{L})لصالح|(?<!\\p{L})المستفيد:?|\\bbeneficiary:?";

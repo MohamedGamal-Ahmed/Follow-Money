@@ -45,6 +45,14 @@ final class ShadowShapeAudit {
     }
 
     private boolean selected(Message m) {
+        // New records what legacy does not even preview, or any disagreement of one sender (no explanation filter).
+        if (group.equals("legacy_none")) return m.preview == null && ShadowDiff.newRecords(m.score.decision);
+        if (group.equals("all_disagreements")) {
+            boolean legacyRecords = m.preview != null && m.preview.isTransaction();
+            String legacyDirection = m.preview == null ? null : "income".equals(m.preview.kind) ? "in" : "expense".equals(m.preview.kind) ? "out" : "transfer";
+            return !ShadowDiff.compare(legacyRecords, legacyRecords ? m.preview.amountMinor : null, legacyRecords ? legacyDirection : null,
+                    m.score.decision, m.x.amountMinor, m.x.direction).agrees();
+        }
         if (m.preview == null) return group.equals("fee_refund") && ShadowDiff.newRecords(m.score.decision) && "in".equals(m.x.direction);
         String kind = m.preview.kind, decision = m.score.decision;
         switch (group) {
@@ -104,7 +112,7 @@ final class ShadowShapeAudit {
                 String key = masked(m.body);
                 StringBuilder note = new StringBuilder(String.join(",", m.score.reasons)).append(" | amounts scanned: ").append(m.amounts.size())
                         .append(" | new amount is scanned #").append(m.amounts.indexOf(m.x.amountMinor) + 1);
-                if (group.equals("unexplained"))
+                if (group.equals("unexplained") || group.equals("legacy_none") || group.equals("all_disagreements"))
                     note.append(" | legacy ").append(m.preview == null ? "none" : m.preview.kind).append(" amount #").append(m.preview == null ? 0 : m.amounts.indexOf(m.preview.amountMinor) + 1)
                         .append(" | new ").append(m.score.decision).append(" ").append(m.x.direction).append(" kind ").append(m.x.movementKind);
                 if (group.equals("two_amount_income") && m.preview != null)
