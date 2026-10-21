@@ -1,6 +1,9 @@
 # Corpus v2 — unapproved draft, 21 October 2026
 
-**Not ready for approval. No production pipeline stage may start from this draft.** The owner accepted
+**Ready for owner review; not approved. No production pipeline stage may start from this draft until the
+owner explicitly approves it.** The acceptance policy was revised on 21 October 2026 (see
+[README](README.md#corpus-v2-acceptance-policy-owner-decision-21-october-2026)): the corpus proves message-type
+coverage, not bank coverage, and labelled synthetic cases close missing types. The owner accepted
 the v1 file shape but rejected its contents. v1 remains an immutable historical comparison file;
 the proposed replacement is [`parser-corpus-v2-draft.tsv`](parser-corpus-v2-draft.tsv).
 
@@ -19,9 +22,13 @@ the proposed replacement is [`parser-corpus-v2-draft.tsv`](parser-corpus-v2-draf
 - Applied the owner corrections to `p134` (AUTO, principal 500 EGP, separate optional 5 EGP fee),
   `p137` (bare `$` means USD/AUTO), and `p140` (likely outgoing direction/REVIEW).
 - Kept the old non-protected synthetic coverage explicitly labelled `legacy-v1`; it is not counted as
-  observed Egyptian bank wording. No unsupported bank greeting, wallet top-up or bill SMS was invented.
+  observed Egyptian bank wording.
+- Added **89 `synthetic_coverage` rows** (25 bases plus declared variants) for the eleven message types that
+  had no observed sample. CIB/NBE greeting cases are attributed to `PUBLIC_FORMAT_CIB`/`PUBLIC_FORMAT_NBE`
+  (published structures, URL in the registry); all others to `SYNTHETIC_<type>`. None is attributed to an
+  observed bank, and none is an alternative format for Banque Misr, HSBC, QNB, Telda or TRU.
 
-There are **280 rows**, rather than deleting retained coverage to force the earlier 240-row count.
+There are **369 rows** (280 earlier rows, byte-identical, plus 89 synthetic rows).
 The raw `source_independence` padding is gone. A source/format lineage is meaningful; a larger row count
 or a different monetary value is not evidence of another real format or bank.
 
@@ -87,33 +94,30 @@ The [generated audit report](corpus-v2-results.md) contains the final measured v
 
 | Gate | Current | Required | Status |
 | --- | ---: | ---: | --- |
-| Arabic message words | 90 / 280 = 32.14% | >=40% | **FAIL** |
-| English message words | 163 / 280 = 58.21% | >=30% | PASS |
-| Mixed message words | 26 / 280 = 9.29% | <=30% | PASS |
-| Nonlinguistic empty notification | 1 / 280 | Counted in full denominator | Explicit |
-| EGP transactions | 145 / 180 = 80.56% | >=80% | PASS |
-| REVIEW | 16 | 15..25 | PASS |
+| Arabic message words | 155 / 369 = 42.01% | >=40% | PASS |
+| English message words | 187 / 369 = 50.68% | >=30% | PASS |
+| Mixed message words | 26 / 369 = 7.05% | <=30% | PASS |
+| Nonlinguistic empty notification | 1 / 369 | Counted in full denominator | Explicit |
+| EGP transactions | 216 / 258 = 83.72% | >=80% | PASS |
+| REVIEW | 20 | 15..25 | PASS |
+| Message-type coverage | 11 / 11 types | each: base + >=2 variants | PASS |
 
 Language counts inspect message **words** after removing variable dates/times, URLs, masked identifiers
 and ISO currency codes. Latin merchant/bank/app words still make Arabic text mixed. Source labels do not
 count, and inherited v1 language labels are not evidence of the quota. The 66 protected rows retain those
 old labels unchanged. Unresolved-currency transactions remain in the EGP-ratio denominator.
 
-Still missing documented examples (placeholders were **not** inserted as pretend test messages):
+The eleven former "missing documented sample" blockers are now **message-type coverage** gates, each closed
+by labelled synthetic cases (per-type list in the [audit report](corpus-v2-results.md#message-type-coverage)).
+Decisions encoded in them: an explicit fee stays separate from the principal (AUTO, like `p134`); in a
+dual-currency charge the charged foreign amount is the principal and the EGP figure only an equivalent;
+reversals are incoming; installment counters are not amounts or dates; a wallet top-up from the user's own
+card is REVIEW/`pending_internal`; Fawry recharge wording (`شحن`) is an outgoing payment, not a top-up;
+card declines are IGNORE with no transaction; a direct InstaPay notification uses separate Android extras.
 
-- An IPN/InstaPay completed transfer explicitly stating its fee in the same message.
-- CIB and NBE purchase messages with the requested `Dear Customer` / `عزيزي العميل` greetings.
-- A single Google Play/Apple payment message with USD principal and explicit EGP equivalent; specify
-  which is the transaction amount independently of balance or fees.
-- An explicit reversal distinct from the already documented CIB refund.
-- A completed installment payment; wallet top-up; Fawry bill payment; observed card-decline message.
-- Vodafone Cash and a direct InstaPay app notification with documented full text/field placement.
-- Additional independently sourced Arabic examples to meet the Arabic quota.
-
-The user explicitly noted the two-phone sample contained no bank-card merchant purchases. The public
-CIB case adds a separate published user report; the NBE test file is a lower-evidence developer fixture.
-Neither proves current coverage across all requested banks/wallets. A service FAQ can explain a product,
-but cannot establish verbatim message wording, so such pages were not used to invent those missing cases.
+Synthetic rows prove that the generic logic meets each type and writing shape. They are **not** observed
+messages and do not prove coverage of any bank; unseen banks rely on the generic design and the
+REVIEW/UNUNDERSTOOD safety net.
 
 ## Reproducibility and checks
 
@@ -121,7 +125,7 @@ but cannot establish verbatim message wording, so such pages were not used to in
 python tools/build-parser-corpus-v2.py
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\tools\run-checks.ps1
-# Strict acceptance gate: intentionally fails while the above requirements remain unmet.
+# Strict acceptance gate: passes now; success means ready for owner review, not approval.
 & "$env:JAVA_HOME/bin/java.exe" -cp .tmp/qa-jvm com.mohamedgamal.masareef.ParserCorpusV2Test --require-ready
 ```
 
@@ -129,7 +133,8 @@ The generator reads v1 and contains explicit base text/expectations; it never as
 values. Output is deterministic UTF-8/LF. `ParserCorpusV2Test` checks preservation/removal, source registry,
 variant semantics, optional money fields, account/card separation, the corrected oracles and pair boundaries.
 The normal JVM runner executes **draft integrity**, prints readiness blockers and does not claim approval.
-`--require-ready` fails on missing distributions/features; even success would still need explicit owner approval.
+`--require-ready` fails on missing distributions or message-type coverage and on mislabelled synthetic rows;
+its success still needs explicit owner approval.
 
 **No semantic evaluation of a new parser has run.** The only application code changed in this checkpoint
 is the separately tested, explicitly requested diagnostic `SmsPreview.shape` prerequisite. Normalization,

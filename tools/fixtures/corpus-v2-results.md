@@ -1,35 +1,40 @@
 # Corpus v2 draft audit
 
-Fixture integrity/oracle assertions: PASS (7853). Parser semantic evaluation: NOT RUN.
-Rows: 280; protected v1 rows unchanged: 66; rejected padding rows removed: 72.
-Provenance: 17 user-supplied base cases + one owner-specified descriptor expansion; 7 public base examples. Variants are not additional observed formats.
-Decisions: {AUTO=156, IGNORE=100, REVIEW=16, UNUNDERSTOOD=8}
+Fixture integrity/oracle assertions: PASS (11522). Parser semantic evaluation: NOT RUN.
+Rows: 369; protected v1 rows unchanged: 66; rejected padding rows removed: 72.
+v2 SHA-256 (UTF-8/LF): `5616952d82c1dacc0d3d23da6c46548f3833cf23ab9beef085c3e41ad490ef46`.
+Provenance: 17 user-supplied base cases + one owner-specified descriptor expansion; 7 public base examples; 25 labelled synthetic base cases. Variants are not additional observed formats.
+Decisions: {AUTO=230, IGNORE=111, REVIEW=20, UNUNDERSTOOD=8}
+Evidence levels (rows): {generated_fixture_v1=168, public_developer_example=3, public_developer_fixture=15, public_user_report=3, synthetic=89, user_redacted=91}
+Transaction currencies: {AED=3, EGP=216, EUR=6, GBP=2, SAR=4, USD=23, null=4}
+
+## Message-type coverage
+
+- ipn_explicit_fee: syn-ipnfee-ar (synthetic, 3 variants); syn-ipnfee-en (synthetic, 2 variants)
+- cib_dear_customer_purchase: syn-cib-dear-en (synthetic, 2 variants); syn-cib-dear-ar (synthetic, 3 variants)
+- nbe_dear_customer_purchase: syn-nbe-dear-credit (synthetic, 3 variants); syn-nbe-dear-debit (synthetic, 3 variants)
+- dual_currency_equivalent: syn-dual-en (synthetic, 2 variants); syn-dual-ar (synthetic, 3 variants)
+- reversal: syn-reversal-ar (synthetic, 3 variants); syn-reversal-atm-ar (synthetic, 3 variants); syn-reversal-en (synthetic, 2 variants)
+- installment_payment: syn-installment-ar (synthetic, 3 variants); syn-installment-en (synthetic, 2 variants)
+- wallet_topup: syn-topup-ar (synthetic, 3 variants)
+- fawry_bill_payment: syn-fawry-ar (synthetic, 3 variants); syn-fawry-recharge-ar (synthetic, 3 variants); syn-fawry-en (synthetic, 2 variants)
+- card_decline: syn-decline-ar (synthetic, 3 variants); syn-decline-limit-ar (synthetic, 3 variants); syn-decline-en (synthetic, 2 variants)
+- vodafone_cash: syn-vfcash-pay (synthetic, 3 variants); syn-vfcash-in (synthetic, 2 variants); syn-vfcash-out (synthetic, 2 variants)
+- instapay_direct: syn-instapay-ar (synthetic, 2 variants); syn-instapay-en (synthetic, 2 variants)
 
 | Measured language | Count | Share |
 | --- | ---: | ---: |
-| ar | 90 | 32.14% |
-| en | 163 | 58.21% |
-| mixed | 26 | 9.29% |
-| neutral | 1 | 0.36% |
+| ar | 155 | 42.01% |
+| en | 187 | 50.68% |
+| mixed | 26 | 7.05% |
+| neutral | 1 | 0.27% |
 
-EGP transactions: 145/180 (80.56%); unresolved-currency transactions stay in the denominator.
+EGP transactions: 216/258 (83.72%); unresolved-currency transactions stay in the denominator.
 
 ## Remaining approval blockers
 
-- Arabic words-only share below 40%
-- Missing documented sample: ipn_explicit_fee
-- Missing documented sample: cib_dear_customer_purchase
-- Missing documented sample: nbe_dear_customer_purchase
-- Missing documented sample: dual_currency_equivalent
-- Missing documented sample: reversal
-- Missing documented sample: installment_payment
-- Missing documented sample: wallet_topup
-- Missing documented sample: fawry_bill_payment
-- Missing documented sample: card_decline_observed
-- Missing documented sample: vodafone_cash_observed
-- Missing documented sample: instapay_direct_observed
 
-Status: NOT READY FOR APPROVAL. Normalization/pipeline implementation is prohibited until explicit approval.
+Status: READY FOR OWNER REVIEW; NOT APPROVED. Normalization/pipeline implementation is prohibited until explicit approval.
 
 ## Base-case diagnostic shape inventory
 
@@ -39,22 +44,28 @@ Only base rows are counted. Generated variations, field-order permutations and p
 - BankMisr: 5 base-case profiles.
 - CIB: 4 base-case profiles.
 - HSBC: 6 base-case profiles.
+- PUBLIC_FORMAT_CIB: 2 base-case profiles.
+- PUBLIC_FORMAT_NBE: 2 base-case profiles.
 - QNB: 2 base-case profiles.
+- SYNTHETIC_CARD_DECLINE: 3 base-case profiles.
+- SYNTHETIC_DUAL_CURRENCY: 2 base-case profiles.
+- SYNTHETIC_FAWRY_BILL: 3 base-case profiles.
+- SYNTHETIC_INSTALLMENT: 2 base-case profiles.
+- SYNTHETIC_INSTAPAY_DIRECT: 2 base-case profiles.
+- SYNTHETIC_IPN_FEE: 2 base-case profiles.
+- SYNTHETIC_REVERSAL: 3 base-case profiles.
+- SYNTHETIC_VODAFONE_CASH: 3 base-case profiles.
+- SYNTHETIC_WALLET_TOPUP: 1 base-case profiles.
 - UNSPECIFIED_EGYPTIAN_BANK: 3 base-case profiles.
 - UNSPECIFIED_WALLET: 1 base-case profiles.
 
-## Verification and boundary report — 21 October 2026
+## Verification and boundary report — 21 October 2026 (synthetic-coverage revision)
 
-- Diagnostic prerequisite commit: `34e9fe5` (55 new shape assertions; existing redaction suite 52 assertions).
+- Policy commit `e1c5051`: readiness redefined as message-type coverage; synthetic labelling enforced by builder and audit.
+- Synthetic cases commit `91c22f1`: 89 rows (25 synthetic bases + declared variants); the 280 previous rows are byte-identical.
 - Historical v1 canonical SHA-256 checked by the audit: `628cc295cbbddc7bda70fe90a0dee6c9125df27563140b8b4e0a61d0a6ed806e`.
-- This v2 draft SHA-256, UTF-8/LF: `aba8eac4c4d4d2a8b828c51979b18ef66b7e529c93fda361bb79c4b32c624f9a`.
-- Regenerating with `python tools/build-parser-corpus-v2.py` reproduced the identical file hash.
-- `tools/run-checks.ps1`: existing JVM suites PASS, including 168 parser and 24 Telda checks; v1 fixture integrity PASS; new shape tests PASS; v2 fixture integrity PASS.
-- `assembleDebug`, `assembleDebugAndroidTest`, `lintDebug`: PASS. Lint has 0 errors and 63 existing warnings.
-- Strict v2 readiness command with `--require-ready`: **FAIL, exit 1**, with the twelve blockers above. This is not a passing corpus acceptance gate.
-- No Android emulator/instrumentation, UI, live notification delivery or phone-message rescan was performed. A test APK build is not evidence those paths worked.
-- No network-dependent application code, new library, database migration, capture/dedupe rule, parser stage, shadow recorder or UI was introduced. Public-source research did not upload device messages.
-- Source evidence levels and the exact supplied-message/derived-variant distinction are recorded in `corpus-v2-sources.tsv`. Unspecified senders remain unspecified; telephone footer numbers are not bank identities.
-- Dates and truncated AM/PM expectations are test oracles only. No new event-time parser was implemented.
-
-The draft intentionally remains unapproved. More independently sourced Arabic examples and the missing exact message types are needed; no messages were fabricated to satisfy their quotas or bank labels. Explicit owner approval of a completed v2 remains required before Normalization begins.
+- Regenerating with `python tools/build-parser-corpus-v2.py` reproduced the identical v2 hash above.
+- `tools/run-checks.ps1`: exit 0; all existing JVM suites PASS (including 168 parser, 24 Telda, 31 InstaPay checks); v1 fixture integrity PASS; shape tests PASS; v2 fixture integrity PASS (11522 assertions).
+- Strict v2 readiness command with `--require-ready`: **PASS, exit 0**, zero blockers.
+- Readiness means "ready for owner review", not approval. No parser semantic evaluation, Normalization stage, application code, schema or UI change was made.
+- Synthetic rows prove message-type/shape coverage only. They are not observed messages, not bank-format claims, and not evidence of coverage for unseen banks (that remains the generic design plus REVIEW/UNUNDERSTOOD).
