@@ -6,11 +6,11 @@ package com.mohamedgamal.masareef;
  * The pipeline runs in shadow mode only: the legacy ExpenseParser path remains the sole ledger authority.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-27.1";
+    static final String POLICY_VERSION = "2026-10-27.2";
     static final String NORMALIZER_VERSION = "normalization-2";
     static final String CLASSIFIER_VERSION = "classification-2";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
-    static final String CORPUS_CONTRACT = "v2:21aa1285";
+    static final String CORPUS_CONTRACT = "v2:f140a4b0";
 
     // Shadow mode.
     static final boolean SHADOW_ENABLED = true;
@@ -257,7 +257,7 @@ final class ParsingPolicy {
     static final String PURCHASE = "(?<!\\p{L})تم\\s+(?:الان\\s+)?(?:دفع|شراء|خصم)|\\b(?:paid|purchased|charged)\\b|\\bwas used (?:for|at)\\b";
     static final String NOT_A_PURCHASE = "تحويل|transfer|سحب|withdraw|قسط|installment|فاتوره|\\bbill\\b|refund|reversal|عكس|اعاده|محفظه|wallet|instapay|ipn";
     static final String QUOTED_MERCHANT = "[\"“«]([^\"”»\\n]{1,60})[\"”»]";
-    static final String MERCHANT_MARKER_STRONG = "\\bat\\b|@(?=\\s)|(?<!\\p{L})(?:لدي|عند)|(?<!\\p{L})(?:في|فى)(?!\\p{L})";
+    static final String MERCHANT_MARKER_STRONG = "\\bat\\b|@(?=\\s)|(?<!\\p{IsArabic})(?:لدي|عند)|(?<!\\p{L})(?:في|فى)(?!\\p{L})";
     /** A glued لـ after a payment noun names the payee ("قيمة مصروفات مدرسية لمدارس النيل"). */
     static final String MERCHANT_GLUED_LAM = "(?<!\\p{L})(?:قيمه|مصروفات|ثمن|مستحقات)(?:\\s+\\p{L}+){0,2}\\s+ل(?=[^\\sل]\\p{L})";
     static final String MERCHANT_MARKER_PARTY = "\\bfrom\\b|\\bto\\b|(?<!\\p{L})(?:من|الي)(?!\\p{L})|(?<!\\p{L})ل(?= )|(?<!\\p{L})لصالح|(?<!\\p{L})المستفيد:?|\\bbeneficiary:?";

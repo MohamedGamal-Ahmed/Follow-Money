@@ -38,7 +38,9 @@ public final class AmountScannerTest {
         int generated = 0;
         for (String[] n : numbers) for (String unit : units) for (String word : glued) {
             String[] forms = {unit + " " + n[0] + word + " متجر", unit + n[0] + word + " متجر", n[0] + unit + " " + word + " متجر", n[0] + " " + unit + " " + word + " متجر",
-                    "خصم " + unit + " " + n[0] + word, "تم خصم " + n[0] + " " + unit + word.replaceAll(".*", " ") + word};
+                    "خصم " + unit + " " + n[0] + word, "تم خصم " + n[0] + " " + unit + word.replaceAll(".*", " ") + word,
+                    // A word of the other script glued after the currency ("44.95 EGPعند"); same-script gluing is one word.
+                    unit.matches("[A-Z]+") == word.matches("[a-z]+") ? n[0] + " " + unit + " " + word : n[0] + " " + unit + word + " متجر"};
             for (String form : forms) {
                 String folded = MessageNormalizer.normalize(MessageNormalizer.Raw.sms("x", form)).matchText;
                 List<AmountScanner.Money> money = AmountScanner.scan(folded);

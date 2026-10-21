@@ -38,7 +38,9 @@ final class AmountScanner {
         // "149.98EGP") is a separate word and the number is never cut back to fit ("149.98عند" is never 149).
         MONEY = Pattern.compile("(?iu)(?<![\\p{L}])(" + unit + ")(?![\\p{L}])(?!-\\d)\\s{0,2}(" + NUMBER + ")(?![.,]?\\d)" +
                 // A number glued to a mask ("***-789", "x1234") is part of an account, not an amount before a unit.
-                "|(?<![\\d.,*#xX-])(" + NUMBER + ")\\s{0,2}(" + unit + ")(?![\\p{L}])");
+                // A unit ends where a word of another script starts: "44.95 EGPعند" is EGP + عند. A Latin unit still
+                // never ends inside a Latin word, nor an Arabic unit inside an Arabic one ("جنيهات" is not a glued word).
+                "|(?<![\\d.,*#xX-])(" + NUMBER + ")\\s{0,2}(" + unit + ")(?!(?<=[a-zA-Z])[a-zA-Z]|(?<=\\p{IsArabic})\\p{IsArabic})");
     }
 
     static List<Money> scan(String text) {

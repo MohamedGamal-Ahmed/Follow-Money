@@ -37,3 +37,12 @@ Expected values were authored from the owner's instructions. Two of them are my 
 - Corpus: all 392 rows pass, with 0 listed disagreements. That's 4330 field comparisons and 186 movement kinds.
 - Held-out sets: 25/25, 25/25, 48/48, 30/30 and 10/10.
 - New `AmountScannerTest` (the general "no fraction lost" check): 504 generated glued shapes (7 numbers × 3 units × 4 glued words × 6 forms) all read exactly. Across every corpus and held-out text, no scanned amount stops before `.digit` or `,digit` (763 amounts).
+
+## Follow-up: currency glued to the next word (policy 2026-10-27.2, corpus v2:f140a4b0, 393 rows)
+
+The S938B re-scan still showed 79 Banque Misr purchases with no amount. Their masked shapes, read on the phone with the owner's approval, are one form: `تم الان خصم <amount> <currency>عند <name> يوم <date>`. The currency follows the amount and عند is glued to it (`44.95 EGPعند`).
+
+- **General rule:** a currency ends where a word of the other script begins. `EGPعند` is EGP + عند, and `ج.مat` is ج.م + at. A Latin currency is never cut out of a Latin word, nor an Arabic currency out of an Arabic one, so `جنيهات` stays one word.
+- **Same rule for merchant markers:** an Arabic marker (عند, لدى) may follow a Latin letter or a digit.
+- **Corpus:** new variant `bm01-currency_after_glued_word` (`15.00 EGPعند`). The generated check grows to 588 glued shapes.
+- **Gates:** all 393 corpus rows, 0 listed disagreements; held-out sets 25/25, 25/25, 48/48, 30/30 and 10/10; 765 corpus/held-out amounts never cut.

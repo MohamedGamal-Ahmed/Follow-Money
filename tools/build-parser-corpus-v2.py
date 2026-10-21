@@ -315,6 +315,8 @@ for suffix, old, new, minor in [
     ("currency_after_fraction", "EGP 15.00عند", "15.00EGP عند", 1500),
     ("currency_before_glued", "EGP 15.00عند", "EGP15.00عند", 1500),
     ("arabic_currency_after", "EGP 15.00عند", "15.00ج.م عند", 1500),
+    # Observed on the owner's phone (79 Bank Misr purchases, masked shapes): the currency follows the amount and عند is glued to it.
+    ("currency_after_glued_word", "EGP 15.00عند", "15.00 EGPعند", 1500),
 ]:
     clone = dict(bm_base); clone.update(id="bm01-" + suffix, source_message_id="masked-fixture-bm01-" + suffix, body=bm_base["body"].replace(old, new),
         expected_amount_minor=minor, variant=suffix, feature_tags="card_purchase|glued_amount|" + suffix,
