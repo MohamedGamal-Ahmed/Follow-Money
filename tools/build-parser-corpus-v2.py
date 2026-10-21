@@ -400,6 +400,10 @@ family(case("bm09", "BankMisr", "تم اعادة قيد معاملتك ل EGP 5.
             reasons="COMPLETED_EVENT|AMOUNT_UNAMBIGUOUS|DIRECTION_IN", tags="reversal|re_posting|expense_offset",
             note=SHAPE_NOTE + "9 messages: 'إعادة قيد' re-posts (returns) an earlier card transaction; an expense offset, linked to the earlier 5.00 charge in capture (owner decision 2)."))
 
+family(case("hsbc01", "HSBC", "From HSBC: 21MAR26 Total POS Purchase from 123-456***-789 EGP 280.00- Your available balance is EGP 1,720.00",
+            amount=28000, direction="out", balance=172000, dt="2026-03-21", precision="date", tags="statement_debit|total_is_description|trailing_sign",
+            note=SHAPE_NOTE + "'Total <…> Purchase' describes the operation; 'total' labels an amount only when no transaction noun follows (the one A556E case where legacy was right)."))
+
 
 def measured_language(row):
     text = row["body"] if row["channel"] == "sms" else "\n".join(row[col] or "" for col in ORIGINAL if col.startswith("android."))

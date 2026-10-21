@@ -6,11 +6,11 @@ package com.mohamedgamal.masareef;
  * The pipeline runs in shadow mode only: the legacy ExpenseParser path remains the sole ledger authority.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-28.4";
+    static final String POLICY_VERSION = "2026-10-28.5";
     static final String NORMALIZER_VERSION = "normalization-2";
     static final String CLASSIFIER_VERSION = "classification-3";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
-    static final String CORPUS_CONTRACT = "v2:53d17486";
+    static final String CORPUS_CONTRACT = "v2:e8d1e108";
 
     // Shadow mode.
     static final boolean SHADOW_ENABLED = true;
@@ -180,7 +180,7 @@ final class ParsingPolicy {
      */
     /** A sentence that states the event's amount ("المبلغ 725 جنيه"), so it can pair with a completion in the previous one. */
     static final String AMOUNT_STATEMENT = "(?<!\\p{L})(?:ال)?(?:مبلغ|قيمه)(?!\\p{L})|\\bamount\\b";
-    static final String CLAUSE_AMOUNT_ROLE_WORD ="balance|available|رصيد|المتاح|\\bfees?\\b|رسوم|مصاريف|\\blimit\\b|\\btotal\\b|اجمالي|الاجمالي";
+    static final String CLAUSE_AMOUNT_ROLE_WORD ="balance|available|رصيد|المتاح|\\bfees?\\b|رسوم|مصاريف|\\blimit\\b|\\btotal\\b(?!\\s+(?:\\p{L}+\\s+)?(?:purchase|transaction|payment|withdrawal|pos)s?\\b)|اجمالي|الاجمالي";
     /** An amount stated as an exchange-rate or equivalent figure is never a second event. */
     static final String CLAUSE_EQUIVALENCE = "\\brate\\b|\\bexchange\\b|\\bequivalent\\b|المعادل|المقيد|سعر (?:ال)?صرف";
 
@@ -218,8 +218,8 @@ final class ParsingPolicy {
     static final String ROLE_EQUIVALENT_AFTER = "^\\s*\\)?\\s*equivalent";
     /** An amount opening a parenthesis right after another amount in a different currency is that amount's equivalent. */
     static final String ROLE_EQUIVALENT_PAREN = "\\(\\s*$";
-    /** A stated total (principal plus fee) is never the principal and never a balance. */
-    static final String ROLE_TOTAL = "\\btotal\\b|الاجمالي|اجمالي|المجموع";
+    /** A stated total (principal plus fee) is never the principal and never a balance; "Total POS Purchase" is a description. */
+    static final String ROLE_TOTAL = "\\btotal\\b(?!\\s+(?:\\p{L}+\\s+)?(?:purchase|transaction|payment|withdrawal|pos)s?\\b)|الاجمالي|اجمالي|المجموع";
     /** A principal marker after a role word means the amount is the principal ("شحن رصيد اتصالات بقيمة 50"). */
     static final String PRINCIPAL_MARKER = "بقيمه|بمبلغ|مبلغ|\\bof\\b";
     /** Credit-card wording, including the adjective after the bank name ("بطاقة بنك مصر الائتمانية"). */
