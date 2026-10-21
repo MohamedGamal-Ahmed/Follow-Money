@@ -211,7 +211,7 @@ public final class ParserDebugActivity extends Activity {
     // ---- Shadow re-scan ------------------------------------------------------------------------------------------
 
     /** The stored re-scan rows as report rows, with the counts the re-scan kept for messages it did not store. */
-    private static ShadowReport.Summary rescanSummary(android.content.Context app, android.database.sqlite.SQLiteDatabase sql) {
+    static ShadowReport.Summary rescanSummary(android.content.Context app, android.database.sqlite.SQLiteDatabase sql) {
         android.content.SharedPreferences meta = app.getSharedPreferences(ShadowRescan.PREFS, MODE_PRIVATE);
         if (!meta.contains("finished_at")) return null;
         java.util.List<ShadowReport.Row> rows = new java.util.ArrayList<>();

@@ -28,8 +28,8 @@ public final class ReconciliationTest extends Instrumentation {
     private String confirmedCardLink;
     private boolean captureBalances;
     private boolean captureRing;
-    private String rescanAudit,expectedBefore;
-    @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));rescanAudit=args.getString("rescan_audit");expectedBefore=args.getString("expected_before");featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
+    private String rescanAudit,expectedBefore,rescanReport;
+    @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));rescanAudit=args.getString("rescan_audit");rescanReport=args.getString("rescan_report");expectedBefore=args.getString("expected_before");featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
     @Override public void onStart() {
         if(featureAudit!=null&&featureAudit.startsWith("source_link_")){new SourceLinkUiTest(this).run(!"source_link_light".equals(featureAudit),"source_link_max".equals(featureAudit)?2f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("transactions_")){new TransactionPagesUiTest(this).run(!"transactions_light".equals(featureAudit),"transactions_max".equals(featureAudit)?2f:1f);return;}
@@ -39,6 +39,7 @@ public final class ReconciliationTest extends Instrumentation {
         if("points_ui".equals(featureAudit)){new DailyPointsUiTest(this).run();return;}
         if("notification_capture".equals(featureAudit)){new NotificationCaptureTest(this).run();return;}
         if("shadow_store".equals(featureAudit)){new ShadowStoreTest(this).run();return;}
+        if("shadow_rescan_report".equals(featureAudit)){new ShadowRescanAudit(this,rescanReport).run();return;}
         if("merchant_badges".equals(featureAudit)){new MerchantBadgeUiTest(this).run();return;}
         if("commitment_ui".equals(featureAudit)){new CommitmentPaymentUiTest(this).run();return;}
         if("commitment_cycle_ui".equals(featureAudit)){new CommitmentCycleUiTest(this).run();return;}
