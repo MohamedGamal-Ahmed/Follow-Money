@@ -27,7 +27,7 @@ final class CaptureTransaction {
     private static void shadow(CaptureRequest request, CaptureResult result) {
         try {
             ParserShadow.observe(request.raw, String.valueOf(result.reason),
-                    result.transaction == null ? null : result.transaction.merchant, System.currentTimeMillis());
+                    result.transaction == null ? null : result.transaction.merchant, request.captureAt, System.currentTimeMillis());
         } catch (RuntimeException | LinkageError ignored) {
             // Diagnostics only.
         }

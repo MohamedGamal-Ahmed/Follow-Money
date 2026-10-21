@@ -38,6 +38,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Transaction extraction checks failed' }
     & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.ShadowComparison classification
     if ($LASTEXITCODE -ne 0) { throw 'Shadow comparison (classification) failed' }
+    & "$env:JAVA_HOME/bin/java$suffix" -cp $out com.mohamedgamal.masareef.ShadowComparison extraction
+    if ($LASTEXITCODE -ne 0) { throw 'Shadow comparison (extraction) failed' }
     $wrapper = if ($windowsHost) { './gradlew.bat' } else { './gradlew' }
     $gradleArguments = @('assembleDebug','lintDebug','assembleDebugAndroidTest')
     if (-not $Online) { $gradleArguments = @('--offline') + $gradleArguments }

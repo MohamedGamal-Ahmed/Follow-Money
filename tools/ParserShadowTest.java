@@ -18,9 +18,11 @@ public final class ParserShadowTest {
         ParserShadow.clear();
         long now = 1_792_600_000_000L;
         for (ParserCorpusFixture.Row row : rows) {
-            ParserShadow.Observation seen = ParserShadow.observe(MessageNormalizerTest.raw(row), "LEGACY_REASON", null, now++);
-            check(seen != null && (seen.status.equals("CLASSIFIED") || seen.status.equals("EMPTY")), "Shadow status " + row.get("id") + " " + seen);
-            if (seen.status.equals("CLASSIFIED")) same(seen.type.toLowerCase(java.util.Locale.ROOT), row.get("expected_type"), "Shadow classification " + row.get("id"));
+            ParserShadow.Observation seen = ParserShadow.observe(MessageNormalizerTest.raw(row), "LEGACY_REASON", null,
+                    Long.parseLong(row.get("received_at_ms")), now++);
+            check(seen != null && (seen.status.equals("EXTRACTED") || seen.status.equals("EMPTY")), "Shadow status " + row.get("id") + " " + seen);
+            if (seen.status.equals("EXTRACTED")) same(seen.type.toLowerCase(java.util.Locale.ROOT), row.get("expected_type"), "Shadow classification " + row.get("id"));
+            same(seen.decision, ShadowComparison.expectedDecision(row), "Shadow provisional decision " + row.get("id"));
             check(seen.toString().contains(ParserShadow.NOT_IMPLEMENTED), "Unimplemented stages stated " + row.get("id"));
             // Only structure is retained: no fragment of the message text appears in the observation.
             for (String word : MessageNormalizer.normalize(MessageNormalizerTest.raw(row)).text.split("[^\\p{L}]+"))
