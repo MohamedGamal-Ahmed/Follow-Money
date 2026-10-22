@@ -1,6 +1,8 @@
 package com.mohamedgamal.masareef;
 
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.res.Configuration;
 
 /** Runtime palette backed by the same resources as the framework widget themes. */
 final class UiTheme {
@@ -10,6 +12,12 @@ final class UiTheme {
     final boolean dark;
     final int ink, muted, background, surface, accent, pale, border, fieldOutline, danger, income;
     final int brand, brandSoft, emerald, lime, indigo, gold, orange, onPrimary, onDanger;
+
+    /** "dark_mode" holds an explicit light/dark choice; without one the app follows the system's dark theme. */
+    static boolean dark(Context context, SharedPreferences prefs) {
+        if (prefs.contains("dark_mode")) return prefs.getBoolean("dark_mode", false);
+        return (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
 
     UiTheme(Context context, boolean dark) {
         this.dark = dark;

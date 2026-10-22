@@ -56,7 +56,7 @@ public final class ParserDebugActivity extends Activity {
     }
 
     @Override public void onCreate(Bundle state) {
-        boolean dark = SmsImportActivity.mainPreferences(this).getBoolean("dark_mode", false);
+        boolean dark = UiTheme.dark(this, SmsImportActivity.mainPreferences(this));
         if (dark) setTheme(R.style.AppTheme_Dark);
         super.onCreate(state);
         appLock = new AppLock(this, this::show);

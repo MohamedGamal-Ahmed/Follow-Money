@@ -57,7 +57,7 @@ public final class SmsImportActivity extends Activity {
         return context.getSharedPreferences(name,MODE_PRIVATE);
     }
     @Override public void onCreate(Bundle state) {
-        dark=mainPreferences(this).getBoolean("dark_mode",false);
+        dark=UiTheme.dark(this,mainPreferences(this));
         if(dark)setTheme(R.style.AppTheme_Dark);
         super.onCreate(state);
         appLock=new AppLock(this,this::onAppUnlocked);

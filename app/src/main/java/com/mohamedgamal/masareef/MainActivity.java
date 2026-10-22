@@ -183,7 +183,7 @@ public final class MainActivity extends Activity {
     };
 
     @Override protected void onCreate(Bundle state) {
-        dark = getPreferences(MODE_PRIVATE).getBoolean("dark_mode", false);
+        dark = UiTheme.dark(this, getPreferences(MODE_PRIVATE));
         if (dark) {
             setTheme(R.style.AppTheme_Dark);
         }
@@ -725,14 +725,18 @@ public final class MainActivity extends Activity {
                 break;
             case "appearance":
         setting("اسم العرض على الرئيسية", this::displayNamePage);
-        setting(getPreferences(MODE_PRIVATE).getBoolean("dark_mode", false) ? "الوضع: ليلي" : "الوضع: فاتح", () -> {
-            boolean enabled = getPreferences(MODE_PRIVATE).getBoolean("dark_mode", false);
-            getPreferences(MODE_PRIVATE).edit().putBoolean("dark_mode", !enabled).apply();
-            recreate();
-        });
+        SharedPreferences appearance = getPreferences(MODE_PRIVATE);
+        int appearanceChoice = !appearance.contains("dark_mode") ? 0 : appearance.getBoolean("dark_mode", false) ? 2 : 1;
+        String[] appearanceNames = {"تلقائي مع الجهاز", "فاتح", "ليلي"};
+        setting("المظهر: " + appearanceNames[appearanceChoice], () ->
+            new ChoiceDialogBuilder().setTitle("مظهر التطبيق").setItems(appearanceNames, (d, w) -> {
+                if (w == 0) appearance.edit().remove("dark_mode").apply();
+                else appearance.edit().putBoolean("dark_mode", w == 2).apply();
+                recreate();
+            }).show());
         setting("الصورة الشخصية (اختيارية)",this::chooseProfilePhoto);
         if(new java.io.File(getFilesDir(),"profile-avatar.png").exists())setting("حذف الصورة الشخصية",()->{new java.io.File(getFilesDir(),"profile-avatar.png").delete();render();});
-        String openingMode=getPreferences(MODE_PRIVATE).getString("opening_mode","every");
+        String openingMode=getPreferences(MODE_PRIVATE).getString("opening_mode","first");
         setting("الافتتاحية: "+("off".equals(openingMode)?"متوقفة":"first".equals(openingMode)?"أول مرة بس":"مع كل فتح"),()->{
             String[] modes={"every","first","off"};
             new ChoiceDialogBuilder().setTitle("افتتاحية التطبيق").setItems(new String[]{"مع كل فتح (٣ ثواني)","أول مرة بس","متوقفة"},(d,w)->{
@@ -869,7 +873,7 @@ public final class MainActivity extends Activity {
         all.add(new SettingEntry("حساباتك على إنستاباي", "instapay handles ipa تحويل", "capture", "حساباتك على إنستاباي"));
         all.add(new SettingEntry("قواعد التجار والتصنيف", "merchant rules category تصنيف تاجر", "capture", "قواعد التجار"));
         all.add(new SettingEntry("اسم العرض على الرئيسية", "name profile display اسم", "appearance", "اسم العرض"));
-        all.add(new SettingEntry("الوضع الليلي والفاتح", "dark mode theme night light ليلي", "appearance", "الوضع:"));
+        all.add(new SettingEntry("الوضع الليلي والفاتح", "dark mode theme night light ليلي", "appearance", "المظهر:"));
         all.add(new SettingEntry("الصورة الشخصية", "photo avatar profile صورة", "appearance", "الصورة الشخصية"));
         all.add(new SettingEntry("افتتاحية التطبيق", "opening intro video splash", "appearance", "الافتتاحية"));
         all.add(new SettingEntry("إشعار فوري بكل عملية", "notification captured transaction إشعار", "alerts", "إشعار فوري"));
@@ -3233,44 +3237,50 @@ public final class MainActivity extends Activity {
         heading.addView(label(period[0].format(dayMonth) + " – اليوم", 12, softInk, false));
         hero.addView(heading);
 
-        // Compact body: the ring on one side, the three numbers stacked beside it, so the card stays about a third of
-        // the screen. The ring shows how much of the income has gone out; full (and coral) when more went out than came in.
+        // One figure carries the card: what is left of the period's income, large, over a slim bar for the share that
+        // has gone out (full and coral when more went out than came in). No fixed circle, so large fonts never crowd it.
         boolean over = s.remaining < 0;
         float share = s.income > 0 ? (float) ((double) s.out / s.income) : (s.out > 0 ? 1f : 0f);
-        LinearLayout body = new LinearLayout(this); body.setGravity(Gravity.CENTER_VERTICAL); body.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        FrameLayout dial = new FrameLayout(this);
-        UiKit.Donut ring = new UiKit.Donut(this);
-        ring.set(share, track, over ? softCoral : LIME, 10);
-        ring.setContentDescription("خرج " + Math.round(Math.min(1f, share) * 100) + "% من الدخل");
-        FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(dp(132), dp(132)); ringParams.gravity = Gravity.CENTER;
-        dial.addView(ring, ringParams);
-        LinearLayout centre = new LinearLayout(this); centre.setOrientation(LinearLayout.VERTICAL); centre.setGravity(Gravity.CENTER);
-        // Inside the ring stroke with room to spare: a long figure on a large-font phone must shrink, never touch the ring.
-        centre.setPadding(dp(24), 0, dp(24), 0);
-        centre.addView(centered(label("باقي من دخل الفترة", 9, softInk, false)));
-        TextView remaining = label((over ? "−" : "") + money(Math.abs(s.remaining), "EGP"), 16, over ? softCoral : Color.WHITE, true);
-        remaining.setTextDirection(View.TEXT_DIRECTION_LTR); remaining.setSingleLine(true);
-        remaining.setAutoSizeTextTypeUniformWithConfiguration(8, 15, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
-        centre.addView(centered(remaining), new LinearLayout.LayoutParams(-1, -2));
-        String hint = s.income <= 0 ? (s.out > 0 ? "مفيش دخل مسجل" : "لسه مفيش حركة") : over ? "خرج أكتر من الدخل" : "اتصرف " + Math.round(share * 100) + "%";
-        centre.addView(centered(label(hint, 9, over ? softCoral : softInk, false)));
-        FrameLayout.LayoutParams centreParams = new FrameLayout.LayoutParams(dp(132), -2); centreParams.gravity = Gravity.CENTER;
-        dial.addView(centre, centreParams);
-        LinearLayout.LayoutParams dialParams = new LinearLayout.LayoutParams(dp(132), dp(132)); dialParams.setMarginEnd(dp(14));
-        body.addView(dial, dialParams);
+        String hint = s.income <= 0 ? (s.out > 0 ? "مفيش دخل مسجل" : "لسه مفيش حركة") : over ? "خرج أكتر من الدخل" : "اتصرف " + Math.round(share * 100) + "% من الدخل";
+        TextView caption = label("باقي من دخل الفترة", 13, softInk, false);
+        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-1, -2); captionParams.topMargin = dp(18);
+        hero.addView(caption, captionParams);
+        TextView remaining = label((over ? "−" : "") + money(Math.abs(s.remaining), "EGP"), 34, over ? softCoral : Color.WHITE, true);
+        remaining.setTextDirection(View.TEXT_DIRECTION_LTR); remaining.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+        remaining.setSingleLine(true); remaining.setFontFeatureSettings("tnum");
+        remaining.setAutoSizeTextTypeUniformWithConfiguration(22, 34, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        hero.addView(remaining, new LinearLayout.LayoutParams(-1, -2));
 
-        // Three rows beside the ring: دخل, خرج, صرف يومي. Each opens exactly the rows that add up to its number.
-        LinearLayout stats = new LinearLayout(this); stats.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout bar = new LinearLayout(this); bar.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        bar.setBackground(rounded(track, 99)); bar.setClipToOutline(true);
+        float filled = Math.min(1f, share);
+        View fill = new View(this); fill.setBackground(rounded(over ? softCoral : LIME, 99));
+        bar.addView(fill, new LinearLayout.LayoutParams(0, -1, filled));
+        bar.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 1f - filled));
+        bar.setContentDescription(hint);
+        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(-1, dp(6)); barParams.topMargin = dp(12);
+        hero.addView(bar, barParams);
+        TextView hintView = label(hint, 12, over ? softCoral : softInk, false);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2); hintParams.topMargin = dp(6);
+        hero.addView(hintView, hintParams);
+
+        // Three columns beneath: دخل, خرج, صرف يومي, divided by hairlines. Each opens exactly the rows that add up to it.
+        LinearLayout stats = new LinearLayout(this); stats.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         String incomeDate = s.salaryWhen > 0 ? "يوم " + Instant.ofEpochMilli(s.salaryWhen).atZone(ZoneId.systemDefault()).toLocalDate().format(dayMonth) : "الفترة";
-        stats.addView(statementOrb(R.drawable.ic_cat_income, 0, LIME, "دخل", "+" + money(s.income, "EGP"), incomeDate,
-                () -> openStatement(MoneyFlow.Bucket.INFLOW.name(), false)));
-        stats.addView(statementOrb(R.drawable.ic_cat_income, 180, softCoral, "خرج", "−" + money(s.out, "EGP"), s.outCount + " عملية",
-                () -> openStatement(MoneyFlow.OUT_FILTER, false)));
-        stats.addView(statementOrb(R.drawable.ic_cat_other, 0, softSky, "صرف يومي", money(s.living, "EGP"), "من خرج",
-                () -> openStatement(MoneyFlow.Bucket.LIVING.name(), false)));
-        body.addView(stats, new LinearLayout.LayoutParams(0, -2, 1));
-        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, -2); bodyParams.topMargin = dp(10);
-        hero.addView(body, bodyParams);
+        View[] columns = {
+                statementStat(LIME, "دخل", (s.income > 0 ? "+" : "") + money(s.income, "EGP"), incomeDate, () -> openStatement(MoneyFlow.Bucket.INFLOW.name(), false)),
+                statementStat(softCoral, "خرج", (s.out > 0 ? "−" : "") + money(s.out, "EGP"), s.outCount + " عملية", () -> openStatement(MoneyFlow.OUT_FILTER, false)),
+                statementStat(softSky, "صرف يومي", money(s.living, "EGP"), "من خرج", () -> openStatement(MoneyFlow.Bucket.LIVING.name(), false))};
+        for (int i = 0; i < columns.length; i++) {
+            if (i > 0) {
+                View rule = new View(this); rule.setBackgroundColor(track);
+                LinearLayout.LayoutParams ruleParams = new LinearLayout.LayoutParams(dp(1), -1); ruleParams.setMargins(dp(10), dp(6), dp(10), dp(6));
+                stats.addView(rule, ruleParams);
+            }
+            stats.addView(columns[i], new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, -2); bodyParams.topMargin = dp(18);
+        hero.addView(stats, bodyParams);
 
         if (s.transfersIn > 0) {
             TextView split = label("راتب " + money(s.salary, "EGP") + " · تحويلات وصلتك " + money(s.transfersIn, "EGP"), 11, softInk, false);
@@ -3278,11 +3288,11 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams splitParams = new LinearLayout.LayoutParams(-1, -2); splitParams.topMargin = dp(8);
             hero.addView(split, splitParams);
         }
-        TextView foot = label("التحويل بين حساباتك وسداد كروتك مش داخلين؛ الكاش محسوب لما اتسحب", 10, 0xff8fb0a3, false);
+        TextView foot = label("التحويل بين حساباتك وسداد كروتك مش داخلين؛ الكاش محسوب لما اتسحب", 11, 0xff8fb0a3, false);
         foot.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams footParams = new LinearLayout.LayoutParams(-1, -2); footParams.topMargin = dp(s.transfersIn > 0 ? 2 : 8);
         hero.addView(foot, footParams);
-        hero.setOnClickListener(v -> openStatement(MoneyFlow.OUT_FILTER, false));
+        hero.setOnClickListener(v -> openStatement(MoneyFlow.OUT_FILTER, false)); hero.setTag(QUIET_ACTION);
 
         boolean any = s.cashSpending > 0 || s.internal > 0 || s.unlinkedTransfer > 0;
         for (MoneyFlow.Bucket bucket : MoneyFlow.STATEMENT_OUT_BUCKETS) if (s.component(bucket) > 0) any = true;
@@ -3314,28 +3324,28 @@ public final class MainActivity extends Activity {
         if (s.internal > 0) box.addView(label("بين حساباتك وسداد كروتك " + money(s.internal, "EGP") + " · مش دخل ولا خرج", 11, MUTED, false));
     }
 
-    /** One stat row beside the ring: a small tinted circle with an icon, then «name · detail» over the amount, nothing wrapping. */
-    private LinearLayout statementOrb(int icon, int rotation, int tint, String name, String amount, String detail, Runnable action) {
-        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(2), dp(3), dp(2), dp(3));
-        ImageView glyph = tintedIcon(icon, tint);
-        glyph.setRotation(rotation);
-        glyph.setPadding(dp(7), dp(7), dp(7), dp(7));
-        glyph.setBackground(rounded((tint & 0x00ffffff) | 0x2e000000, 99));
-        row.addView(glyph, new LinearLayout.LayoutParams(dp(30), dp(30)));
-        LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
-        TextView title = label(name + " · " + detail, 11, 0xffb9d3c8, false); title.setSingleLine(true);
-        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        copy.addView(title, new LinearLayout.LayoutParams(-1, -2));
-        TextView value = label(amount, 14, tint == LIME ? LIME : Color.WHITE, true);
-        value.setTextDirection(View.TEXT_DIRECTION_LTR); value.setSingleLine(true);
-        value.setAutoSizeTextTypeUniformWithConfiguration(10, 14, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
-        copy.addView(value, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(10));
-        row.addView(copy, copyParams);
-        row.setContentDescription(name + " " + amount);
-        row.setOnClickListener(v -> action.run());
-        return row;
+    /** One stat column under the hero figure: a dot and name, the amount, then a quiet detail line, nothing wrapping. */
+    private LinearLayout statementStat(int tint, String name, String amount, String detail, Runnable action) {
+        final int softInk = 0xffb9d3c8;
+        LinearLayout column = new LinearLayout(this); column.setOrientation(LinearLayout.VERTICAL);
+        column.setMinimumHeight(dp(48)); column.setPadding(0, dp(2), 0, dp(2));
+        TextView title = label("● " + name, 12, softInk, false); title.setSingleLine(true);
+        android.text.SpannableString dot = new android.text.SpannableString(title.getText());
+        dot.setSpan(new android.text.style.ForegroundColorSpan(tint), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        title.setText(dot);
+        column.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        TextView value = label(amount, 15, tint == LIME ? LIME : Color.WHITE, true);
+        value.setTextDirection(View.TEXT_DIRECTION_LTR); value.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+        value.setSingleLine(true); value.setFontFeatureSettings("tnum");
+        value.setAutoSizeTextTypeUniformWithConfiguration(11, 15, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(-1, -2); valueParams.topMargin = dp(4);
+        column.addView(value, valueParams);
+        TextView note = label(detail, 11, softInk, false); note.setSingleLine(true);
+        note.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        column.addView(note, new LinearLayout.LayoutParams(-1, -2));
+        column.setContentDescription(name + " " + amount + "، " + detail);
+        column.setOnClickListener(v -> action.run()); column.setTag(QUIET_ACTION);
+        return column;
     }
 
     private void openInsights(String section,LocalDate month) {
@@ -3436,7 +3446,7 @@ public final class MainActivity extends Activity {
         ExpenseDb.BalanceSnapshot balance = db.currentBalance(source.id, "EGP");
         String caption = credit ? "رصيد ائتماني مسجل" + (balance != null && balance.estimated ? " · تقديري" : "") :
                 balance != null && balance.estimated ? "رصيد تقديري" : "آخر رصيد مؤكد";
-        balanceColumn.addView(label(caption, 10, 0xccffffff, false));
+        balanceColumn.addView(label(caption, 11, 0xccffffff, false));
         balanceColumn.addView(label(balance == null ? "غير متاح" : money(balance.amountMinor, "EGP"), 18, Color.WHITE, true));
         middle.addView(balanceColumn);
         LinearLayout.LayoutParams middleParams = new LinearLayout.LayoutParams(-1, 0, 1);
@@ -3448,7 +3458,7 @@ public final class MainActivity extends Activity {
         bottom.addView(digits, new LinearLayout.LayoutParams(0, -2, 1));
         String tag = credit ? "CREDIT" : source.kind.contains("حساب") ? "ACCOUNT" :
                 source.kind.contains("محفظة") ? "WALLET" : "DEBIT";
-        TextView type = label(tag, 10, Color.WHITE, true);
+        TextView type = label(tag, 11, Color.WHITE, true);
         type.setLetterSpacing(0.1f);
         type.setPadding(dp(8), dp(2), dp(8), dp(2));
         type.setBackground(rounded(0x29ffffff, 6));
@@ -4613,7 +4623,7 @@ public final class MainActivity extends Activity {
         if (balance != null) {
             LinearLayout column = new LinearLayout(this); column.setOrientation(LinearLayout.VERTICAL);
             column.setGravity(Gravity.END);
-            column.addView(label("بطاقة ائتمان".equals(source.kind) ? "رصيد ائتماني مسجل" : balance.estimated?"رصيد محسوب · تقديري":"آخر رصيد مسجل", 10, 0xccffffff, false));
+            column.addView(label("بطاقة ائتمان".equals(source.kind) ? "رصيد ائتماني مسجل" : balance.estimated?"رصيد محسوب · تقديري":"آخر رصيد مسجل", 11, 0xccffffff, false));
             column.addView(label(money(balance.amountMinor, "EGP"), 15, Color.WHITE, true));
             strip.addView(column);
         }
@@ -4891,7 +4901,7 @@ public final class MainActivity extends Activity {
                 List<ExpenseDb.Recurring> due=commitmentsOn(all,date);
                 cell.setBackground(rounded(today?BRAND:due.isEmpty()?SURFACE:ACCENT_PALE,12));
                 cell.addView(centered(label(Integer.toString(number),14,today?LIME:INK,!due.isEmpty()||today)));
-                cell.addView(centered(label(due.isEmpty()?"":due.size()+" •",10,today?LIME:ACCENT,true)));
+                cell.addView(centered(label(due.isEmpty()?"":due.size()+" •",11,today?LIME:ACCENT,true)));
                 cell.setContentDescription(date+" · "+due.size()+" التزامات");
                 cell.setOnClickListener(v -> showCommitmentsOn(date, due));
             }
@@ -6096,8 +6106,7 @@ public final class MainActivity extends Activity {
         next.setOnClickListener(v->{introStep++;render();});
         LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.topMargin=dp(24);page.addView(next,params);
         page.addView(centered(label("بياناتك محلية · تقدر تستخدم التطبيق يدويًا",12,MUTED,false)));
-        float animations=Settings.Global.getFloat(getContentResolver(),Settings.Global.ANIMATOR_DURATION_SCALE,1f);
-        if(animations>0){demo.setAlpha(0);demo.setTranslationY(dp(10));demo.animate().alpha(1).translationY(0).setDuration(240).start();}
+        if(animationsEnabled()){demo.setAlpha(0);demo.setTranslationY(dp(10));demo.animate().alpha(1).translationY(0).setDuration(240).start();}
     }
 
     private void finishIntro(boolean choose) {
@@ -6637,8 +6646,11 @@ public final class MainActivity extends Activity {
     }
 
     /** Plain text that opens data gets the same visible affordance; filled buttons already have one. */
+    /** Tag for a tappable surface that already reads as one (the home statement card and its stats): no underline. */
+    private static final Object QUIET_ACTION = new Object();
+
     private void markDetailActions(View view) {
-        if (view.hasOnClickListeners()) {
+        if (view.hasOnClickListeners() && view.getTag() != QUIET_ACTION) {
             TextView title=view instanceof TextView?(TextView)view:firstPlainLabel(view);
             if (title!=null && !(title instanceof EditText) && title.getBackground()==null)
                 title.setPaintFlags(title.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
@@ -7682,14 +7694,18 @@ public final class MainActivity extends Activity {
      * name are on screen (~3 s). A tap skips it; Settings can limit it to the first launch or turn it off.
      */
     private android.app.Dialog openingDialog;
+    /** Off when the system's remove-animations setting zeroes the animator scale; the opening and its fades step aside. */
+    private boolean animationsEnabled() {
+        return Settings.Global.getFloat(getContentResolver(), Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0;
+    }
     /** A message that arrived while the opening was playing (e.g. the repair summary) waits until it closes. */
     private Runnable afterOpening;
 
     private void playOpening(boolean forced) {
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-        String mode = prefs.getString("opening_mode", "every");
+        String mode = prefs.getString("opening_mode", "first");
         boolean first = !prefs.getBoolean("opening_seen", false);
-        if (!forced && ("off".equals(mode) || "first".equals(mode) && !first)) return;
+        if (!forced && ("off".equals(mode) || "first".equals(mode) && !first || !animationsEnabled())) return;
         prefs.edit().putBoolean("opening_seen", true).apply();
         android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         FrameLayout stage = new FrameLayout(this);
@@ -7718,7 +7734,7 @@ public final class MainActivity extends Activity {
         });
         Runnable close = () -> {
             if (!dialog.isShowing() || isFinishing() || isDestroyed()) return;
-            stage.animate().alpha(0f).setDuration(260).withEndAction(() -> {
+            stage.animate().alpha(0f).setDuration(animationsEnabled() ? 260 : 0).withEndAction(() -> {
                 video.stopPlayback();
                 try { dialog.dismiss(); } catch (IllegalArgumentException ignored) {}
             }).start();

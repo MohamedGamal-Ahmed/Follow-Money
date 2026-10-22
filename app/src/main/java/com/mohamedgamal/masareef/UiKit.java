@@ -15,6 +15,11 @@ import java.util.Locale;
 final class UiKit {
     private UiKit() {}
 
+    /** Chart labels in sp at the 11sp floor, so they grow with the system font size like every other label. */
+    static float labelPx(View view) {
+        return android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, 11, view.getResources().getDisplayMetrics());
+    }
+
     /** Seven compact day bars used in the home summary card. */
     static final class MiniBars extends View {
         private final Paint bar = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -39,8 +44,8 @@ final class UiKit {
         @Override protected void onDraw(Canvas canvas) {
             if (values.length == 0) return;
             float density = getResources().getDisplayMetrics().density;
-            float labelHeight = 14 * density;
-            text.setTextSize(9 * density);
+            text.setTextSize(labelPx(this));
+            float labelHeight = text.getTextSize() + 5 * density;
             long max = 1;
             for (long value : values) max = Math.max(max, value);
             float slot = getWidth() / (float) values.length;
@@ -114,8 +119,8 @@ final class UiKit {
         @Override protected void onDraw(Canvas canvas) {
             if (values.length == 0) return;
             float density = getResources().getDisplayMetrics().density;
-            float labelHeight = labels.length > 0 ? 16 * density : 0;
-            text.setTextSize((values.length > 16 ? 8 : 10) * density);
+            text.setTextSize(labelPx(this));
+            float labelHeight = labels.length > 0 ? text.getTextSize() + 6 * density : 0;
             long max = 1;
             for (long[] column : values) { long sum = 0; for (long v : column) sum += v; max = Math.max(max, sum); }
             float chartHeight = getHeight() - labelHeight - 2 * density;
@@ -220,41 +225,6 @@ final class UiKit {
                     (getWidth() + size) / 2 - stroke / 2, (getHeight() + size) / 2 - stroke / 2);
             canvas.drawArc(box, 0, 360, false, track);
             if (fraction > 0) canvas.drawArc(box, -90, 360 * fraction, false, fill);
-        }
-    }
-
-    /**
-     * The statement ring on the home card: a soft track and one arc for the share of the income that has gone out,
-     * full when more went out than came in. Colors and stroke are set by the caller, so the ring reads on the
-     * brand background in both themes.
-     */
-    static final class Donut extends View {
-        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private float fraction, strokeDp = 14;
-
-        Donut(Context context) {
-            super(context);
-            for (Paint paint : new Paint[]{track, fill}) {
-                paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeCap(Paint.Cap.ROUND);
-            }
-        }
-
-        void set(float value, int trackColor, int fillColor, float stroke) {
-            fraction = Math.max(0f, Math.min(1f, value));
-            track.setColor(trackColor); fill.setColor(fillColor); strokeDp = stroke;
-            invalidate();
-        }
-
-        @Override protected void onDraw(Canvas canvas) {
-            float stroke = strokeDp * getResources().getDisplayMetrics().density;
-            track.setStrokeWidth(stroke); fill.setStrokeWidth(stroke);
-            float size = Math.min(getWidth(), getHeight());
-            RectF box = new RectF(stroke / 2 + (getWidth() - size) / 2, stroke / 2 + (getHeight() - size) / 2,
-                    (getWidth() + size) / 2 - stroke / 2, (getHeight() + size) / 2 - stroke / 2);
-            canvas.drawArc(box, 0, 360, false, track);
-            if (fraction > 0) canvas.drawArc(box, -90, Math.max(4f, 360 * fraction), false, fill);
         }
     }
 
