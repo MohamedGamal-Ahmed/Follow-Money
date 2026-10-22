@@ -298,6 +298,19 @@ final class UiKit {
         return MONOGRAM_COLORS[Math.floorMod(key.hashCode(), MONOGRAM_COLORS.length)];
     }
 
+    /** {@code amount} of {@code top} over {@code base}, opaque. */
+    static int blend(int top, int base, float amount) {
+        int r = Math.round(((top >> 16) & 0xff) * amount + ((base >> 16) & 0xff) * (1 - amount));
+        int g = Math.round(((top >> 8) & 0xff) * amount + ((base >> 8) & 0xff) * (1 - amount));
+        int b = Math.round((top & 0xff) * amount + (base & 0xff) * (1 - amount));
+        return 0xff000000 | (r << 16) | (g << 8) | b;
+    }
+
+    /** The monogram letter on its soft plate: the merchant's hue pulled toward the ink so it stays readable. */
+    static int monogramInk(int hue, int ink, boolean dark) {
+        return dark ? blend(hue, 0xffffffff, 0.45f) : blend(hue, ink, 0.6f);
+    }
+
     /** "example@instapay" reads better as "example"; the InstaPay pill says where it came from. */
     static boolean isInstaPay(String name) {
         return name != null && name.toLowerCase(Locale.ROOT).contains("@instapay");

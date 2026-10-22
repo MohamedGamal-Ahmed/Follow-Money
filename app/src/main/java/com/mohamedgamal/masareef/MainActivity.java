@@ -260,7 +260,8 @@ public final class MainActivity extends Activity {
         if (!initialActionsPending || appLock.guard()) return;
         initialActionsPending = false;
         if (initialFresh && !initialDirect) playOpening(false);
-        handleShare(getIntent());
+        // A recreated activity (theme follows the system, rotation) still holds the shared text; it was offered once.
+        if (initialFresh) handleShare(getIntent());
         openTransactionFromIntent(getIntent());
         openCaptureEventFromIntent(getIntent());
         openWidgetAction(getIntent());
@@ -3292,7 +3293,7 @@ public final class MainActivity extends Activity {
         foot.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams footParams = new LinearLayout.LayoutParams(-1, -2); footParams.topMargin = dp(s.transfersIn > 0 ? 2 : 8);
         hero.addView(foot, footParams);
-        hero.setOnClickListener(v -> openStatement(MoneyFlow.OUT_FILTER, false)); hero.setTag(QUIET_ACTION);
+        hero.setOnClickListener(v -> openStatement(MoneyFlow.OUT_FILTER, false));
 
         boolean any = s.cashSpending > 0 || s.internal > 0 || s.unlinkedTransfer > 0;
         for (MoneyFlow.Bucket bucket : MoneyFlow.STATEMENT_OUT_BUCKETS) if (s.component(bucket) > 0) any = true;
@@ -3344,7 +3345,7 @@ public final class MainActivity extends Activity {
         note.setEllipsize(android.text.TextUtils.TruncateAt.END);
         column.addView(note, new LinearLayout.LayoutParams(-1, -2));
         column.setContentDescription(name + " " + amount + "، " + detail);
-        column.setOnClickListener(v -> action.run()); column.setTag(QUIET_ACTION);
+        column.setOnClickListener(v -> action.run());
         return column;
     }
 
@@ -6270,7 +6271,7 @@ public final class MainActivity extends Activity {
     }
 
     private int kindColor(String kind) {
-        return "income".equals(kind) ? INCOME : "expense".equals(kind) ? CORAL : MUTED;
+        return "income".equals(kind) ? INCOME : "expense".equals(kind) ? INK : MUTED;
     }
 
     private int kindColor(ExpenseDb.Recurring item) {
@@ -6463,11 +6464,12 @@ public final class MainActivity extends Activity {
     }
 
     private TextView identityBadge(String name, String category, int size) {
-        TextView badge = label(UiKit.monogram(name), Math.max(12, Math.round(size * 0.42f)), Color.WHITE, true);
+        int hue = UiKit.monogramColor(name);
+        TextView badge = label(UiKit.monogram(name), Math.max(12, Math.round(size * 0.42f)), UiKit.monogramInk(hue, INK, dark), true);
         badge.setPadding(0, 0, 0, 0);
         badge.setGravity(Gravity.CENTER);
         badge.setIncludeFontPadding(false);
-        badge.setBackground(rounded(UiKit.monogramColor(name), size / 2));
+        badge.setBackground(rounded(UiKit.blend(hue, SURFACE, dark ? 0.24f : 0.14f), size / 2));
         badge.setContentDescription(name);
         return badge;
     }
@@ -6528,8 +6530,11 @@ public final class MainActivity extends Activity {
         LinearLayout nav = new LinearLayout(this); nav.setGravity(Gravity.CENTER_VERTICAL);
         nav.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         nav.setPadding(dp(8), dp(6), dp(8), dp(8));
-        nav.setBackgroundColor(SURFACE);
-        nav.setElevation(dp(12));
+        // A hairline on top instead of a shadow; the bar sits flat on the page like the cards do.
+        android.graphics.drawable.LayerDrawable navBackground = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
+                new android.graphics.drawable.ColorDrawable(BORDER), new android.graphics.drawable.ColorDrawable(SURFACE)});
+        navBackground.setLayerInset(1, 0, dp(1), 0, 0);
+        nav.setBackground(navBackground);
         String[] labels = {"الرئيسية", "العمليات", "", "الالتزامات", "التحليلات"};
         int[] icons = {R.drawable.ic_nav_home, R.drawable.ic_nav_transactions, R.drawable.ic_plus,
                 R.drawable.ic_calendar, R.drawable.ic_nav_insights};
@@ -6548,12 +6553,16 @@ public final class MainActivity extends Activity {
             }
             boolean active = NavigationState.destination(selectedTab,transactionReturnTab) == tab;
             LinearLayout item = new LinearLayout(this); item.setOrientation(LinearLayout.VERTICAL); item.setGravity(Gravity.CENTER);
-            item.setSelected(active);item.setBackground(active?rounded(BRAND,14):null);
-            ImageView icon = tintedIcon(icons[i], active ? LIME : MUTED);
-            TextView caption = label(labels[i], 11, active ? Color.WHITE : MUTED, active); caption.setGravity(Gravity.CENTER);
+            item.setSelected(active);
+            item.setBackground(new RippleDrawable(ColorStateList.valueOf((ACCENT & 0x00ffffff) | 0x24000000), null, rounded(SURFACE, 16)));
+            // The active tab: a soft pill behind the icon, the icon in the accent and a bold caption; nothing else changes.
+            ImageView icon = tintedIcon(icons[i], active ? ACCENT : MUTED);
+            icon.setPadding(dp(16), dp(4), dp(16), dp(4));
+            icon.setBackground(active ? rounded(ACCENT_PALE, 99) : null);
+            TextView caption = label(labels[i], 11, active ? INK : MUTED, active); caption.setGravity(Gravity.CENTER);
             caption.setPadding(0, 0, 0, 0);
-            LinearLayout.LayoutParams iconSize = new LinearLayout.LayoutParams(dp(24), dp(24));
-            iconSize.bottomMargin = dp(3); item.addView(icon, iconSize); item.addView(caption);
+            LinearLayout.LayoutParams iconSize = new LinearLayout.LayoutParams(dp(56), dp(32));
+            iconSize.bottomMargin = dp(4); item.addView(icon, iconSize); item.addView(caption);
             item.setContentDescription(labels[i]+(active?"، الصفحة الحالية":""));
             LinearLayout.LayoutParams destinationParams=new LinearLayout.LayoutParams(0,dp(60),1);
             destinationParams.setMargins(dp(3),0,dp(3),0);nav.addView(item,destinationParams);
@@ -6646,30 +6655,24 @@ public final class MainActivity extends Activity {
     }
 
     /** Plain text that opens data gets the same visible affordance; filled buttons already have one. */
-    /** Tag for a tappable surface that already reads as one (the home statement card and its stats): no underline. */
-    private static final Object QUIET_ACTION = new Object();
-
+    /**
+     * Inline text that opens data («عرض الكل», «اربطه») is underlined like a link. Tappable rows and cards already read
+     * as tappable (chevron, avatar, card shape), so they get a press ripple clipped to their shape instead of an underline.
+     */
     private void markDetailActions(View view) {
-        if (view.hasOnClickListeners() && view.getTag() != QUIET_ACTION) {
-            TextView title=view instanceof TextView?(TextView)view:firstPlainLabel(view);
-            if (title!=null && !(title instanceof EditText) && title.getBackground()==null)
-                title.setPaintFlags(title.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+        if (view.hasOnClickListeners()) {
+            if (view instanceof TextView) {
+                if (!(view instanceof EditText) && view.getBackground()==null)
+                    ((TextView)view).setPaintFlags(((TextView)view).getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+            } else if (view instanceof android.view.ViewGroup && view.getForeground()==null
+                    && (view.getBackground()==null || view.getBackground() instanceof GradientDrawable)) {
+                view.setForeground(new RippleDrawable(ColorStateList.valueOf((ACCENT & 0x00ffffff) | 0x24000000), null, view.getBackground()));
+            }
         }
         if (view instanceof android.view.ViewGroup) {
             android.view.ViewGroup group=(android.view.ViewGroup)view;
             for (int i=0;i<group.getChildCount();i++) markDetailActions(group.getChildAt(i));
         }
-    }
-
-    private TextView firstPlainLabel(View view) {
-        if (view instanceof TextView && !(view instanceof EditText) && view.getBackground()==null) return (TextView)view;
-        if (view instanceof android.view.ViewGroup) {
-            android.view.ViewGroup group=(android.view.ViewGroup)view;
-            for (int i=0;i<group.getChildCount();i++) {
-                TextView found=firstPlainLabel(group.getChildAt(i));if(found!=null)return found;
-            }
-        }
-        return null;
     }
 
     // ---- التحليلات: one screen that answers, in order: how much, on what, which month rose and why, what needs review ----
