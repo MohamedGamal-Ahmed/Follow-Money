@@ -6,37 +6,11 @@ package com.mohamedgamal.masareef;
  * only on the same amount and direction (a legacy own-account transfer has no in/out, so any direction fits it).
  */
 final class ShadowDiff {
-    enum Outcome {
-        BOTH_SKIP(true), BOTH_RECORD_SAME(true), BOTH_RECORD_DIFFERENT(false), LEGACY_ONLY(false), NEW_ONLY(false);
-        final boolean agrees;
-        Outcome(boolean agrees) { this.agrees = agrees; }
-    }
 
-    static final class Result {
-        final Outcome outcome;
-        /** For BOTH_RECORD_DIFFERENT: AMOUNT, DIRECTION or AMOUNT+DIRECTION; otherwise null. */
-        final String difference;
-        Result(Outcome outcome, String difference) { this.outcome = outcome; this.difference = difference; }
-        boolean agrees() { return outcome.agrees; }
-        @Override public String toString() { return outcome + (difference == null ? "" : ":" + difference); }
-    }
 
     static boolean newRecords(String decision) { return "AUTO".equals(decision) || "REVIEW".equals(decision); }
 
-    /** legacyDirection: out, in or transfer (ShadowStore.legacyDirection); null when legacy recorded nothing. */
-    static Result compare(boolean legacyRecorded, Long legacyAmount, String legacyDirection, String newDecision, Long newAmount, String newDirection) {
-        boolean recorded = newRecords(newDecision);
-        if (!legacyRecorded && !recorded) return new Result(Outcome.BOTH_SKIP, null);
-        if (legacyRecorded && !recorded) return new Result(Outcome.LEGACY_ONLY, null);
-        if (!legacyRecorded) return new Result(Outcome.NEW_ONLY, null);
-        boolean amount = java.util.Objects.equals(legacyAmount, newAmount);
-        boolean direction = "transfer".equals(legacyDirection) || java.util.Objects.equals(legacyDirection, newDirection);
-        if (amount && direction) return new Result(Outcome.BOTH_RECORD_SAME, null);
-        return new Result(Outcome.BOTH_RECORD_DIFFERENT, !amount && !direction ? "AMOUNT+DIRECTION" : !amount ? "AMOUNT" : "DIRECTION");
-    }
 
-    /** Legacy decisions stored by ShadowStore: RECORDED and RECORDED_REVIEW wrote a ledger row; WOULD_RECORD is its opinion after step 7. */
-    static boolean legacyRecorded(String legacyDecision) { return legacyDecision != null && (legacyDecision.startsWith("RECORDED") || legacyDecision.equals("WOULD_RECORD")); }
 
     private ShadowDiff() {}
 }

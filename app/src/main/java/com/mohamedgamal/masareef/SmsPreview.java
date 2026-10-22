@@ -87,16 +87,6 @@ final class SmsPreview {
     private static final java.util.regex.Pattern AMOUNT=java.util.regex.Pattern.compile(
             "(?iu)(?:(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)\\.?\\s*[0-9][0-9,.]*|[0-9][0-9,.]*\\s*(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)(?![\\p{L}]))");
 
-    /**
-     * Conservative support-only selection; never changes parser acceptance or books an operation. A known bank sender,
-     * financial wording, an amount in the text (card-delivery notices, system-maintenance notes and «تم إضافة الراتب»
-     * teasers carry none and are not formats to fix), not an OTP, not a promotion, and refused by the parser.
-     */
-    static boolean canReport(String sender,String body) {
-        return BrandCatalog.bank(sender)!=null && ExpenseParser.isFinancialCandidate(body) && hasAmount(body)
-                && !ExpenseParser.isVerificationMessage(body) && !ExpenseParser.isPromotion(body)
-                && parse(sender,body,0)==null;
-    }
     static boolean hasAmount(String body) { return body!=null && AMOUNT.matcher(ExpenseParser.normalizeDigits(body)).find(); }
 
     /**

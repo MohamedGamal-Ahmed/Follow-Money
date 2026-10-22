@@ -7,7 +7,7 @@ An Arabic Android app for understanding everyday spending, transfers and recurri
 | | |
 | --- | --- |
 | Status | Private project; feature freeze from 14 October 2026 — fixes, testing and Play preparation only |
-| App version | 0.3.4 / versionCode 9 — phone acceptance candidate |
+| App version | 0.4.0 / versionCode 10 — phone acceptance candidate |
 | Platform | Android 8.0+ / API 26+ |
 | Implementation | Java 17, native Android views, SQLite |
 | Services | No backend, account registration or analytics service |
@@ -71,7 +71,7 @@ The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`. Uploa
 
 ### Separate APK for private testers
 
-The `beta` build uses `com.mohamedgamal.masareef.beta`, the launcher/widget label **Follow Money Beta**, and version name `0.3.4-beta`. It inherits release shrinking and disables debugging. Its signature permission is scoped to its application ID, so it can coexist with the original app even with a different signer. Beta data is separate and does not automatically migrate to the production app.
+The `beta` build uses `com.mohamedgamal.masareef.beta`, the launcher/widget label **Follow Money Beta**, and version name `0.4.0-beta`. It inherits release shrinking and disables debugging. Its signature permission is scoped to its application ID, so it can coexist with the original app even with a different signer. Beta data is separate and does not automatically migrate to the production app.
 
 On the original Windows account, create a dedicated Beta key once, then retain that same key for updates:
 
@@ -102,10 +102,11 @@ python tools/check-repo.py
 
 The script runs the standalone JVM suites, assembles the app and instrumentation APK, and runs Android lint. `-Android` also installs both APKs and runs five instrumentation groups (base, phase, features, focused audit regressions and card/cancellation). Use an emulator with synthetic data: these checks exercise writes and repairs. They are deliberately blocked on physical device IDs. Additional installed-update, lifetime and visual checks use separate QA packages so existing emulator data is preserved.
 
-The replacement bank-message parser is waiting for approval of its [v2 corpus draft](tools/fixtures/corpus-v2-draft.md).
-The historical v1 fixture gate still runs on Gradle `check` and `preBuild`; v2 integrity and diagnostic-shape
-checks run in `run-checks.ps1`. These checks do not demonstrate semantic recognition by a replacement pipeline.
-The draft has a separate strict readiness gate and must be approved before pipeline implementation.
+Since 0.4.0 the bank-message pipeline (normalize → classify → extract → score → local learning, checked against the
+approved [v2 corpus](tools/fixtures/corpus-v2-draft.md) and five held-out sets) decides every live message and the
+SMS import. The legacy `ExpenseParser` runs only when the pipeline cannot decide a message, and each such message
+leaves a `PIPELINE_FAILED` note. The historical v1 fixture gate still runs on Gradle `check` and `preBuild`; v2
+integrity and diagnostic-shape checks run in `run-checks.ps1`.
 
 GitHub Actions runs the JVM/build/lint checks, SQLite emulator groups and isolated resource-lifetime regression for pushes and pull requests to `main`. No CI pass or production readiness is implied by the presence of the workflow.
 

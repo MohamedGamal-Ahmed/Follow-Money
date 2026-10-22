@@ -37,18 +37,7 @@ final class ShadowStore {
                 "conflicting INTEGER NOT NULL DEFAULT 0, merchant TEXT, category TEXT, updated_at INTEGER NOT NULL)");
     }
 
-    /** What the legacy path did with the same message, as the shadow store records it. */
-    static String legacyDecision(CaptureResult result) {
-        if (result.transaction == null) return "NOT_RECORDED";
-        return result.transaction.needsReview ? "RECORDED_REVIEW" : "RECORDED";
-    }
 
-    /** Legacy kind expense/income → out/in; other kinds (transfer, fee) keep their name. */
-    static String legacyDirection(String kind) {
-        if ("expense".equals(kind)) return "out";
-        if ("income".equals(kind)) return "in";
-        return kind;
-    }
 
     /**
      * Stores one observation beside the ledger row it decided (transactionId, or null when it recorded nothing). The
@@ -111,7 +100,23 @@ final class ShadowStore {
         row.put("encrypted_body", EvidenceVault.encrypt(sealed.toString()));
         sql.insert("shadow_observations", null, row);
         bound(sql, origin);
-        if ("UNUNDERSTOOD".equals(o.decision) && raw != null) rememberUnunderstood(sql, raw, content, source, o);
+        if (raw != null && ("UNUNDERSTOOD".equals(o.decision) || missedFromBank(source, raw, o))) rememberUnunderstood(sql, raw, content, source, o);
+    }
+
+    /**
+     * Owner decision m6 (0.4.0): a message the pipeline ignored from a known bank or a payment app, naming an amount,
+     * may be a movement it missed; it waits on «رسائل من بنوكك ما اتسجلتش». The user's own ignore rule or dismissal is
+     * not a miss.
+     */
+    static boolean missedFromBank(String source, MessageNormalizer.Raw raw, ParserShadow.Observation o) {
+        if (!"IGNORE".equals(o.decision) || o.reasons.contains("LEARNED_IGNORED_MERCHANT") || o.reasons.contains("LEARNED_DISMISSED_SHAPE")) return false;
+        if (BrandCatalog.bank(source) == null && SourceIdentity.appKey(source) == null) return false;
+        return SmsPreview.hasAmount(MessageNormalizer.normalize(raw).text);
+    }
+
+    /** «تجاهل» on the missed-messages page: the message leaves the list (it returns only if delivered again). */
+    static void dismissUnunderstood(SQLiteDatabase sql, String messageHash) {
+        sql.delete("ununderstood_messages", "message_hash=?", new String[]{messageHash});
     }
 
     /**
@@ -227,95 +232,35 @@ final class ShadowStore {
     static void clearAll(SQLiteDatabase sql) {
         for (String table : new String[]{"shadow_observations", "ununderstood_messages", "learning_rules"}) sql.delete(table, null, null);
         ParserShadow.learning().restoreShapes(new ArrayList<>());
-        ParserShadow.clear();
     }
 
-    /** Removes every stored row of one origin (the previous re-scan before a new one). */
-    static void clearOrigin(SQLiteDatabase sql, String origin) {
-        sql.delete("shadow_observations", "origin=?", new String[]{origin});
-    }
 
-    /** One stored observation, its sealed values opened on this device. */
-    static final class Stored {
-        long id, observedAt, receivedAt;
-        String channel, source, origin, legacyReason, legacyDecision, status, type, decision, scoredDecision, movementKind, reasons, dedupe, dedupeReason;
-        int score;
-        /** True when the sealed values exist but this device can no longer open them. */
-        boolean unreadable;
-        final java.util.Map<String, String> values = new java.util.LinkedHashMap<>(), legacy = new java.util.LinkedHashMap<>();
 
-        Long amount(java.util.Map<String, String> from) {
-            try { return from.containsKey("amount_minor") ? Long.valueOf(from.get("amount_minor")) : null; }
-            catch (NumberFormatException e) { return null; }
-        }
-
-        ShadowDiff.Result diff() {
-            return ShadowDiff.compare(ShadowDiff.legacyRecorded(legacyDecision), amount(legacy), legacy.get("direction"), decision, amount(values), values.get("direction"));
-        }
-    }
-
-    /** Newest first, at most limit rows of one origin ("live" or "rescan"). */
-    static List<Stored> recent(SQLiteDatabase sql, String origin, int limit) {
-        List<Stored> rows = new ArrayList<>();
-        try (Cursor c = sql.rawQuery("SELECT id, observed_at, received_at, channel, source, origin, legacy_reason, legacy_decision, status, type, " +
-                "decision, scored_decision, score, movement_kind, reasons, dedupe, dedupe_reason, encrypted_body FROM shadow_observations " +
-                "WHERE origin=? ORDER BY received_at DESC, id DESC LIMIT ?", new String[]{origin, Integer.toString(limit)})) {
-            while (c.moveToNext()) {
-                Stored s = new Stored();
-                s.id = c.getLong(0); s.observedAt = c.getLong(1); s.receivedAt = c.getLong(2); s.channel = c.getString(3); s.source = c.getString(4);
-                s.origin = c.getString(5); s.legacyReason = c.getString(6); s.legacyDecision = c.getString(7); s.status = c.getString(8);
-                s.type = c.getString(9); s.decision = c.getString(10); s.scoredDecision = c.getString(11); s.score = c.getInt(12);
-                s.movementKind = c.getString(13); s.reasons = c.getString(14); s.dedupe = c.getString(15); s.dedupeReason = c.getString(16);
-                EvidenceVault.Read body = EvidenceVault.read(c.getString(17));
-                s.unreadable = body.failed;
-                if (body.body != null) try {
-                    org.json.JSONObject json = new org.json.JSONObject(body.body);
-                    for (java.util.Iterator<String> k = json.keys(); k.hasNext(); ) {
-                        String key = k.next();
-                        if (!key.equals("legacy")) s.values.put(key, json.getString(key));
-                    }
-                    org.json.JSONObject legacy = json.optJSONObject("legacy");
-                    if (legacy != null) for (java.util.Iterator<String> k = legacy.keys(); k.hasNext(); ) {
-                        String key = k.next();
-                        s.legacy.put(key, legacy.getString(key));
-                    }
-                } catch (org.json.JSONException malformed) { s.unreadable = true; }
-                rows.add(s);
-            }
-        }
-        return rows;
-    }
 
     /** A message the pipeline did not understand, its text opened on this device (null when unreadable). */
     static final class Ununderstood {
         long firstSeen, lastSeen;
         int count;
-        String channel, source, reasons, text;
+        String channel, source, reasons, text, hash;
     }
+
+    /** Every kept message, newest first (at most UNUNDERSTOOD_MAX_ROWS are kept). */
+    static List<Ununderstood> ununderstood(SQLiteDatabase sql) { return ununderstood(sql, ParsingPolicy.UNUNDERSTOOD_MAX_ROWS); }
 
     static List<Ununderstood> ununderstood(SQLiteDatabase sql, int limit) {
         List<Ununderstood> rows = new ArrayList<>();
-        try (Cursor c = sql.rawQuery("SELECT first_seen, last_seen, seen_count, channel, source, reasons, encrypted_body FROM ununderstood_messages " +
+        try (Cursor c = sql.rawQuery("SELECT first_seen, last_seen, seen_count, channel, source, reasons, encrypted_body, message_hash FROM ununderstood_messages " +
                 "ORDER BY last_seen DESC LIMIT ?", new String[]{Integer.toString(limit)})) {
             while (c.moveToNext()) {
                 Ununderstood u = new Ununderstood();
                 u.firstSeen = c.getLong(0); u.lastSeen = c.getLong(1); u.count = c.getInt(2); u.channel = c.getString(3);
-                u.source = c.getString(4); u.reasons = c.getString(5); u.text = EvidenceVault.decrypt(c.getString(6));
+                u.source = c.getString(4); u.reasons = c.getString(5); u.text = EvidenceVault.decrypt(c.getString(6)); u.hash = c.getString(7);
                 rows.add(u);
             }
         }
         return rows;
     }
 
-    /** Row counts: observations of the origin, ununderstood messages, learned shapes. */
-    static long[] counts(SQLiteDatabase sql, String origin) {
-        long[] out = new long[3];
-        String[] queries = {"SELECT COUNT(*) FROM shadow_observations WHERE origin=?", "SELECT COUNT(*) FROM ununderstood_messages",
-                "SELECT COUNT(*) FROM learning_rules"};
-        for (int i = 0; i < queries.length; i++)
-            try (Cursor c = sql.rawQuery(queries[i], i == 0 ? new String[]{origin} : null)) { if (c.moveToFirst()) out[i] = c.getLong(0); }
-        return out;
-    }
 
     private static volatile boolean learningLoaded;
 

@@ -10,45 +10,8 @@ final class ImportBatch {
 
     ImportBatch(ExpenseDb db) { this.db = db; }
 
-    /** Same approved selection without repair, retained for existing callers. */
-    long applySelected(List<SmsPreview> selected) {
-        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
-        try {
-            long before=db.transactionCount();
-            for(SmsPreview row:selected)db.addHistoricalSms(row);
-            long added=db.transactionCount()-before;
-            sql.setTransactionSuccessful();return added;
-        }finally {sql.endTransaction();}
-    }
 
-    /** Activity-owned call returns after commit; failures propagate before the UI writes success flags. */
-    long execute(List<SmsPreview> selected) {
-        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();
-        try {
-            long before=db.transactionCount();applySelected(selected);
-            // Do not run a global transfer repair here: unselected history must stay untouched.
-            long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
-            for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}
-            db.repairBetweenInCallerTransaction(first-86_400_000L,last+86_400_000L);
-            long added=db.transactionCount()-before;
-            sql.setTransactionSuccessful();return added;
-        }finally {sql.endTransaction();}
-    }
 
-    /** The same approved selection without repair, reported per selected row instead of as one ledger delta. */
-    ImportResult applySelectedDetailed(List<SmsPreview> selected) {
-        SQLiteDatabase sql=db.getWritableDatabase();
-        boolean owned=!sql.inTransaction();
-        sql.beginTransaction();
-        try {
-            long revisionBefore=db.changes();
-            List<ImportResult.Row> rows=applyRows(selected);
-            settleSurvivors(rows,null);
-            long revisionAfter=db.changes();
-            sql.setTransactionSuccessful();
-            return ImportResult.of(rows,owned,revisionBefore,revisionAfter,ImportResult.Repair.NONE);
-        }finally {sql.endTransaction();}
-    }
 
     /**
      * The same batch and bounded repair as {@link #execute}, with each selected row's outcome and the repair it

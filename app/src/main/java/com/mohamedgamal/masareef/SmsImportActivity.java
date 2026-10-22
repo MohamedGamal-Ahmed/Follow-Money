@@ -21,14 +21,6 @@ import java.util.*;
 
 /** Choosing a period imports supported SMS. An optional preview keeps manual selection available. */
 public final class SmsImportActivity extends Activity {
-    /** One approved batch; the returned net ledger increase is independent of list pagination. */
-    static long applySelected(ExpenseDb db,List<SmsPreview> selected) {
-        return new ImportBatch(db).applySelected(selected);
-    }
-    /** Compatibility facade for the import use case; its return follows the batch commit. */
-    static long applyBatchWithRepair(ExpenseDb db,List<SmsPreview> selected) {
-        return new ImportBatch(db).execute(selected);
-    }
     /** The review list is a read after the commit: failing to read it must never turn a saved import into a reported failure. */
     static List<CaptureEvents.Event> pendingAfterCommit(ExpenseDb db,long start,long end) {
         try {return new CaptureEvents(db).pendingHistory(start,end);}

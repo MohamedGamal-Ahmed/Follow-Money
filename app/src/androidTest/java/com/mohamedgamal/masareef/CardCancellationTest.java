@@ -74,20 +74,20 @@ final class CardCancellationTest {
         SmsPreview excluded=SmsPreview.parse("BANK","Card purchase at QA EXCLUDED EGP 99",time);excluded.captureStatus=2;
         java.util.List<SmsPreview> rows=java.util.Arrays.asList(debit,cancellation,decline,excluded);SmsPreview.selectForImport(rows);
         java.util.List<SmsPreview> selected=new java.util.ArrayList<>();for(SmsPreview row:rows)if(row.selected)selected.add(row);
-        eq(2,selected.size());eq(1,SmsImportActivity.applySelected(db,selected));eq(1,db.transactionCount());ok(!event().cancelled());ok("needs_confirmation".equals(event().status));eq(1,new CaptureEvents(db).pendingHistory(time-86_400_000L,time+86_400_000L).size());
-        eq(0,SmsImportActivity.applySelected(db,selected));eq(1,scalar("SELECT COUNT(*) FROM capture_events"));eq(1,db.transactionCount());
+        eq(2,selected.size());eq(1,ImportRun.added(db,selected));eq(1,db.transactionCount());ok(!event().cancelled());ok("needs_confirmation".equals(event().status));eq(1,new CaptureEvents(db).pendingHistory(time-86_400_000L,time+86_400_000L).size());
+        eq(0,ImportRun.added(db,selected));eq(1,scalar("SELECT COUNT(*) FROM capture_events"));eq(1,db.transactionCount());
         CaptureEvents store=new CaptureEvents(db);ExpenseDb.Transaction original=store.choices(event()).get(0);store.confirm(event().id,original.id,store.identity(original.id));eq(0,db.transactionCount());ok(event().cancelled());eq(2,store.evidence(event()).size());
     }
     public void testHistoricalCancellationCannotAutoResolveWhenDebitArrivesLater(){
         SmsPreview cancellation=SmsPreview.parse("BANK",cancel(),time+3000),debit=SmsPreview.parse("BANK",debit(),time);
-        eq(1,SmsImportActivity.applySelected(db,java.util.Arrays.asList(cancellation,debit)));eq(1,db.transactionCount());ok("needs_confirmation".equals(event().status));
+        eq(1,ImportRun.added(db,java.util.Arrays.asList(cancellation,debit)));eq(1,db.transactionCount());ok("needs_confirmation".equals(event().status));
         ok(!db.addSms("BANK",debit(),time));eq(1,db.transactionCount());ok(!event().cancelled());
     }
     public void testHistoricalBalanceReceiptPreventsReapplication(){
         SmsPreview balance=SmsPreview.parse("BANK","Your card **1111 available balance EGP 1000",time);ok(balance!=null);
-        eq(0,SmsImportActivity.applySelected(db,java.util.Collections.singletonList(balance)));eq(1,scalar("SELECT COUNT(*) FROM sms_import_receipts"));eq(1,db.smsCaptureStatus(balance.sender,balance.body,balance.receivedAt,balance.captureAt));
+        eq(0,ImportRun.added(db,java.util.Collections.singletonList(balance)));eq(1,scalar("SELECT COUNT(*) FROM sms_import_receipts"));eq(1,db.smsCaptureStatus(balance.sender,balance.body,balance.receivedAt,balance.captureAt));
         db.getWritableDatabase().execSQL("UPDATE balance_snapshots SET balance_minor=77700");
-        eq(0,SmsImportActivity.applySelected(db,java.util.Collections.singletonList(balance)));eq(77700,scalar("SELECT balance_minor FROM balance_snapshots LIMIT 1"));db.clearAllData();eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
+        eq(0,ImportRun.added(db,java.util.Collections.singletonList(balance)));eq(77700,scalar("SELECT balance_minor FROM balance_snapshots LIMIT 1"));db.clearAllData();eq(0,scalar("SELECT COUNT(*) FROM sms_import_receipts"));
     }
     public void testSkippedMessageClearsCancellationStateBeforeNotification(){
         ok(db.addSms("BANK",debit(),time));ok(db.addSms("BANK",cancel(),time+3000));ok(db.lastCaptureEvent()!=null);

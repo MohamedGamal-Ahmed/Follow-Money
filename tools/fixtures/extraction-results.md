@@ -19,7 +19,7 @@ original spelling, so a merchant's original letters (harakat included) are prese
 
 All new vocabulary and limits are in `ParsingPolicy`.
 
-## Shadow comparison (full per-row table: [shadow-comparison-extraction.md](shadow-comparison-extraction.md))
+## Shadow comparison (the per-row legacy-vs-new table and its generator, ShadowComparison, were removed in 0.4.0 with the legacy opinion)
 
 A row counts as correct when the decision equals the expected standalone decision and, for transaction rows, amount,
 currency, direction and merchant key all equal the expectation (null included).

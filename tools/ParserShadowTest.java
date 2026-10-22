@@ -15,14 +15,13 @@ public final class ParserShadowTest {
 
     public static void main(String[] args) throws Exception {
         List<ParserCorpusFixture.Row> rows = ParserCorpusFixture.readV2(Path.of("tools/fixtures/parser-corpus-v2-draft.tsv"));
-        ParserShadow.clear();
         long now = 1_792_600_000_000L;
         for (ParserCorpusFixture.Row row : rows) {
             ParserShadow.Observation seen = ParserShadow.observe(MessageNormalizerTest.raw(row), "LEGACY_REASON", null,
                     Long.parseLong(row.get("received_at_ms")), now++);
             check(seen != null && (seen.status.equals("EXTRACTED") || seen.status.equals("EMPTY")), "Shadow status " + row.get("id") + " " + seen);
             if (seen.status.equals("EXTRACTED")) same(seen.type.toLowerCase(java.util.Locale.ROOT), row.get("expected_type"), "Shadow classification " + row.get("id"));
-            same(seen.decision, ShadowComparison.expectedDecision(row), "Shadow scored decision " + row.get("id"));
+            same(seen.decision, CorpusExpectations.expectedDecision(row), "Shadow scored decision " + row.get("id"));
             check(!"AUTO".equals(seen.decision) || seen.score >= ParsingPolicy.AUTO_THRESHOLD, "Shadow AUTO carries its score " + row.get("id"));
             same(seen.decision, seen.scoredDecision, "Without user data, learning leaves the scored decision " + row.get("id"));
             check(seen.toString().contains(ParserShadow.NOT_IMPLEMENTED), "Unimplemented stages stated " + row.get("id"));
@@ -32,10 +31,8 @@ public final class ParserShadowTest {
                     // The observation's own upper-case codes (PROMO, CLASSIFIED, ...) are vocabulary, not message text.
                     check(!seen.toString().replaceAll("\\b[A-Z][A-Z_]+\\b", "").contains(word), "Message text kept in observation " + row.get("id") + ": " + word);
         }
-        List<ParserShadow.Observation> recent = ParserShadow.recent();
-        same(recent.size(), ParsingPolicy.SHADOW_BUFFER_SIZE, "Bounded in-memory buffer");
-        same(recent.get(recent.size() - 1).observedAt, now - 1, "Newest observation last");
-        check(recent.get(0).policy.contains(ParsingPolicy.CORPUS_CONTRACT), "Observation names its policy and corpus contract");
+        check(ParserShadow.observe(MessageNormalizer.Raw.sms("BANK", "x"), "R", null, now).policy.contains(ParsingPolicy.CORPUS_CONTRACT),
+                "Observation names its policy and corpus contract");
 
         // Legacy merchant compared with the normalized catalog, never written back.
         ParserShadow.Observation agrees = ParserShadow.observe(MessageNormalizer.Raw.sms("BANK", "x"), "INSERTED", "KASHIER*BUTLERS", now);
@@ -61,7 +58,7 @@ public final class ParserShadowTest {
         // The legacy path decides: outside the shadow wiring no production class reads new-stage output.
         Path source = Path.of("app/src/main/java/com/mohamedgamal/masareef");
         List<String> allowed = List.of("ParserShadow.java", "MessageNormalizer.java", "MerchantNormalizer.java", "MerchantCatalogIndex.java",
-                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "PipelineDecider.java", "SmsPreview.java", "ShadowDiff.java", "ShadowOffset.java", "ShadowReport.java", "ShadowRescan.java", "ParserDebugActivity.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
+                "ParsingPolicy.java", "AmountScanner.java", "MessageClassifier.java", "TransactionExtractor.java", "ConfidenceScorer.java", "LocalLearning.java", "ShadowStore.java", "ShadowDedupe.java", "PipelineDecider.java", "SmsPreview.java", "ShadowDiff.java", "ShadowOffset.java", "CaptureTransaction.java", "CaptureRequest.java", "PaymentNotificationListener.java", "ExpenseDb.java");
         try (Stream<Path> files = Files.list(source)) {
             for (Path file : (Iterable<Path>) files::iterator) {
                 String name = file.getFileName().toString();
@@ -113,46 +110,14 @@ public final class ParserShadowTest {
         String db = Files.readString(source.resolve("ExpenseDb.java"), StandardCharsets.UTF_8);
         check(!db.matches("(?s).*\\b(ParserShadow|MessageNormalizer\\.normalize|MerchantCatalogIndex|MessageClassifier|AmountScanner|TransactionExtractor|ConfidenceScorer|LocalLearning)\\b.*"), "Ledger storage never reads shadow output");
 
-        // Agreement used by the debug screen and the re-scan report.
-        same(ShadowDiff.compare(false, null, null, "IGNORE", null, null).toString(), "BOTH_SKIP", "Both skip");
-        same(ShadowDiff.compare(false, null, null, "UNUNDERSTOOD", null, null).toString(), "BOTH_SKIP", "Ununderstood records nothing");
-        same(ShadowDiff.compare(true, 4500L, "out", "AUTO", 4500L, "out").toString(), "BOTH_RECORD_SAME", "Same record");
-        same(ShadowDiff.compare(true, 4500L, "out", "REVIEW", 4500L, "out").agrees(), true, "Review still records");
-        same(ShadowDiff.compare(true, 4500L, "out", "AUTO", 450L, "in").toString(), "BOTH_RECORD_DIFFERENT:AMOUNT+DIRECTION", "Both fields differ");
-        same(ShadowDiff.compare(true, 4500L, "out", "AUTO", 4500L, "in").toString(), "BOTH_RECORD_DIFFERENT:DIRECTION", "Direction differs");
-        same(ShadowDiff.compare(true, 4500L, "transfer", "REVIEW", 4500L, "in").toString(), "BOTH_RECORD_SAME", "Own transfer has no in/out");
-        same(ShadowDiff.compare(true, 4500L, "out", "IGNORE", null, null).toString(), "LEGACY_ONLY", "Legacy only");
-        same(ShadowDiff.compare(false, null, null, "AUTO", 4500L, "out").toString(), "NEW_ONLY", "New only");
-        check(ShadowDiff.legacyRecorded("RECORDED_REVIEW") && !ShadowDiff.legacyRecorded("NOT_RECORDED"), "Legacy decision labels");
-        // The debug screen is read-only and local: no ledger write, no network, not exported.
-        String debug = Files.readString(source.resolve("ParserDebugActivity.java"), StandardCharsets.UTF_8);
-        check(!debug.matches("(?s).*(getWritableDatabase|\\.insert\\(|execSQL|\\.delete\\(|\\.update\\(|HttpURLConnection|java\\.net\\.|Intent\\.ACTION_SEND).*"), "Debug screen is read-only and offline");
-        // The re-scan reads the inbox like the import and writes shadow rows only: no capture, import or ledger table.
-        String rescan = Files.readString(source.resolve("ShadowRescan.java"), StandardCharsets.UTF_8);
-        check(!rescan.matches("(?s).*(addSms|captureSms|captureNotification|ImportBatch|applySelected|\\.execute\\(|INSERT INTO|\"transactions\"|excluded_messages|capture_evidence|sms_import_receipts).*"), "Re-scan records no operation");
-        check(rescan.contains("SmsPreview.parse(sender, body, date, sent)") && rescan.contains("Telephony.Sms.Inbox.CONTENT_URI"), "Re-scan uses the import path");
-        check(rescan.contains("ShadowStore.record(sql, \"rescan\""), "Re-scan rows are tagged");
-        check(rescan.matches("(?s).*private static void submit\\(Context app, Work work\\) \\{\\s*CaptureQueue\\.submit\\(.*") && !rescan.contains("beginTransaction();\n            try {\n                while"), "Re-scan writes only on the capture worker, in short batches");
-        check(debug.contains("ACTION_CREATE_DOCUMENT") && debug.contains("ShadowReport.text("), "Report saved only to a file the user picks");
-        // The report: totals, by source and type, differences; the export has no message text, merchant or counterparty.
-        List<ShadowReport.Row> reportRows = List.of(
-                new ShadowReport.Row("BANK", now, "RECORDED", "PREVIEW_EXPENSE/LEDGER_RECORDED", 4500L, "EGP", "out", "AUTO", 4500L, "EGP", "out", "TRANSACTION", "card_purchase", "COMPLETED_EVENT", 90),
-                new ShadowReport.Row("BANK", now + 1, "RECORDED", "PREVIEW_INCOME/LEDGER_NEW", 1000L, "EGP", "in", "IGNORE", null, null, null, "PROMO", null, "PROMOTIONAL_MESSAGE", -1),
-                new ShadowReport.Row("WALLET", now + 2, "NOT_RECORDED", "NOT_CANDIDATE/LEDGER_NEW", null, null, null, "REVIEW", 25000L, "EGP", "in", "TRANSACTION", "wallet_topup", "POSSIBLE_INTERNAL_TRANSFER", 70));
-        ShadowReport.Summary report = ShadowReport.build(reportRows, 40, 37);
-        same(report.compared() + "/" + report.agreed() + "/" + report.disagree, "40/38/2", "Report totals");
-        same(report.byOutcome.get(ShadowDiff.Outcome.BOTH_SKIP), 37, "Unstored skips counted");
-        same(report.bySource.get("BANK")[0] + "/" + report.bySource.get("BANK")[1], "1/1", "By source");
-        same(report.byType.get("wallet_topup")[1], 1, "By type");
-        same(report.differences.get(0).source, "WALLET", "Newest difference first");
-        String exported = ShadowReport.text(report, "t", java.time.ZoneOffset.UTC);
-        check(exported.contains("| WALLET |") && exported.contains("NEW_ONLY") && exported.contains("250.00 EGP") && exported.contains("LEGACY_ONLY"), "Export lists differences");
-        check(!exported.toLowerCase().matches("(?s).*\\|\\s*(merchant|counterparty|party|text|body)\\s*\\|.*"), "Export has no merchant, party or text column");
-        for (java.lang.reflect.Field field : ShadowReport.Row.class.getDeclaredFields())
-            check(!field.getName().matches("(?i).*(merchant|counterparty|text|body).*"), "Report rows cannot carry message content: " + field.getName());
+        // 0.4.0: the debug screen, the re-scan, its report and the legacy-vs-new comparison are gone.
+        for (String gone : List.of("ParserDebugActivity.java", "ShadowRescan.java", "ShadowReport.java", "DecisionSwitch.java"))
+            check(!Files.exists(source.resolve(gone)), "Removed: " + gone);
         String manifest = Files.readString(Path.of("app/src/main/AndroidManifest.xml"), StandardCharsets.UTF_8);
-        check(manifest.contains("<activity android:name=\".ParserDebugActivity\" android:exported=\"false\" />"), "Debug screen not exported");
-        ParserShadow.clear();
+        check(!manifest.contains("ParserDebugActivity"), "No debug screen in the manifest");
+        String diff = Files.readString(source.resolve("ShadowDiff.java"), StandardCharsets.UTF_8);
+        check(!diff.contains("compare(") && !diff.contains("legacyRecorded"), "ShadowDiff keeps newRecords only");
+        check(ShadowDiff.newRecords("AUTO") && ShadowDiff.newRecords("REVIEW") && !ShadowDiff.newRecords("IGNORE") && !ShadowDiff.newRecords("UNUNDERSTOOD"), "AUTO and REVIEW record");
         System.out.println("Parser shadow checks passed: " + checks + " (" + rows.size() + " corpus rows observed; the new pipeline decides; legacy only when it fails).");
     }
 }

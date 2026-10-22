@@ -1,6 +1,5 @@
 package com.mohamedgamal.masareef;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -60,7 +59,6 @@ final class ParserShadow {
         }
     }
 
-    private static final ArrayDeque<Observation> RECENT = new ArrayDeque<>();
 
     /**
      * Observes one message after the legacy path decided it. legacyMerchant is the merchant the legacy path stored,
@@ -112,21 +110,10 @@ final class ParserShadow {
             observation = new Observation(now, raw.channel.name(), legacyReason, "STAGE_FAILED:" + failure.getClass().getSimpleName(),
                     new LinkedHashSet<>(), 0, 0, new ArrayList<>(), null, null, null, null, new ArrayList<>());
         }
-        synchronized (RECENT) {
-            RECENT.addLast(observation);
-            while (RECENT.size() > ParsingPolicy.SHADOW_BUFFER_SIZE) RECENT.removeFirst();
-        }
         return observation;
     }
 
-    /** Newest last; a copy, for a future local debug screen. */
-    static List<Observation> recent() {
-        synchronized (RECENT) { return new ArrayList<>(RECENT); }
-    }
 
-    static void clear() {
-        synchronized (RECENT) { RECENT.clear(); }
-    }
 
     private ParserShadow() {}
 }

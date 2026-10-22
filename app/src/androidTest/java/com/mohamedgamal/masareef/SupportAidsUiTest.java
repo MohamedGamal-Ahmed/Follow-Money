@@ -76,9 +76,10 @@ final class SupportAidsUiTest {
             target.getSharedPreferences("notification_settings",0).edit().putBoolean("access_prompted",true).commit();
             main=(MainActivity)runner.startActivitySync(new Intent(target,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));idle();
             if("support_crash".equals(mode)){
-                mainCall("debugCrashDialog");
+                // 0.4.0: no crash button in the app any more; the QA package crashes its own main thread.
                 Bundle marker=new Bundle();marker.putString("stream","Triggering expected debug crash\n");runner.sendStatus(0,marker);
-                click("إحداث العطل");throw new AssertionError("Debug crash did not terminate the process");
+                main.runOnUiThread(()->{throw new IllegalStateException("Synthetic debug crash");});
+                android.os.SystemClock.sleep(5000);throw new AssertionError("Debug crash did not terminate the process");
             }
             if("support_battery_allowed".equals(mode)){
                 android.os.PowerManager power=(android.os.PowerManager)target.getSystemService(Context.POWER_SERVICE);
@@ -112,6 +113,23 @@ final class SupportAidsUiTest {
                 // 0.4.0: the import lists only what the new pipeline reads; unknown formats are no longer offered from here.
                 ok(!has("أرسل صيغتها")&&!has("صيغة غير متعرّفة"),"The import still offers unknown formats for support");
                 ok(AppResources.database(target).transactionCount()==0,"Support preview wrote a financial transaction");
+                runner.runOnMainSync(sms::finish);sms=null;idle();
+                // m6 (0.4.0): a message from a known bank that the pipeline did not record, and that names an amount, waits on
+                // «رسائل من بنوكك ما اتسجلتش» with its text redacted, to report or dismiss. Other senders never appear there.
+                ExpenseDb store=AppResources.database(target);long now=System.currentTimeMillis();
+                store.captureSms("HSBC","Your card ****4321 statement is issued with total EGP 7000, minimum due is EGP 6000, due before 26-11-2026",now);
+                store.captureSms("QASHOP","QASHOP offer: EGP 100 off your next order today only",now+1000);
+                ok(store.transactionCount()==0,"A message the pipeline did not record became an operation");
+                settings("capture");ok(has("رسائل من بنوكك ما اتسجلتش"),"Missed bank messages row absent from capture settings");
+                click("رسائل من بنوكك ما اتسجلتش");
+                ok(has("minimum due")&&!has("4321")&&!has("7000"),"Missed message not shown redacted");
+                ok(!has("QASHOP"),"A non-bank sender listed as a missed bank message");
+                ok(has("بلّغ عنها")&&has("تجاهل"),"Report and dismiss actions absent");shot(target,"04-missed-bank-messages");
+                click("بلّغ عنها");ok(has("الرسالة اتقرت غلط؟")&&has("المرسل: HSBC"),"Report draft did not open with the message");
+                Intent missed=interceptMail();
+                ok(missed!=null&&missed.getStringExtra(Intent.EXTRA_TEXT).contains("minimum due")&&!missed.getStringExtra(Intent.EXTRA_TEXT).contains("4321"),"Report draft not redacted");
+                settings("missed");click("تجاهل");
+                ok(!has("minimum due")&&has("مفيش رسائل"),"Dismissed message still listed");
             }
             result.putString("stream","Support aids UI checks passed: "+checked+"; mode="+mode+"\n");
         }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Support aids UI FAILED: "+trace);}

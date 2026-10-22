@@ -61,7 +61,7 @@ allprojects { p ->
         $result
         if ($LASTEXITCODE -ne 0 -or ($result -join "`n") -notmatch 'Support aids UI checks passed: [1-9][0-9]*' -or ($result -join "`n") -match 'FAILED|Process crashed') { throw "Support QA failed: $mode" }
     }
-    foreach ($name in @('01-crash-preview','02-battery-restricted','03-battery-exempt')) {
+    foreach ($name in @('01-crash-preview','02-battery-restricted','03-battery-exempt','04-missed-bank-messages')) {
         $destination = Join-Path (Get-Location) ".tmp/support-aids/$name.png"
         & cmd.exe /c "`"$adb`" -s $Device exec-out run-as $appId cat cache/support-aids/$name.png > `"$destination`""
         if ($LASTEXITCODE -ne 0 -or (Get-Item $destination).Length -lt 1000) { throw "Screenshot pull failed: $name" }

@@ -34,8 +34,8 @@ public final class ConfidenceScorerTest {
         int changed = 0;
         for (ParserCorpusFixture.Row row : rows) {
             TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
-            ConfidenceScorer.Confidence c = ShadowComparison.confidence(MessageNormalizerTest.raw(row), Long.parseLong(row.get("received_at_ms")), x);
-            same(c.decision, ShadowComparison.expectedDecision(row), "Corpus decision " + row.get("id") + " score " + c.score + " " + c.components);
+            ConfidenceScorer.Confidence c = CorpusExpectations.confidence(MessageNormalizerTest.raw(row), Long.parseLong(row.get("received_at_ms")), x);
+            same(c.decision, CorpusExpectations.expectedDecision(row), "Corpus decision " + row.get("id") + " score " + c.score + " " + c.components);
             if (!c.decision.equals(x[0].decision)) changed++;
             if (c.decision.equals("AUTO")) check(c.score >= ParsingPolicy.AUTO_THRESHOLD, "AUTO below threshold " + row.get("id"));
         }
@@ -43,7 +43,7 @@ public final class ConfidenceScorerTest {
         for (Map<String, String> h : HeldOutBlind.read(Path.of("tools/fixtures/held-out-blind.tsv"))) {
             MessageNormalizer.Raw raw = "sms".equals(h.get("channel")) ? MessageNormalizer.Raw.sms("held-out", h.get("body")) :
                     MessageNormalizer.Raw.notification("held-out", 0, h.get("android.title"), h.get("android.text"), null, h.get("android.textLines"), null, null);
-            same(ShadowComparison.confidence(raw, received, new TransactionExtractor.Extraction[1]).decision, h.get("expected_decision"), "Held-out decision " + h.get("id"));
+            same(CorpusExpectations.confidence(raw, received, new TransactionExtractor.Extraction[1]).decision, h.get("expected_decision"), "Held-out decision " + h.get("id"));
         }
 
         // Paths the corpus does not reach.
@@ -82,12 +82,12 @@ public final class ConfidenceScorerTest {
             {"Paid EGP 80.00 at CAFE ONE. A service fee of EGP 2.00 will be charged next month.", "AUTO", "AMOUNT_UNAMBIGUOUS"},
         };
         for (String[] probe : safety) {
-            ConfidenceScorer.Confidence c = ShadowComparison.confidence(MessageNormalizer.Raw.sms("probe", probe[0]), received, new TransactionExtractor.Extraction[1]);
+            ConfidenceScorer.Confidence c = CorpusExpectations.confidence(MessageNormalizer.Raw.sms("probe", probe[0]), received, new TransactionExtractor.Extraction[1]);
             same(c.decision, probe[1], "Safety probe decision: " + probe[0] + " " + c.reasons);
             check(c.reasons.contains(probe[2]), "Safety probe reason " + probe[2] + ": " + probe[0] + " " + c.reasons);
         }
         TransactionExtractor.Extraction[] paren = new TransactionExtractor.Extraction[1];
-        ShadowComparison.confidence(MessageNormalizer.Raw.sms("probe", safety[4][0]), received, paren);
+        CorpusExpectations.confidence(MessageNormalizer.Raw.sms("probe", safety[4][0]), received, paren);
         same(paren[0].currency + " " + paren[0].amountMinor + " / " + paren[0].originalCurrency + " " + paren[0].originalMinor, "EUR 460 / USD 500",
                 "Parenthesized different-currency amount is the equivalent");
 

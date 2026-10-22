@@ -2377,6 +2377,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      * Rows an older parser booked from HSBC's trailing-sign alerts: a "+" credit saved as spending, or the bank name
      * saved as the merchant. Reads the stored source message; user edits, linked rows (refund, card settlement,
      * commitment payment, reconciled transfer) and unreadable evidence are left alone.
+     * m7 (0.4.0): kept with REPAIR_VERSION 3 for one more round. Rows written by the legacy parser before 0.3.1 on
+     * Beta 0.2.x phones have not run this repair yet; remove it in 0.4.x once every tester has upgraded.
      */
     private int repairTrailingSigns() {
         java.util.Map<Long,String[]> evidence=new java.util.LinkedHashMap<>();
@@ -2590,86 +2592,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
     }
 
-    /** Only combines already confirmed own-transfer legs with unique matching accounts and amounts.
-     * Amount/time alone never establishes ownership. Unconfirmed expenses stay visible for review. */
-    public long lastRepairSum;
-    public int repairOwnTransfers(boolean apply) {
-        int pairs=0; lastRepairSum=0;
-        java.util.Set<Long> used=new java.util.HashSet<>();
-        List<Transaction> rows=transactionsBetween(LocalDate.of(1970,1,1),LocalDate.now().plusDays(1));
-        SQLiteDatabase writable=getWritableDatabase();
-        if(apply) writable.beginTransaction();
-        try {
-            for(Transaction debit:rows) {
-                if(!"transfer".equals(debit.kind) || debit.paymentSourceId==null || debit.destinationSourceId!=null || used.contains(debit.id)) continue;
-                List<Transaction> candidates=new ArrayList<>();
-                for(Transaction credit:rows) {
-                    if(used.contains(credit.id) || !"transfer".equals(credit.kind) || credit.paymentSourceId!=null || credit.destinationSourceId==null ||
-                            debit.paymentSourceId.equals(credit.destinationSourceId) || debit.amountMinor!=credit.amountMinor ||
-                            !debit.currency.equals(credit.currency) || Math.abs(debit.when-credit.when)>120000) continue;
-                    candidates.add(credit);
-                }
-                if(candidates.size()!=1) continue;
-                Transaction credit=candidates.get(0);
-                int reverse=0;
-                for(Transaction other:rows) if("transfer".equals(other.kind) && other.paymentSourceId!=null && other.destinationSourceId==null &&
-                        !other.paymentSourceId.equals(credit.destinationSourceId) && other.amountMinor==credit.amountMinor &&
-                        other.currency.equals(credit.currency) && Math.abs(other.when-credit.when)<=120000) reverse++;
-                if(reverse!=1) continue;
-                if(apply&&!mergeEntries(debit.id,credit.id,"confirmed own transfer: debit and credit legs"))continue;
-                used.add(debit.id);used.add(credit.id);pairs++;lastRepairSum+=debit.amountMinor;
-            }
-            if(apply) writable.setTransactionSuccessful();
-            return pairs;
-        } finally { if(apply) writable.endTransaction(); }
-    }
 
-    /** Aggregates only (no message text) that explain where a period's totals come from. */
-    public String diagnostics(LocalDate start, LocalDate end) {
-        long from = start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        long to = end.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        String[] range = {Long.toString(from), Long.toString(to)};
-        StringBuilder out = new StringBuilder("تشخيص Follow Money · " + start + " → " + end.minusDays(1) + "\n");
-        out.append("\n== حسب النوع والتصنيف (EGP) ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT kind, category, COUNT(*), SUM(amount_minor) FROM transactions " +
-                "WHERE currency='EGP' AND occurred_at>=? AND occurred_at<? GROUP BY kind, category ORDER BY SUM(amount_minor) DESC", range)) {
-            while (c.moveToNext()) out.append(c.getString(0)).append(" · ").append(c.getString(1)).append(" · ")
-                    .append(c.getInt(2)).append(" عملية · ").append(String.format(Locale.ROOT, "%,.2f", c.getLong(3) / 100.0)).append("\n");
-        }
-        out.append("\n== حسب المصدر والحساب ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT t.kind, t.source, COALESCE(p.name || ' ' || COALESCE(p.last4,''), 'بدون حساب'), " +
-                "COUNT(*), SUM(t.amount_minor) FROM transactions t LEFT JOIN payment_sources p ON p.id=COALESCE(t.payment_source_id, t.destination_source_id) " +
-                "WHERE t.currency='EGP' AND t.occurred_at>=? AND t.occurred_at<? GROUP BY 1,2,3 ORDER BY 5 DESC LIMIT 25", range)) {
-            while (c.moveToNext()) out.append(c.getString(0)).append(" · ").append(c.getString(1)).append(" · ").append(c.getString(2))
-                    .append(" · ").append(c.getInt(3)).append(" · ").append(String.format(Locale.ROOT, "%,.2f", c.getLong(4) / 100.0)).append("\n");
-        }
-        out.append("\n== حسب الشهر: دخل / خرج / بين حساباتك ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT strftime('%Y-%m', occurred_at/1000, 'unixepoch', 'localtime') m, " +
-                "SUM(CASE WHEN kind='income' THEN amount_minor ELSE 0 END), SUM(CASE WHEN kind='expense' THEN amount_minor ELSE 0 END), " +
-                "SUM(CASE WHEN kind='transfer' THEN amount_minor ELSE 0 END) FROM transactions WHERE currency='EGP' AND occurred_at>=? AND occurred_at<? " +
-                "GROUP BY m ORDER BY m", range)) {
-            while (c.moveToNext()) out.append(c.getString(0)).append(String.format(Locale.ROOT, " · %,.0f / %,.0f / %,.0f\n",
-                    c.getLong(1) / 100.0, c.getLong(2) / 100.0, c.getLong(3) / 100.0));
-        }
-        out.append("\n== مكرر محتمل: نفس النوع والمبلغ في خلال دقيقتين ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT a.kind, a.source, b.source, COUNT(*), SUM(a.amount_minor) FROM transactions a " +
-                "JOIN transactions b ON a.id>b.id AND a.amount_minor=b.amount_minor AND a.kind=b.kind AND a.currency=b.currency " +
-                "AND ABS(a.occurred_at-b.occurred_at)<=120000 WHERE a.currency='EGP' AND a.occurred_at>=? AND a.occurred_at<? " +
-                "GROUP BY 1,2,3 ORDER BY 5 DESC", range)) {
-            boolean any = false;
-            while (c.moveToNext()) {
-                any = true;
-                out.append(c.getString(0)).append(" · ").append(c.getString(1)).append(" + ").append(c.getString(2)).append(" · ")
-                        .append(c.getInt(3)).append(" زوج · ").append(String.format(Locale.ROOT, "%,.2f", c.getLong(4) / 100.0)).append("\n");
-            }
-            if (!any) out.append("مفيش\n");
-        }
-        int pairs = repairOwnTransfers(false);
-        out.append("\n== تحويلات بين حساباتك لسه متسجلة صرف ودخل ==\n").append(pairs).append(" زوج · ")
-                .append(String.format(Locale.ROOT, "%,.2f", lastRepairSum / 100.0)).append(" (كل السنين)\n");
-        out.append("\nعدد الحسابات المكتشفة: ").append(paymentSources().size()).append("\n");
-        return out.toString();
-    }
 
     /** InstaPay bill payments name the service without an amount; they can still close a matching commitment. */
 

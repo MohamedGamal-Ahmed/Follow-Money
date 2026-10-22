@@ -449,18 +449,6 @@ public final class ExpenseParser {
                 .matcher(text).find();
     }
 
-    /** Prioritizes completed-looking messages for review without booking them as expenses. */
-    public static boolean isCompletedFinancialCandidate(String body) {
-        if (!isFinancialCandidate(body) || isPromotion(body) || isUnsuccessful(body) || isFutureOnly(body)) return false;
-        String text = normalizeDigits(body);
-        if (Pattern.compile("(?i)(نذكرك|بنفكرك|يرجى|جاهز[ة]?\\s+للدفع|طلب\\s+سداد|" +
-                "للتقديم|خصومات|خصم\\s+على|العرض\\s+سار|offer\\s+valid|payment\\s+due)")
-                .matcher(text).find()) return false;
-        return Pattern.compile("(?i)(successfully\\s+purchased|has\\s+been\\s+deducted|" +
-                "you\\s+have\\s+added\\s+balance|تم\\s+تنفيذ\\s+تحويل|تم\\s+شحن|" +
-                "تم\\s+(?:خصم|دفع|سداد)|successful\\s+transaction)")
-                .matcher(text).find();
-    }
 
     /** Uses a stated transaction date/time when available; otherwise keeps the message timestamp. */
     public static long eventTime(String body, long receivedAt) {

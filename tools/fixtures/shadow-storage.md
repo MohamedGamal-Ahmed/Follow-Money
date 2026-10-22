@@ -1,5 +1,7 @@
 # Shadow storage (step 2 of the device phase)
 
+> **0.4.0 (22 Oct 2026):** the new pipeline decides every message, so these tables now store its decisions (origin `live`, and `import` for the SMS import, bounded apart). The hidden debug screen (`ParserDebugActivity`), its seven-tap gesture, the shadow re-scan (`ShadowRescan`, origin `rescan`), its report and the legacy opinion are removed; the sections about them below are history. `ununderstood_messages` also keeps messages the pipeline ignored from a known bank or payment app that name an amount; its one reader is Settings → التقاط العمليات → «رسائل من بنوكك ما اتسجلتش».
+
 Schema v26 adds three tables (`ShadowStore`), created on install and on upgrade from any older schema. None of them is tracked by `LedgerRevision`, so a shadow write never counts as a ledger change and recording behaviour is unchanged. Legacy remains the only decision-maker.
 
 | Table | One row per | Plain columns | Sealed by EvidenceVault (`encrypted_body`) |

@@ -73,7 +73,7 @@ That path never triggers on the corpus or the held-out set. `ConfidenceScorerTes
 score of 60 gives REVIEW, 40 gives UNUNDERSTOOD, exactly 80 gives AUTO; a hard failure beats a score of 100; each
 review cap blocks AUTO.
 
-## Shadow comparison (full per-row table: [shadow-comparison-confidence.md](shadow-comparison-confidence.md))
+## Shadow comparison (the per-row legacy-vs-new table and its generator, ShadowComparison, were removed in 0.4.0 with the legacy opinion)
 
 Same scoring as phase 3: decision plus principal fields. Both correct 159, **new correct and legacy wrong 210,
 legacy correct and new wrong 0**, both wrong 0.

@@ -31,8 +31,8 @@ public final class TransactionExtractorTest {
         int compared = 0, listed = 0, kinds = 0;
         for (ParserCorpusFixture.Row row : rows) {
             String id = row.get("id");
-            TransactionExtractor.Extraction x = ShadowComparison.extract(row);
-            same(x.decision, ShadowComparison.expectedDecision(row), "Decision " + id + " " + x.reasons);
+            TransactionExtractor.Extraction x = CorpusExpectations.extract(row);
+            same(x.decision, CorpusExpectations.expectedDecision(row), "Decision " + id + " " + x.reasons);
             if (!"transaction".equals(row.get("expected_type"))) continue;
             Map<String, String> got = new LinkedHashMap<>();
             for (String field : FIELDS) got.put(field, value(x, field));
@@ -53,7 +53,7 @@ public final class TransactionExtractorTest {
             }
             if (row.get("expected_counterparty_token") != null) same(x.counterparty, row.get("expected_counterparty_token"), "Counterparty " + id);
             if ("expense_offset".equals(row.get("expected_accounting_effect"))) same(x.accountingEffect, "expense_offset", "Reversal offsets expense " + id);
-            if (!ShadowComparison.expectedDecision(row).equals("UNUNDERSTOOD") && row.get("expected_standalone_decision") == null)
+            if (!CorpusExpectations.expectedDecision(row).equals("UNUNDERSTOOD") && row.get("expected_standalone_decision") == null)
                 for (String reason : row.get("required_reasons").split("\\|")) check(x.reasons.contains(reason), id + " missing reason " + reason + " " + x.reasons);
         }
         same(listed, KNOWN_DISAGREEMENTS.size(), "Every listed disagreement is still a disagreement");
@@ -102,7 +102,7 @@ public final class TransactionExtractorTest {
             case "expected_currency": return x.currency;
             case "expected_direction": return x.direction;
             case "expected_merchant_key": return x.merchantKey;
-            default: return ShadowComparison.secondary(x, field);
+            default: return CorpusExpectations.secondary(x, field);
         }
     }
 }

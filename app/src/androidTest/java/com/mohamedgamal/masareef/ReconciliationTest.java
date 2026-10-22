@@ -28,8 +28,7 @@ public final class ReconciliationTest extends Instrumentation {
     private String confirmedCardLink;
     private boolean captureBalances;
     private boolean captureRing;
-    private String rescanAudit,expectedBefore,rescanReport,shapeReport,shapeSender,shapeGroup;
-    @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));rescanAudit=args.getString("rescan_audit");rescanReport=args.getString("rescan_report");shapeReport=args.getString("shape_report");shapeSender=args.getString("shape_sender");shapeGroup=args.getString("shape_group");expectedBefore=args.getString("expected_before");featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
+    @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
     @Override public void onStart() {
         if(featureAudit!=null&&featureAudit.startsWith("source_link_")){new SourceLinkUiTest(this).run(!"source_link_light".equals(featureAudit),"source_link_max".equals(featureAudit)?2f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("transactions_")){new TransactionPagesUiTest(this).run(!"transactions_light".equals(featureAudit),"transactions_max".equals(featureAudit)?2f:1f);return;}
@@ -39,8 +38,6 @@ public final class ReconciliationTest extends Instrumentation {
         if("points_ui".equals(featureAudit)){new DailyPointsUiTest(this).run();return;}
         if("notification_capture".equals(featureAudit)){new NotificationCaptureTest(this).run();return;}
         if("shadow_store".equals(featureAudit)){new ShadowStoreTest(this).run();return;}
-        if("shadow_rescan_report".equals(featureAudit)){new ShadowRescanAudit(this,rescanReport).run();return;}
-        if("shadow_shapes".equals(featureAudit)){new ShadowShapeAudit(this,shapeReport,shapeSender,shapeGroup).run();return;}
         if("merchant_badges".equals(featureAudit)){new MerchantBadgeUiTest(this).run();return;}
         if("commitment_ui".equals(featureAudit)){new CommitmentPaymentUiTest(this).run();return;}
         if("commitment_cycle_ui".equals(featureAudit)){new CommitmentCycleUiTest(this).run();return;}
@@ -63,7 +60,6 @@ public final class ReconciliationTest extends Instrumentation {
         if("visual".equals(featureAudit)){new ReleaseVisualTest(this).run();return;}
         if("regressions".equals(featureAudit)){new AuditRegressionTest(this).run();return;}
         if(journeyUi){new JourneyUiTest(this).run();return;}
-        if(rescanAudit!=null){new RescanAudit(this).run(rescanAudit,expectedBefore);return;}
         if (featureAudit != null) { new FeatureAuditTest(this).run(featureAudit); return; }
         if(captureBalances) {
             Bundle result=new Bundle();
@@ -648,7 +644,7 @@ public final class ReconciliationTest extends Instrumentation {
         db=new ExpenseDb(context);
         assertEquals(1072,scalar("SELECT COUNT(*) FROM transactions"));
         List<String> lines=Files.readAllLines(new File(fixture,"messages.tsv").toPath(),StandardCharsets.UTF_8);
-        replay(lines);db.repairOwnTransfers(true);
+        replay(lines);db.repairAll();
         assertNull(db.transactionById(1072));assertNull(db.transactionById(1073));
         assertNotNull(db.transactionById(1069));assertNotNull(db.transactionById(1071));
         assertEquals(Long.valueOf(3),db.transactionById(1071).destinationSourceId);
@@ -666,7 +662,7 @@ public final class ReconciliationTest extends Instrumentation {
         long count=scalar("SELECT COUNT(*) FROM transactions"),sum=scalar("SELECT SUM(amount_minor) FROM transactions WHERE currency='EGP'"),
                 evidence=scalar("SELECT COUNT(*) FROM capture_evidence"),paid=scalar("SELECT SUM(paid_count) FROM recurring");
         exportSnapshot(new File(fixture,"first.db"));
-        replay(lines);db.repairOwnTransfers(true);
+        replay(lines);db.repairAll();
         exportSnapshot(new File(fixture,"second.db"));
         assertEquals(count,scalar("SELECT COUNT(*) FROM transactions"));
         assertEquals(sum,scalar("SELECT SUM(amount_minor) FROM transactions WHERE currency='EGP'"));
@@ -699,7 +695,7 @@ public final class ReconciliationTest extends Instrumentation {
                 org.json.JSONArray ids=item.getJSONArray("sources");for(int j=0;j<ids.length();j++) sources.add(ids.getLong(j));
                 target.reconcileIncome(item.getLong("id"),sources);
             }
-            if(plan.optBoolean("repair_other_transfers",true))target.repairOwnTransfers(true);
+            if(plan.optBoolean("repair_other_transfers",true))target.repairAll();
             writable.setTransactionSuccessful();
         } finally {writable.endTransaction();}
     }

@@ -651,7 +651,8 @@ public final class MainActivity extends Activity {
                 "capture".equals(settingsSection)?"التقاط العمليات":
                 "appearance".equals(settingsSection)?"المظهر والملف الشخصي":
                 "alerts".equals(settingsSection)?"الإشعارات والتذكير":
-                "data".equals(settingsSection)?"البيانات والخصوصية":"المساعدة وعن التطبيق";
+                "data".equals(settingsSection)?"البيانات والخصوصية":
+                "missed".equals(settingsSection)?"رسائل من بنوكك ما اتسجلتش":"المساعدة وعن التطبيق";
         LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.addView(iconButton(R.drawable.ic_chevron_back,"رجوع",this::backFromSettings),new LinearLayout.LayoutParams(dp(44),dp(44)));
         LinearLayout.LayoutParams heading=new LinearLayout.LayoutParams(0,-2,1);heading.setMarginStart(dp(10));
@@ -721,6 +722,10 @@ public final class MainActivity extends Activity {
                 setting(hasNotificationAccess()?"الوصول للإشعارات: مفعل":"تفعيل الوصول للإشعارات",this::openNotificationSettings);
                 setting("حساباتك على إنستاباي",this::ownHandlesDialog);
                 setting("قواعد التجار والتصنيف",()->{selectedTab=7;render();});
+                setting("رسائل من بنوكك ما اتسجلتش",()->{settingsSection="missed";render();});
+                break;
+            case "missed":
+                missedBankMessages();
                 break;
             case "appearance":
         setting("اسم العرض على الرئيسية", this::displayNamePage);
@@ -782,30 +787,17 @@ public final class MainActivity extends Activity {
                 setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("استيراد معاملات CSV",this::chooseCsvImport);
                 setting("تصدير معاملات "+selectedMonth.toString().substring(0,7)+" CSV",this::exportCsv);
+                setting("فحص البيانات وإصلاحها",()->runRepair(true));
+                note("يلاقي الإعلانات اللي اتسجلت عمليات، والعمليات والإيصالات المكررة، والتحويلات بين حساباتك اللي اتسجلت صرف ودخل، ويصلحها.");
                 section("نسخة احتياطية",null,null);
                 long lastBackup=LocalBackup.lastBackupAt(this);
                 note(lastBackup==0?"لسه ما عملتش نسخة. ملف واحد مشفر بكلمة سر تختارها، يتحفظ في المكان اللي تختاره ويرجع على أي جهاز."
                         :"آخر نسخة: "+Instant.ofEpochMilli(lastBackup).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL));
                 setting("نسخة احتياطية",this::backupDialog);
                 setting("استعادة نسخة",this::chooseRestore);
-                if(BuildConfig.DEBUG) {
-                    section("أدوات المراجعة",null,null);
-                    setting("تصحيح البيانات: إعلانات وتكرار وتحويلات داخلية",()->runRepair(true));
-                    setting("فحص تغطية رسائل SMS",this::smsCoverageDialog);
-                    setting("تقرير تشخيص الأرقام",this::diagnosticsDialog);
-                    setting("مراجعة التحويلات بين حساباتك",this::repairTransfersDialog);
-                    setting("عينات رسائل البنوك",this::messageSamples);
-                    setting("عطل تجريبي",this::debugCrashDialog);
-                }
                 // Keep access to existing records without promoting unused financial modules.
                 if(!db.assets().isEmpty())setting("الأصول المسجلة",()->{selectedTab=8;render();});
                 if(!db.debts().isEmpty())setting("الديون المسجلة",()->{selectedTab=9;render();});
-                if(BuildConfig.DEBUG||getPreferences(MODE_PRIVATE).getBoolean(ParserDebugActivity.ENABLED_KEY,false)){
-                    section("إعدادات متقدمة",null,null);
-                    setting("رسائل لم أفهمها",()->startActivity(new Intent(this,ParserDebugActivity.class).putExtra(ParserDebugActivity.VIEW_EXTRA,"ununderstood")));
-                    setting("رسائل لم تُسجَّل (للمعلومة)",()->startActivity(new Intent(this,ParserDebugActivity.class).putExtra(ParserDebugActivity.VIEW_EXTRA,"unrecorded")));
-                    setting("تشخيص المحلل (الفروق أولًا بأول)",()->startActivity(new Intent(this,ParserDebugActivity.class)));
-                }
                 section("حذف البيانات",null,null);
         setting("حذف كل البيانات المحلية", () -> new ChoiceDialogBuilder()
                 .setTitle("حذف كل البيانات؟")
@@ -814,7 +806,6 @@ public final class MainActivity extends Activity {
                     db.clearAllData();
                     getSharedPreferences(DailySummary.SETTINGS,MODE_PRIVATE).edit().clear().apply();
                     getSharedPreferences(DailyPointsStore.SETTINGS,MODE_PRIVATE).edit().clear().apply();
-                    getSharedPreferences(ShadowRescan.PREFS,MODE_PRIVATE).edit().clear().apply();
                     getPreferences(MODE_PRIVATE).edit().putBoolean("initial_sms_import_done", true).apply();
                     selectedTab = 0; render();
                     toast("تم حذف البيانات المحلية");
@@ -822,7 +813,6 @@ public final class MainActivity extends Activity {
                 break;
             default:
                 note("Follow Money · "+GitHubSupport.version(this));
-                parserDebugGesture(page.getChildAt(page.getChildCount()-1));
                 setting("ما الجديد",this::whatsNewDialog);
                 setting("سياسة الخصوصية",this::privacyPolicyDialog);
                 setting("الإبلاغ عن مشكلة",this::reportProblem);
@@ -866,6 +856,7 @@ public final class MainActivity extends Activity {
         all.add(new SettingEntry("الوصول للإشعارات", "notification access listener إذن", "capture", hasNotificationAccess() ? "الوصول للإشعارات" : "تفعيل الوصول للإشعارات"));
         all.add(new SettingEntry("حساباتك على إنستاباي", "instapay handles ipa تحويل", "capture", "حساباتك على إنستاباي"));
         all.add(new SettingEntry("قواعد التجار والتصنيف", "merchant rules category تصنيف تاجر", "capture", "قواعد التجار"));
+        all.add(new SettingEntry("رسائل من بنوكك ما اتسجلتش", "missed bank messages not recorded report رسائل لم تسجل بلاغ", "capture", "رسائل من بنوكك"));
         all.add(new SettingEntry("اسم العرض على الرئيسية", "name profile display اسم", "appearance", "اسم العرض"));
         all.add(new SettingEntry("الوضع الليلي والفاتح", "dark mode theme night light ليلي", "appearance", "المظهر:"));
         all.add(new SettingEntry("الصورة الشخصية", "photo avatar profile صورة", "appearance", "الصورة الشخصية"));
@@ -882,14 +873,7 @@ public final class MainActivity extends Activity {
         all.add(new SettingEntry("تصدير معاملات CSV", "csv export excel", "data", "تصدير معاملات"));
         all.add(new SettingEntry("نسخة احتياطية", "backup encrypted", "data", "نسخة احتياطية"));
         all.add(new SettingEntry("استعادة نسخة", "restore backup", "data", "استعادة نسخة"));
-        if (BuildConfig.DEBUG) {
-            all.add(new SettingEntry("تصحيح البيانات", "repair ads duplicates transfers أدوات المراجعة", "data", "تصحيح البيانات"));
-            all.add(new SettingEntry("فحص تغطية رسائل SMS", "sms coverage أدوات المراجعة", "data", "فحص تغطية"));
-            all.add(new SettingEntry("تقرير تشخيص الأرقام", "diagnostics numbers أدوات المراجعة", "data", "تقرير تشخيص"));
-            all.add(new SettingEntry("مراجعة التحويلات بين حساباتك", "transfers repair أدوات المراجعة", "data", "مراجعة التحويلات"));
-            all.add(new SettingEntry("عينات رسائل البنوك", "bank message samples sms عينة أدوات المراجعة", "data", "عينات رسائل"));
-            all.add(new SettingEntry("عطل تجريبي", "crash debug أدوات المراجعة", "data", "عطل تجريبي"));
-        }
+        all.add(new SettingEntry("فحص البيانات وإصلاحها", "repair check duplicates ads transfers receipts تصحيح تكرار إعلانات تحويلات", "data", "فحص البيانات وإصلاحها"));
         if (!db.assets().isEmpty()) all.add(new SettingEntry("الأصول المسجلة", "assets", "data", "الأصول المسجلة"));
         if (!db.debts().isEmpty()) all.add(new SettingEntry("الديون المسجلة", "debts", "data", "الديون المسجلة"));
         all.add(new SettingEntry("حذف كل البيانات المحلية", "delete clear reset data مسح", "data", "حذف كل البيانات"));
@@ -975,7 +959,7 @@ public final class MainActivity extends Activity {
 
 
     private void backFromSettings() {
-        if(settingsSection.isEmpty())selectedTab=0;else settingsSection="";
+        if(settingsSection.isEmpty())selectedTab=0;else settingsSection="missed".equals(settingsSection)?"capture":"";
         render();
     }
 
@@ -2870,16 +2854,6 @@ public final class MainActivity extends Activity {
     private void buttonStatus(String status) { toast(status); }
 
     private int parserDebugTaps;
-    /** Hidden gesture: seven taps on the version line show or hide the parser diagnostics row in advanced settings. */
-    private void parserDebugGesture(View version) {
-        version.setOnClickListener(v->{
-            if(++parserDebugTaps<7)return;
-            parserDebugTaps=0;
-            boolean enabled=!getPreferences(MODE_PRIVATE).getBoolean(ParserDebugActivity.ENABLED_KEY,false);
-            getPreferences(MODE_PRIVATE).edit().putBoolean(ParserDebugActivity.ENABLED_KEY,enabled).apply();
-            toast(enabled?"ظهر «تشخيص المحلل» في البيانات والخصوصية ← إعدادات متقدمة":"تم إخفاء «تشخيص المحلل»");
-        });
-    }
     private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
@@ -4570,8 +4544,16 @@ public final class MainActivity extends Activity {
             if (redacted.length() > 0) redacted.append("\n\n");
             redacted.append("المرسل: ").append(evidence.sender).append("\n").append(Redaction.text(evidence.body));
         }
+        reportMessageReading(recorded, redacted.length() == 0 ? "(الرسالة الأصلية غير متاحة؛ اكتب صيغتها هنا لو فاكرها)" : redacted.toString());
+    }
+
+    /**
+     * «الرسالة اتقرت غلط؟»: the redacted message and what the app did with it, as an e-mail draft the user reviews and
+     * sends. From a ledger row (reportTransactionReading) or a message the app did not record (missedBankMessages).
+     */
+    private void reportMessageReading(String recorded, String redactedBody) {
         Bundle draft = new Bundle();
-        draft.putString("body", redacted.length() == 0 ? "(الرسالة الأصلية غير متاحة؛ اكتب صيغتها هنا لو فاكرها)" : redacted.toString());
+        draft.putString("body", redactedBody);
         draft.putString("correct", "");
         savePageScroll();
         formPages.push(new DraftFormPage("report_reading", "الرسالة اتقرت غلط؟", draft, new Bundle(draft)) {
@@ -4596,6 +4578,31 @@ public final class MainActivity extends Activity {
             // Message text stays out of saved instance state even after redaction.
             @Override boolean restoreAfterRecreation() { return false; }
         });
+    }
+
+    /**
+     * Owner decision m6 (0.4.0): messages from a known bank or payment app, naming an amount, that the app did not record
+     * (ShadowStore.missedFromBank, or not understood). Text redacted; report one as a misreading or dismiss it.
+     */
+    private void missedBankMessages() {
+        note("رسائل من بنك أو تطبيق دفع فيها مبلغ والتطبيق ما سجّلهاش. لو كانت عملية فعلًا، بلّغ عنها عشان نصلّح قراءتها؛ لو مش عملية، تجاهلها. الأرقام والأسماء محجوبة.");
+        int shown = 0;
+        for (ShadowStore.Ununderstood message : ShadowStore.ununderstood(db.getReadableDatabase())) {
+            if (message.text == null || message.hash == null) continue;
+            shown++;
+            String redacted = Redaction.text(message.text);
+            LinearLayout box = card();
+            box.addView(label(message.source + " · " + Instant.ofEpochMilli(message.lastSeen).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL)
+                    + (message.count > 1 ? " · وصلت " + message.count + " مرات" : ""), 12, MUTED, false));
+            TextView text = label(redacted, 14, INK, false); text.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG); box.addView(text);
+            LinearLayout actions = new LinearLayout(this); actions.setPadding(0, dp(8), 0, 0);
+            actions.addView(ui.button("بلّغ عنها", false, false, () -> reportMessageReading("ما اتسجلتش", "المرسل: " + message.source + "\n" + redacted)),
+                    new LinearLayout.LayoutParams(0, -2, 1));
+            actions.addView(ui.button("تجاهل", false, false, () -> { ShadowStore.dismissUnunderstood(db.getWritableDatabase(), message.hash); render(); }),
+                    new LinearLayout.LayoutParams(0, -2, 1));
+            box.addView(actions);
+        }
+        if (shown == 0) note("مفيش رسائل من بنوكك محتاجة مراجعة.");
     }
 
     private LinearLayout cardStrip(ExpenseDb.PaymentSource source) {
@@ -7551,138 +7558,12 @@ public final class MainActivity extends Activity {
         row.addView(box, params);
     }
 
-    /**
-     * Collects the shapes of bank messages with every digit, month and handle masked, grouped by sender, so the user
-     * can review them and share them to improve the parser. Three sections: income read, outgoing transfers read, and
-     * — the useful one — messages from a known bank that the parser did not read (SmsPreview.canReport). Shapes are
-     * listed per sender (top three each), so a bank with one fixed template cannot crowd the others out of the list.
-     * Nothing is sent automatically.
-     */
-    private void messageSamples() {
-        if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            toast("محتاج إذن قراءة الرسائل الأول"); return;
-        }
-        toast("بجهّز العينات...");
-        AppResources.read(() -> {
-            Map<String, Map<String, int[]>> income = new LinkedHashMap<>();
-            Map<String, Map<String, int[]>> sent = new LinkedHashMap<>();
-            Map<String, Map<String, int[]>> unread = new LinkedHashMap<>();
-            try (Cursor cursor = getContentResolver().query(Telephony.Sms.Inbox.CONTENT_URI,
-                    new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY}, null, null, Telephony.Sms.DATE + " DESC")) {
-                if (cursor != null) while (cursor.moveToNext()) {
-                    String sender = cursor.getString(0) == null ? "" : cursor.getString(0);
-                    String body = cursor.getString(1);
-                    if (body == null) continue;
-                    Map<String, Map<String, int[]>> bucket = null;
-                    if (ExpenseParser.parseIncome(sender, body) != null) bucket = income;
-                    else {
-                        ExpenseParser.Parsed parsed = ExpenseParser.parse(sender, body);
-                        if (parsed != null && "تحويلات".equals(parsed.category)) bucket = sent;
-                        else if (parsed == null && SmsPreview.canReport(sender, body)) bucket = unread;
-                    }
-                    if (bucket == null) continue;
-                    String bank = BrandCatalog.bank(sender);
-                    String group = (bank == null ? maskMessage(sender) : bank) + " · " + maskMessage(sender);
-                    bucket.computeIfAbsent(group, k -> new LinkedHashMap<>()).computeIfAbsent(maskMessage(body), k -> new int[1])[0]++;
-                }
-            } catch (Exception error) {
-                postUi(() -> toast("تعذر قراءة الرسائل"));
-                return;
-            }
-            StringBuilder text = new StringBuilder("عينات Follow Money (الأرقام والشهور مخفية)\n");
-            appendSamples(text, "رسائل من بنك معروف ما اتقرتش", unread);
-            appendSamples(text, "رسائل دخل اتقرت", income);
-            appendSamples(text, "تحويلات خارجة اتقرت", sent);
-            String result = text.toString();
-            postUi(() -> new ChoiceDialogBuilder().setTitle("راجعها قبل ما تبعتها")
-                    .setMessage(result)
-                    .setPositiveButton("مشاركة", (dialog, which) -> {
-                        Intent share = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, result);
-                        startActivity(Intent.createChooser(share, "مشاركة العينات"));
-                    })
-                    .setNeutralButton("نسخ", (dialog, which) -> {
-                        android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                        if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("samples", result));
-                        toast("اتنسخت");
-                    })
-                    .setNegativeButton("إغلاق", null).show());
-        });
-    }
 
-    /** The masked shape of a message (SmsPreview.shape): one bank template → one shape. */
-    static String maskMessage(String text) { return SmsPreview.shape(text); }
 
-    /** Up to three shapes per sender, senders ordered by message count, so every bank is represented. */
-    private static void appendSamples(StringBuilder text, String title, Map<String, Map<String, int[]>> groups) {
-        int shapes = 0;
-        for (Map<String, int[]> bucket : groups.values()) shapes += bucket.size();
-        text.append("\n== ").append(title).append(" (").append(groups.size()).append(" مرسل · ").append(shapes).append(" شكل) ==\n");
-        if (groups.isEmpty()) { text.append("لا شيء\n"); return; }
-        List<Map.Entry<String, Map<String, int[]>>> senders = new ArrayList<>(groups.entrySet());
-        senders.sort((a, b) -> Integer.compare(total(b.getValue()), total(a.getValue())));
-        for (Map.Entry<String, Map<String, int[]>> sender : senders) {
-            List<Map.Entry<String, int[]>> rows = new ArrayList<>(sender.getValue().entrySet());
-            rows.sort((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]));
-            text.append("\n-- ").append(sender.getKey()).append(" · ").append(total(sender.getValue())).append(" رسالة · ").append(rows.size()).append(" شكل --\n");
-            for (int i = 0; i < Math.min(3, rows.size()); i++)
-                text.append("[").append(rows.get(i).getValue()[0]).append("×] ").append(rows.get(i).getKey()).append("\n");
-        }
-    }
 
-    /** Flat shapes (the SMS coverage report): the ten most frequent. */
-    private static void appendFlatSamples(StringBuilder text, String title, Map<String, int[]> bucket) {
-        List<Map.Entry<String, int[]>> rows = new ArrayList<>(bucket.entrySet());
-        rows.sort((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]));
-        text.append("\n== ").append(title).append(" (").append(rows.size()).append(" شكل) ==\n");
-        for (int i = 0; i < Math.min(10, rows.size()); i++)
-            text.append("\n[").append(rows.get(i).getValue()[0]).append("×] ").append(rows.get(i).getKey()).append("\n");
-    }
 
-    private static int total(Map<String, int[]> bucket) {
-        int n = 0;
-        for (int[] count : bucket.values()) n += count[0];
-        return n;
-    }
 
-    private void repairTransfersDialog() {
-        CaptureQueue.submit(() -> {
-            int found = db.repairOwnTransfers(false);
-            postUi(() -> {
-                if (found == 0) { toast("مفيش تحويلات قديمة بين حساباتك محتاجة تتصلح"); return; }
-                new ChoiceDialogBuilder().setTitle("لقينا " + found + " تحويل بين حساباتك")
-                        .setMessage("كل واحد منهم مبلغ خرج من حساب ودخل حساب تاني ليك في خلال 10 دقايق. " +
-                                "اتسجلوا قبل كده صرف ودخل، فكانوا بيكبّروا الأرقام. نعلّمهم تحويل بين حساباتك؟")
-                        .setPositiveButton("أيوه، صلّحهم", (dialog, which) -> CaptureQueue.submit(() -> {
-                            int fixed = db.repairOwnTransfers(true);
-                            postUi(() -> { toast("اتصلّح " + fixed + " تحويل"); render(); });
-                        }))
-                        .setNegativeButton("لأ", null).show();
-            });
-        });
-    }
 
-    private void diagnosticsDialog() {
-        toast("بجهّز التقرير...");
-        AppResources.read(() -> {
-            LocalDate start = LocalDate.now().withDayOfYear(1);
-            String report;
-            try { report = db.diagnostics(start, LocalDate.now().plusDays(1)); }
-            catch (RuntimeException error) { report = "تعذر عمل التقرير: " + error.getMessage(); }
-            String result = report;
-            postUi(() -> new ChoiceDialogBuilder().setTitle("تقرير الأرقام")
-                    .setMessage(result)
-                    .setPositiveButton("مشاركة", (dialog, which) -> {
-                        Intent share = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, result);
-                        startActivity(Intent.createChooser(share, "مشاركة التقرير"));
-                    })
-                    .setNeutralButton("نسخ", (dialog, which) -> {
-                        android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                        if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("report", result));
-                        toast("اتنسخ");
-                    })
-                    .setNegativeButton("إغلاق", null).show());
-        });
-    }
 
     /**
      * The brand opening (res/raw/app_intro.mp4, the same 5-second intro as the promo video) in a full-screen dialog,
@@ -7792,77 +7673,5 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private void debugCrashDialog() {
-        if(!BuildConfig.DEBUG)return;
-        new ChoiceDialogBuilder().setTitle("عطل تجريبي")
-                .setMessage("هيقفل نسخة التطوير عشان تختبر حفظ آخر عطل. استخدم بيانات مصطنعة فقط.")
-                .setPositiveButton("إحداث العطل",(dialog,which)->{
-                    throw new IllegalStateException("Synthetic debug crash");
-                }).setNegativeButton("إلغاء",null).show();
-    }
 
-    private void smsCoverageDialog() {
-        if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            toast("محتاج إذن قراءة الرسائل الأول"); return;
-        }
-        toast("براجع الرسائل المسجلة...");
-        AppResources.read(() -> {
-            int scanned = 0, captured = 0, excluded = 0, missing = 0, completedReview = 0, otherReview = 0;
-            Map<String, int[]> missingSamples = new LinkedHashMap<>();
-            Map<String, int[]> reviewSamples = new LinkedHashMap<>();
-            String error = null;
-            try (ExpenseDb auditDb = new ExpenseDb(getApplicationContext());
-                 Cursor cursor = getContentResolver().query(Telephony.Sms.Inbox.CONTENT_URI,
-                         new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.DATE_SENT},
-                         null, null, Telephony.Sms.DATE + " DESC")) {
-                Set<String> sentKeys=ExpenseDb.smsSentKeys(getApplicationContext(),0,Long.MAX_VALUE);
-                if (cursor != null) while (cursor.moveToNext()) {
-                    String sender = cursor.getString(0), body = cursor.getString(1);
-                    if (body == null) continue;
-                    scanned++;
-                    boolean receiptKeySafe=CaptureIdentity.receiptKeySafe(sender,body,cursor.getLong(2),cursor.getLong(3),sentKeys);
-                    int status = auditDb.smsCaptureStatus(sender, body, cursor.getLong(2), cursor.getLong(3),receiptKeySafe);
-                    if (status == 1) { captured++; continue; }
-                    if (status == 2) { excluded++; continue; }
-                    boolean parsed = ExpenseParser.parse(sender, body) != null ||
-                            ExpenseParser.parseIncome(sender, body) != null ||
-                            ExpenseParser.parseTransfer(body) != null;
-                    if (parsed) {
-                        missing++;
-                        String shape = maskMessage(sender == null ? "" : sender) + ": " + maskMessage(body);
-                        missingSamples.computeIfAbsent(shape, key -> new int[1])[0]++;
-                    } else if (ExpenseParser.isCompletedFinancialCandidate(body)) {
-                        completedReview++;
-                        String shape = maskMessage(sender == null ? "" : sender) + ": " + maskMessage(body);
-                        reviewSamples.computeIfAbsent(shape, key -> new int[1])[0]++;
-                    } else if (ExpenseParser.isFinancialCandidate(body)) {
-                        otherReview++;
-                    }
-                }
-            } catch (Exception failure) {
-                error = "تعذر فحص صندوق SMS على هذا الجهاز";
-            }
-            String result;
-            if (error != null) result = error;
-            else {
-                StringBuilder report = new StringBuilder("فحص تغطية SMS · كل الرسائل الموجودة حاليًا على الجهاز\n\n");
-                report.append("اتقرت: ").append(scanned).append(" · لها مصدر مسجل: ").append(captured)
-                        .append(" · مستبعدة يدويًا: ").append(excluded).append("\n");
-                report.append("قابلة للتحليل لكن بلا مصدر مسجل: ").append(missing).append("\n");
-                report.append("تبدو عملية مكتملة وتحتاج مراجعة: ").append(completedReview).append("\n");
-                report.append("إشارات مالية أخرى (عروض/تذكيرات/أرصدة): ").append(otherReview).append("\n");
-                report.append("المراجعة لا تثبت مصروفًا؛ شحن الرصيد قد يكون له خصم بنكي مسجل.\n");
-                appendFlatSamples(report, "قابلة للتحليل وغير مسجلة", missingSamples);
-                appendFlatSamples(report, "عمليات محتملة للمراجعة", reviewSamples);
-                result = report.toString();
-            }
-            postUi(() -> new ChoiceDialogBuilder().setTitle("تغطية رسائل SMS")
-                    .setMessage(result)
-                    .setPositiveButton("نسخ", (dialog, which) -> {
-                        android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                        if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("sms coverage", result));
-                        toast("اتنسخ؛ راجع العينات قبل مشاركتها");
-                    }).setNegativeButton("إغلاق", null).show());
-        });
-    }
 }

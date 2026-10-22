@@ -284,18 +284,11 @@ public final class ParserSmokeTest {
             throw new AssertionError("Mobile-credit subscription was missed");
         checked++;
         expect("1234", "Dear customer, you have successfully purchased Microsoft Apps - Microsoft 365 Basic Subscription - 1 month (Microsoft OneDrive) from Google Play Store and 80 Egyptian pound has been deducted from your credit", 8000, "EGP");
-        if (!ExpenseParser.isCompletedFinancialCandidate(vodafoneRecharge) ||
-                ExpenseParser.isCompletedFinancialCandidate(valuRequest) ||
-                ExpenseParser.isCompletedFinancialCandidate("اقوى خصومات باقات Plus الجديدة 400 ميجا ب20 جنيه بدل 100 العرض سارى") ||
-                ExpenseParser.isCompletedFinancialCandidate("نذكرك بدفع 5.00 ج.م. رسوم استخدام الراوتر"))
-            throw new AssertionError("Coverage audit did not separate completed events from reminders and offers");
-        checked++;
         // Promotions mention amounts but never move money (real Banque Misr campaign, July 2026).
         String carnival = "عميلنا العزيز، استمتع بعروض كرنفال بنك مصر - يوليو 2026 عند استخدام بطاقات بنك مصر الائتمانية في الشراء أونلاين، " +
                 "وعزز فرصتك للفوز بكاش باك يصل إلى 50,000 جنيه. العرض ساري حتى 16 يوليو 2026. للمزيد: bnkmsr.com/BMCarnivalCashBack . تُطبق الشروط والأحكام.";
         skip(carnival);
-        if (ExpenseParser.parseIncome("Banque Misr", carnival) != null || ExpenseParser.parseTransfer(carnival) != null ||
-                ExpenseParser.isCompletedFinancialCandidate(carnival))
+        if (ExpenseParser.parseIncome("Banque Misr", carnival) != null || ExpenseParser.parseTransfer(carnival) != null)
             throw new AssertionError("Promotion read as money movement");
         checked++;
         skip("Get up to 20% cash back when you pay with your card at AMAZON. Offer valid till 30 Oct. T&Cs apply. EGP 500 max");
@@ -336,9 +329,6 @@ public final class ParserSmokeTest {
                 ExpenseParser.isUnsuccessful("هيتم خصم ٧٠٠ جنيه من حسابك بكرة") ||
                 ExpenseParser.isFutureOnly("تم خصم ١٠٠٠ جنيه لدى كارفور، وسيتم خصم رسوم ٥ جنيه"))
             throw new AssertionError("Future wording was confused with failure or completed payment");
-        checked++;
-        if(ExpenseParser.isCompletedFinancialCandidate("سيتم خصم 700 جنيه من حسابك بكرة"))
-            throw new AssertionError("Future alert appeared completed in coverage review");
         checked++;
         String distant="تم خصم رسوم الخدمة " + "تفاصيل ".repeat(25) + "500 جنيه وسيتم خصم رسوم غدًا";
         skip(distant);

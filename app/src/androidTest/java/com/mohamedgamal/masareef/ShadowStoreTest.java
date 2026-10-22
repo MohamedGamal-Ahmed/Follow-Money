@@ -10,8 +10,7 @@ import java.util.List;
 /**
  * Shadow storage on a real Android runtime (isolated emulator app only): upgrade v25 → v26, live capture stores its
  * shadow row beside the ledger row without bumping the ledger revision, Keystore sealing, ununderstood text, dedupe
- * replay, the new pipeline deciding every message with legacy only on its failure and legacy guards noted, learning persistence, backup open/re-seal, the re-scan over
- * real inbox SMS without touching the ledger, and "delete all data".
+ * replay, the new pipeline deciding every message with legacy only on its failure and legacy guards noted, learning persistence, backup open/re-seal, and "delete all data".
  */
 final class ShadowStoreTest {
     private final Instrumentation runner;
@@ -19,18 +18,7 @@ final class ShadowStoreTest {
     ShadowStoreTest(Instrumentation runner) { this.runner = runner; }
     private void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); checks++; }
 
-    private void shell(String command) throws Exception {
-        try (android.os.ParcelFileDescriptor fd = runner.getUiAutomation().executeShellCommand(command);
-             java.io.InputStream input = new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd)) {
-            byte[] bytes = new byte[1024]; while (input.read(bytes) != -1) { }
-        }
-    }
 
-    private static void collect(android.view.View view, StringBuilder out) {
-        if (view instanceof android.widget.TextView) out.append(((android.widget.TextView) view).getText()).append('\n');
-        if (view instanceof android.view.ViewGroup)
-            for (int i = 0; i < ((android.view.ViewGroup) view).getChildCount(); i++) collect(((android.view.ViewGroup) view).getChildAt(i), out);
-    }
 
     private static long count(SQLiteDatabase sql, String query) {
         try (Cursor c = sql.rawQuery(query, null)) { return c.moveToFirst() ? c.getLong(0) : -1; }
@@ -38,6 +26,35 @@ final class ShadowStoreTest {
 
     private static String first(SQLiteDatabase sql, String query) {
         try (Cursor c = sql.rawQuery(query, null)) { return c.moveToFirst() ? c.getString(0) : null; }
+    }
+
+    /** One stored observation with its sealed values opened (the app itself no longer lists them). */
+    private static final class Row {
+        long id; int score; boolean unreadable;
+        String legacyDecision, decision, reasons, dedupe, dedupeReason, source;
+        final java.util.Map<String, String> values = new java.util.HashMap<>(), legacy = new java.util.HashMap<>();
+    }
+
+    private static List<Row> rows(SQLiteDatabase sql, String origin, int limit) {
+        List<Row> out = new java.util.ArrayList<>();
+        try (Cursor c = sql.rawQuery("SELECT id, legacy_decision, decision, reasons, dedupe, dedupe_reason, source, score, encrypted_body FROM shadow_observations " +
+                "WHERE origin=? ORDER BY received_at DESC, id DESC LIMIT ?", new String[]{origin, Integer.toString(limit)})) {
+            while (c.moveToNext()) {
+                Row r = new Row();
+                r.id = c.getLong(0); r.legacyDecision = c.getString(1); r.decision = c.getString(2); r.reasons = c.getString(3);
+                r.dedupe = c.getString(4); r.dedupeReason = c.getString(5); r.source = c.getString(6); r.score = c.getInt(7);
+                String body = EvidenceVault.decrypt(c.getString(8));
+                r.unreadable = body == null;
+                if (body != null) try {
+                    org.json.JSONObject json = new org.json.JSONObject(body);
+                    for (java.util.Iterator<String> k = json.keys(); k.hasNext(); ) { String key = k.next(); if (!key.equals("legacy")) r.values.put(key, json.getString(key)); }
+                    org.json.JSONObject legacy = json.optJSONObject("legacy");
+                    if (legacy != null) for (java.util.Iterator<String> k = legacy.keys(); k.hasNext(); ) { String key = k.next(); r.legacy.put(key, legacy.getString(key)); }
+                } catch (org.json.JSONException malformed) { r.unreadable = true; }
+                out.add(r);
+            }
+        }
+        return out;
     }
 
     void run() {
@@ -61,9 +78,9 @@ final class ShadowStoreTest {
             CaptureResult paid = db.captureSms("QABANK", "Paid EGP 45 at \"QA Market\". Card ****1234.", now);
             check(paid.transaction != null && paid.transaction.amountMinor == 4500, "The new pipeline recorded the payment: " + paid.reason);
             check(db.changes() == paid.revisionAfter, "Shadow write does not change the ledger revision");
-            List<ShadowStore.Stored> live = ShadowStore.recent(sql, "live", 10);
+            List<Row> live = rows(sql, "live", 10);
             check(live.size() == 1, "One live shadow row");
-            ShadowStore.Stored row = live.get(0);
+            Row row = live.get(0);
             check("LEGACY_OFF".equals(row.legacyDecision) && row.legacy.isEmpty(), "No legacy opinion computed: " + row.legacyDecision);
             check("AUTO".equals(row.decision) && "4500".equals(row.values.get("amount_minor")) && row.score >= 80 && !row.unreadable, "New decision, amount and score stored: " + row.decision);
             check(count(sql, "SELECT transaction_id FROM shadow_observations WHERE id=" + row.id) == paid.transactionId, "Linked to the ledger row");
@@ -85,16 +102,16 @@ final class ShadowStoreTest {
             db.captureNotification("com.qa.pay", "QA Pay", "QA Pay\nPaid EGP 85 at \"Nova Market\".", 5000L, delivery);
             db.captureNotification("com.qa.pay", "QA Pay", "QA Pay\nPaid EGP 85 at \"Nova Market\".", 5000L, delivery);
             check(db.transactionCount() == ledgerRows + 1, "One operation for two deliveries: " + (db.transactionCount() - ledgerRows));
-            live = ShadowStore.recent(sql, "live", 10);
-            ShadowStore.Stored replay = null, firstDelivery = null;
-            for (ShadowStore.Stored s : live) if ("QA Pay".equals(s.source)) { if (replay == null) replay = s; else firstDelivery = s; }
+            live = rows(sql, "live", 10);
+            Row replay = null, firstDelivery = null;
+            for (Row s : live) if ("QA Pay".equals(s.source)) { if (replay == null) replay = s; else firstDelivery = s; }
             check(firstDelivery != null && "NEW".equals(firstDelivery.dedupe), "First delivery observed");
             check("REPLAY".equals(replay.dedupe) && "DELIVERY_REPLAY".equals(replay.dedupeReason), "Same delivery replayed: " + replay.dedupe);
 
             // 5. Learning rules persist (hashes and counts only).
             ParserShadow.learning().recordDismissal("QABANK", "Paid EGP 45 at \"QA Market\".");
             ShadowStore.saveLearning(sql, ParserShadow.learning(), now);
-            check(ShadowStore.counts(sql, "live")[2] >= 1, "Learning rule stored");
+            check(count(sql, "SELECT COUNT(*) FROM learning_rules") >= 1, "Learning rule stored");
             check(!first(sql, "SELECT rule_key FROM learning_rules").contains("QA"), "Rule key is a hash");
 
             // 6. Backup opens shadow ciphertext in the snapshot only; restore re-seals it.
@@ -110,49 +127,13 @@ final class ShadowStoreTest {
             } finally { snapshot.delete(); }
             check(first(sql, "SELECT encrypted_body FROM shadow_observations WHERE origin='live' ORDER BY id LIMIT 1").equals(sealed), "Live database untouched by backup");
 
-            // 7. Re-scan over the real inbox (the QA script sends the SMS): shadow rows only, the ledger is untouched.
-            shell("pm grant " + target.getPackageName() + " android.permission.READ_SMS");
-            ledgerRows = db.transactionCount(); long revision = db.changes();
-            ShadowRescan.Result scan = ShadowRescan.run(target, 0, new java.util.concurrent.atomic.AtomicBoolean(), (done, total) -> { });
-            check(scan.scanned >= 3, "Inbox SMS scanned: " + scan.scanned);
-            check(db.transactionCount() == ledgerRows && db.changes() == revision, "Re-scan recorded no operation");
-            List<ShadowStore.Stored> rescanned = ShadowStore.recent(sql, "rescan", 100);
-            boolean comparedPayment = false;
-            for (ShadowStore.Stored s : rescanned) if ("7000".equals(s.values.get("amount_minor")) && "7000".equals(s.legacy.get("amount_minor"))) comparedPayment = true;
-            check(comparedPayment && rescanned.size() == scan.stored, "Re-scan compared the inbox payment on both sides");
-            check(target.getSharedPreferences(ShadowRescan.PREFS, 0).getInt("scanned", -1) == scan.scanned, "Re-scan summary kept");
-            ShadowRescan.run(target, 0, new java.util.concurrent.atomic.AtomicBoolean(), (done, total) -> { });
-            check(ShadowStore.recent(sql, "rescan", 100).size() == rescanned.size(), "A new re-scan replaces the previous one");
-            ShadowReport.Summary report = ShadowReport.build(new java.util.ArrayList<>(), scan.scanned, scan.skippedUnstored);
-            check(report.scanned == scan.scanned, "Report built");
-
             // 7b. A fee returned minutes after the same charge is an expense offset linked to that charge.
             long feeAt = now + 3_600_000L;
             db.captureSms("QABANK", "تم خصم 5.00 جنيه رسوم خدمة من حسابك", feeAt);
             db.captureSms("QABANK", "تم اضافة 5.00 جنيه الى حسابك", feeAt + 5 * 60_000L);
-            List<ShadowStore.Stored> feeRows = ShadowStore.recent(sql, "live", 2);
+            List<Row> feeRows = rows(sql, "live", 2);
             check("expense_offset".equals(feeRows.get(0).values.get("accounting_effect")) && feeRows.get(0).reasons.contains("LINKED_EXPENSE_OFFSET") &&
                     String.valueOf(feeRows.get(1).id).equals(feeRows.get(0).values.get("offset_of")), "Fee return linked to its charge: " + feeRows.get(0).reasons);
-
-            // 8. The hidden debug screen renders every view over the stored rows (live, differences, ununderstood, re-scan report).
-            android.content.Intent open = new android.content.Intent(target, ParserDebugActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            ParserDebugActivity screen = (ParserDebugActivity) runner.startActivitySync(open);
-            java.lang.reflect.Field viewField = ParserDebugActivity.class.getDeclaredField("view"), loadedField = ParserDebugActivity.class.getDeclaredField("loaded");
-            viewField.setAccessible(true); loadedField.setAccessible(true);
-            java.lang.reflect.Method show = ParserDebugActivity.class.getDeclaredMethod("show"), load = ParserDebugActivity.class.getDeclaredMethod("load");
-            show.setAccessible(true); load.setAccessible(true);
-            String[][] views = {{"all", "QABANK"}, {"diff", "إعادة الفحص"}, {"ununderstood", "Cafe Nine"}, {"rescan", "اتفاق:"}};
-            for (String[] v : views) {
-                runner.runOnMainSync(() -> { try { viewField.set(screen, v[0]); loadedField.set(screen, null); load.invoke(screen); show.invoke(screen); } catch (Exception e) { throw new RuntimeException(e); } });
-                String shown = "";
-                for (int i = 0; i < 100; i++) {
-                    Thread.sleep(100); runner.waitForIdleSync();
-                    StringBuilder all = new StringBuilder(); collect(screen.getWindow().getDecorView(), all); shown = all.toString();
-                    if (loadedField.get(screen) != null && shown.contains(v[1])) break;
-                }
-                check(shown.contains("تشخيص المحلل") && shown.contains(v[1]), "Debug view " + v[0] + " shows " + v[1]);
-            }
-            screen.finish(); runner.waitForIdleSync();
 
             // 10. The new pipeline decides every message, whenever it arrived.
             long t = now + 2 * 3_600_000L;
@@ -244,15 +225,14 @@ final class ShadowStoreTest {
             db.clearAllData();
             check(count(sql, "SELECT (SELECT COUNT(*) FROM shadow_observations)+(SELECT COUNT(*) FROM ununderstood_messages)+(SELECT COUNT(*) FROM learning_rules)") == 0,
                     "Shadow data deleted with all data");
-            check(ParserShadow.learning().shapeCount() == 0 && ParserShadow.recent().isEmpty(), "In-memory shadow data forgotten");
-            result.putString("stream", "Shadow store checks passed: " + checks + "; upgrade, live row beside ledger, sealing, ununderstood, dedupe, pipeline decides, failure note, guards, learning, backup, re-scan, delete\n");
+            check(ParserShadow.learning().shapeCount() == 0, "In-memory learning forgotten");
+            result.putString("stream", "Shadow store checks passed: " + checks + "; upgrade, live row beside ledger, sealing, ununderstood, dedupe, pipeline decides, failure note, guards, learning, backup, delete\n");
         } catch (Throwable failure) {
             status = 0; java.io.StringWriter trace = new java.io.StringWriter(); failure.printStackTrace(new java.io.PrintWriter(trace));
             result.putString("stream", "Shadow store FAILED: " + trace);
         } finally {
             if (owned) {
                 try { db.clearAllData(); } catch (RuntimeException ignored) { }
-                target.getSharedPreferences(ShadowRescan.PREFS, 0).edit().clear().commit();
             }
             if (db != null) db.close();
             runner.finish(status, result);

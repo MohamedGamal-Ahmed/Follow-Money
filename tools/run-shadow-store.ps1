@@ -24,11 +24,6 @@ allprojects { p ->
         & $adb -s $Device install -r $apk
         if($LASTEXITCODE -ne 0){throw 'Shadow QA installation failed'}
     }
-    # Invented inbox messages for the re-scan (emulator console only).
-    & $adb -s $Device emu sms send QABANK 'Paid EGP 70 at QA Bakery. Card 4321.'
-    & $adb -s $Device emu sms send QAPROMO 'Win a 20% cashback on your next order!'
-    & $adb -s $Device emu sms send QAOTP 'Your OTP is 553019. Do not share it.'
-    Start-Sleep -Seconds 3
     $result=& $adb -s $Device shell am instrument -w -e feature_audit shadow_store "$appId.test/com.mohamedgamal.masareef.ReconciliationTest"
     $result
     if($LASTEXITCODE -ne 0 -or ($result -join "`n") -notmatch 'Shadow store checks passed: [1-9][0-9]*;' -or ($result -join "`n") -match 'FAILED|Process crashed'){throw 'Shadow store checks failed'}

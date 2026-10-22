@@ -57,7 +57,7 @@ public final class AmountScannerTest {
         for (ParserCorpusFixture.Row row : ParserCorpusFixture.readV2(Path.of("tools/fixtures/parser-corpus-v2-draft.tsv"))) {
             amounts += maximal(MessageNormalizer.normalize(MessageNormalizerTest.raw(row)).text, row.get("id")); texts++;
         }
-        for (String set : ShadowComparison.HELD_OUT_SETS)
+        for (String set : CorpusExpectations.HELD_OUT_SETS)
             for (String line : Files.readAllLines(Path.of(set))) {
                 if (line.startsWith("#") || line.startsWith("id\t")) continue;
                 for (String cell : line.split("\t")) if (cell.matches(".*\\d.*") && cell.matches(".*\\p{L}.*")) { amounts += maximal(cell.replace("\\n", "\n"), set); texts++; }

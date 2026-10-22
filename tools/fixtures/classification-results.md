@@ -13,7 +13,7 @@ only inside `ParserShadow`, after the legacy capture is final, and keeps its res
 
 The rules are generic wording rules. There are no bank templates, and the sender never decides the type.
 
-## Shadow comparison (full per-row table: [shadow-comparison-classification.md](shadow-comparison-classification.md))
+## Shadow comparison (the per-row legacy-vs-new table and its generator, ShadowComparison, were removed in 0.4.0 with the legacy opinion)
 
 All 369 rows, legacy replayed in `addAutomaticCapture` order on the body the listener builds.
 

@@ -19,7 +19,7 @@ public final class LocalLearningTest {
         ParserCorpusFixture.Row row = ids.get(id);
         MessageNormalizer.Raw raw = MessageNormalizerTest.raw(row);
         TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
-        ConfidenceScorer.Confidence c = ShadowComparison.confidence(raw, Long.parseLong(row.get("received_at_ms")), x);
+        ConfidenceScorer.Confidence c = CorpusExpectations.confidence(raw, Long.parseLong(row.get("received_at_ms")), x);
         return model.apply(row.get("source"), MessageNormalizer.normalize(raw).text, c, x[0]);
     }
 
@@ -33,13 +33,13 @@ public final class LocalLearningTest {
 
         // Without any user data, learning changes nothing: corpus and both held-out sets keep the phase-4 decision.
         LocalLearning empty = new LocalLearning();
-        for (ParserCorpusFixture.Row row : rows) same(learn(empty, row.get("id")).decision, ShadowComparison.expectedDecision(row), "Empty model no-op " + row.get("id"));
+        for (ParserCorpusFixture.Row row : rows) same(learn(empty, row.get("id")).decision, CorpusExpectations.expectedDecision(row), "Empty model no-op " + row.get("id"));
         long received = java.time.LocalDateTime.of(2026, 10, 22, 12, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
-        for (String file : ShadowComparison.HELD_OUT_SETS) for (Map<String, String> h : HeldOutBlind.read(Path.of(file))) {
+        for (String file : CorpusExpectations.HELD_OUT_SETS) for (Map<String, String> h : HeldOutBlind.read(Path.of(file))) {
             MessageNormalizer.Raw raw = "sms".equals(h.get("channel")) ? MessageNormalizer.Raw.sms("held-out", h.get("body")) :
                     MessageNormalizer.Raw.notification("held-out", 0, h.get("android.title"), h.get("android.text"), h.get("android.bigText"), h.get("android.textLines"), null, null);
             TransactionExtractor.Extraction[] x = new TransactionExtractor.Extraction[1];
-            ConfidenceScorer.Confidence c = ShadowComparison.confidence(raw, received, x);
+            ConfidenceScorer.Confidence c = CorpusExpectations.confidence(raw, received, x);
             String learned = empty.apply("held-out", MessageNormalizer.normalize(raw).text, c, x[0]).decision;
             check(learned.equals(c.decision) && HeldOutBlind.equal("decision", learned, h.get("expected_decision")), "Empty model no-op " + h.get("id") + ": " + learned);
         }
@@ -75,12 +75,12 @@ public final class LocalLearningTest {
         for (int i = 0; i < 3; i++) confirm.recordConfirmation(source("p140"), text("p140"), "out");
         same(learn(confirm, "p140").decision, "AUTO", "Inferred direction confirmed three times");
         for (String id : new String[]{"u08", "p141"}) {
-            for (int i = 0; i < 5; i++) confirm.recordConfirmation(source(id), text(id), ShadowComparison.extract(ids.get(id)).direction);
+            for (int i = 0; i < 5; i++) confirm.recordConfirmation(source(id), text(id), CorpusExpectations.extract(ids.get(id)).direction);
             same(learn(confirm, id).decision, "REVIEW", "Non-learnable cap stays REVIEW " + id);
         }
         for (String id : new String[]{"p131", "p161"}) {
             for (int i = 0; i < 5; i++) confirm.recordConfirmation(source(id), text(id), "out");
-            same(learn(confirm, id).decision, ShadowComparison.expectedDecision(ids.get(id)), "Hard failure / IGNORE never learned into a transaction " + id);
+            same(learn(confirm, id).decision, CorpusExpectations.expectedDecision(ids.get(id)), "Hard failure / IGNORE never learned into a transaction " + id);
         }
         LocalLearning wrongDirection = new LocalLearning();
         for (int i = 0; i < 3; i++) wrongDirection.recordConfirmation(source("syn-topup-ar"), text("syn-topup-ar"), "out");
