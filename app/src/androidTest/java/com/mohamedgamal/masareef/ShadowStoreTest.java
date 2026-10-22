@@ -215,6 +215,11 @@ final class ShadowStoreTest {
             check(telda != null && topUp != null && "transfer".equals(topUp.kind) && topUp.amountMinor == 3000 && topUp.paymentSourceId == misr && topUp.destinationSourceId.equals(telda),
                     "One internal top-up of 30.00 from Banque Misr to the Telda source: " + (topUp == null ? null : topUp.kind + "/" + topUp.destinationSourceId + " telda=" + telda));
             check(db.transactionCount() == before10c + 1, "No fee, no income row: " + (db.transactionCount() - before10c));
+            // 10d. The same receipt delivered again by the app, worded slightly differently, after the transfer was settled:
+            // it folds into the transfer instead of becoming a second income (owner test, second round).
+            CaptureResult again = db.captureNotification("io.telda.app", "Telda", "تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية 🎉", t + 20_000L + 25 * 60_000L);
+            check(again.transaction != null && again.transaction.id == toTelda.transaction.id && db.transactionCount() == before10c + 1,
+                    "A late copy of the receipt is the settled transfer: " + (again.transaction == null ? again.reason : again.transaction.id + " count+" + (db.transactionCount() - before10c)));
             DecisionSwitch.set(target, false);
             CaptureResult after = db.captureSms("QABANK", "Paid EGP 44.00 at \"QA Kiosk\". Card ****1234.", t + 3_600_000L);
             check(after.transaction != null && first(sql, "SELECT legacy_decision FROM shadow_observations WHERE transaction_id=" + after.transaction.id).startsWith("RECORDED"), "Rollback: legacy decides the next message at once");

@@ -102,6 +102,24 @@ public final class RepairRulesTest {
         rows.add(row(3001, "2026-10-22T06:09:00", 3500, "expense", "تحويلات", "SMS", "expense", 6L, null));
         rows.add(row(3003, "2026-10-22T07:10:00", 3500, "income", "دخل", "إشعار: Telda", "income", 9L, null));
         check(RepairRules.ownTransfers(rows, accountOf).isEmpty(), "a receipt more than an hour later is not paired");
+        // 2d) Owner test (22 Oct 2026, second round): after the bank debit and the receipt were reconciled into one transfer,
+        // the receipt's app notification arrived again (InstaPay +1.00, Telda +10.00) and became a second income row,
+        // because a reconciled transfer is user-edited and no longer an income. A notification income of the same amount
+        // within the duplicate window, on the transfer's destination (or with no source), is that receipt seen again.
+        rows.clear();
+        RepairRules.Row settled = new RepairRules.Row(4001, at("2026-10-22T10:25:00"), at("2026-10-22T10:25:00"), 1000, "EGP", "transfer", "تحويلات", "SMS", "expense", 6L, 9L, true, "تحويل بين حساباتي");
+        rows.add(settled);
+        rows.add(row(4002, "2026-10-22T10:25:40", 1000, "income", "دخل", "إشعار: Telda", "income", 9L, null));
+        rows.add(row(4003, "2026-10-22T10:50:10", 1000, "income", "دخل", "إشعار: InstaPay", "income", null, null)); // the receipt itself was 24 minutes late
+        List<RepairRules.Duplicate> again = RepairRules.lateReceiptDuplicates(rows);
+        check(again.size() == 2 && again.get(0).keepId == 4001 && again.get(1).keepId == 4001
+                && again.get(0).removeId == 4002 && again.get(1).removeId == 4003, "both app copies of the receipt fold into the settled transfer: " + again.size());
+        rows.clear(); rows.add(settled);
+        rows.add(row(4004, "2026-10-22T10:25:40", 1000, "income", "دخل", "إشعار: Telda", "income", 4L, null)); // another account
+        rows.add(row(4005, "2026-10-22T10:25:40", 1500, "income", "دخل", "إشعار: Telda", "income", 9L, null)); // other amount
+        rows.add(row(4006, "2026-10-22T11:40:00", 1000, "income", "دخل", "إشعار: Telda", "income", 9L, null)); // after the transfer window
+        rows.add(row(4007, "2026-10-22T10:25:40", 1000, "income", "دخل", "SMS", "income", 9L, null)); // a bank SMS is a real credit
+        check(RepairRules.lateReceiptDuplicates(rows).isEmpty(), "other account, other amount, late, or a bank SMS stay as they are");
 
         // 3) A fixed monthly transfer is offered as an installment.
         rows.clear();

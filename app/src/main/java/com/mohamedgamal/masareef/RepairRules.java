@@ -71,6 +71,32 @@ final class RepairRules {
         return result;
     }
 
+    /**
+     * The receipt of an own transfer seen again after the transfer was settled: an app notification income of the same
+     * amount and currency, inside the own-transfer window (plus the duplicate window) after a transfer that already names
+     * its destination, landing on that destination (or with no source of its own). A bank SMS credit is a real movement
+     * and never folds this way.
+     * Owner test, 22 Oct 2026: InstaPay +1.00 and Telda +10.00 arrived again after their transfers were reconciled.
+     */
+    static List<Duplicate> lateReceiptDuplicates(List<Row> rows) {
+        List<Duplicate> result = new ArrayList<>();
+        for (Row copy : rows) {
+            if (!"income".equals(copy.kind) || !isNotification(copy.source) || copy.userEdited) continue;
+            Row settled = null;
+            for (Row transfer : rows) {
+                if (!"transfer".equals(transfer.kind) || transfer.to == null || transfer.from == null || transfer.id == copy.id) continue;
+                if (transfer.amountMinor != copy.amountMinor || !transfer.currency.equals(copy.currency)) continue;
+                if (copy.from != null && !copy.from.equals(transfer.to)) continue;
+                long gap = copy.receivedAt - transfer.receivedAt;
+                if (gap < -OWN_TRANSFER_EARLY_MS || gap > OWN_TRANSFER_WINDOW_MS + DUPLICATE_WINDOW_MS) continue;
+                if (settled != null) { settled = null; break; } // two candidates: no guess
+                settled = transfer;
+            }
+            if (settled != null) result.add(new Duplicate(settled.id, copy.id));
+        }
+        return result;
+    }
+
     private static boolean sameEvent(Row a, Row b) {
         return a.id != b.id && a.amountMinor == b.amountMinor && a.currency.equals(b.currency) &&
                 a.direction != null && a.direction.equals(b.direction) &&

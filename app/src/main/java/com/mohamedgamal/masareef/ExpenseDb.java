@@ -2255,6 +2255,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 report.mergedRows.put(duplicate.removeId,duplicate.keepId);report.duplicates++;
             }
         }
+        // The receipt of an already settled own transfer, delivered again by a payment app: the settled transfer is
+        // user-edited (reconciliation marks it so), so it is read here with every row and only the copy is removed.
+        for (RepairRules.Duplicate again:RepairRules.lateReceiptDuplicates(repairRows(from,to))) {
+            if(mergeEntries(again.keepId,again.removeId,"receipt of an own transfer seen again")){
+                report.mergedRows.put(again.removeId,again.keepId);report.duplicates++;
+            }
+        }
         rows.clear();
         for (RepairRules.Row row:repairRows(from,to)) if (!row.userEdited) rows.add(row);
         java.util.Set<Long> debitAmounts=new java.util.HashSet<>();
