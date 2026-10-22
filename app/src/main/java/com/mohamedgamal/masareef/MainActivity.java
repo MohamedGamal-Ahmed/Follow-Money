@@ -136,6 +136,12 @@ public final class MainActivity extends Activity {
     private static final String[] PURPOSES = {
             "عائلة ومساعدات", "سكن وإيجار", "أقساط", "فواتير", "أكل وشرب", "مقاهي", "بقالة", "تسوق", "رعاية صحية", "صحة", "مواصلات", "أخرى"
     };
+    /**
+     * Owner acceptance (0.4.0): «تحويلات» is the open bucket itself (a transfer to a person, purpose unknown); a transfer to
+     * one of the user's own accounts leaves it through this choice, which opens the reconcile dialog.
+     */
+    private static final String OWN_TRANSFER_CHOICE = "تحويل بين حساباتي";
+    private static final String OPEN_TRANSFER_HINT = "«تحويلات» يعني تحويل لشخص غرضه مش محدد، فيفضل في «غرضها مش محدد». اختار الغرض، أو «تحويل بين حساباتي» لو راح لحساب من حساباتك.";
     private static final String[] CURRENCIES = {"EGP", "USD", "EUR", "GBP"};
     private ExpenseDb db;
     private AppLock appLock;
@@ -2085,9 +2091,14 @@ public final class MainActivity extends Activity {
             if(destination!=null)destination.setVisibility("transfer".equals(text("kind"))?View.VISIBLE:View.GONE);
             if(remember!=null)remember.setVisibility(draft.getLong("id",-1)>=0&&"expense".equals(text("kind"))&&(draft.getBoolean("remember")||ExpenseDb.canRememberMerchant(text("merchant"),"أخرى"))?View.VISIBLE:View.GONE);
         }
+        /** The row being edited is a transfer to a person whose purpose is open: «تحويل بين حساباتي» is offered first. */
+        private boolean openTransfer(){long id=draft.getLong("id",-1);return id>=0&&openTransferRow(id);}
         private void drawCategories() {
             categories.removeAllViews();ui.caption("التصنيف",categories);
-            String[] names=transactionCategories(text("category"));int[] icons=new int[names.length];
+            boolean open=openTransfer();
+            String[] names=open?withOwnTransfer(transactionCategories(OWN_TRANSFER_CHOICE.equals(text("category"))?"":text("category"))):transactionCategories(text("category"));
+            if(open)ui.caption(OPEN_TRANSFER_HINT,categories);
+            int[] icons=new int[names.length];
             for(int i=0;i<names.length;i++)icons[i]=categoryStyle(names[i])[2];
             ui.choices(names,icons,java.util.Arrays.asList(names).indexOf(text("category")),i->draft.putString("category",names[i]),categories);
             categories.addView(ui.button("كل التصنيفات",false,false,()->chooseValue("التصنيف",names,text("category"),value->{draft.putString("category",value);drawCategories();})));
@@ -2123,6 +2134,8 @@ public final class MainActivity extends Activity {
             long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
             if(minor<=0)return fail("اكتب المبلغ بشكل صحيح",amount);
             if(text("merchant").trim().isEmpty())return fail("اكتب الجهة أو وصف العملية",merchant);
+            // «تحويل بين حساباتي»: nothing is written here; the reconcile dialog opens after the page closes.
+            if(OWN_TRANSFER_CHOICE.equals(text("category"))&&openTransfer())return true;
             String type=text("kind");Long from=source("from"),to=source("to");
             if("transfer".equals(type)&&(from==null||to==null||from.equals(to)))return fail("اختار حساب المصدر والوجهة للتحويل، ولازم يكونوا مختلفين",null);
             boolean learn=draft.getBoolean("remember")&&"expense".equals(type);
@@ -2147,6 +2160,7 @@ public final class MainActivity extends Activity {
             return true;
         }
         @Override void onSaved() {
+            if(OWN_TRANSFER_CHOICE.equals(text("category"))&&openTransfer()){reconcileTransfers(java.util.Collections.singletonList(draft.getLong("id",-1)));return;}
             if(draft.getLong("id",-1)>=0){toast("اتحفظ تعديل العملية");if(draft.getBoolean("remember")&&"expense".equals(text("kind")))offerPastMerchantCategory(text("merchant"),text("category"));}
         }
         @Override boolean restoreAfterRecreation(){return true;}
@@ -2186,7 +2200,7 @@ public final class MainActivity extends Activity {
             group.sort((first, second) -> Long.compare(second.when, first.when));
             for (int i = 0; i < group.size(); i++) {
                 ExpenseDb.Transaction recent = group.get(i);
-                if (dismissed.contains(ExpenseDb.recurringKey(recent.merchant, recent.amountMinor, recent.currency))) continue;
+                if (dismissed.contains(ExpenseDb.recurringKey(recent.merchant, recent.currency))) continue;
                 if (ExpenseParser.genericMerchant(recent.merchant) || confirmedKeys.contains(recent.merchant.toLowerCase(Locale.ROOT) + "\n" + recent.currency) ||
                         "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "رسوم بنكية".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
                 LocalDate current = Instant.ofEpochMilli(recent.when).atZone(ZoneId.systemDefault()).toLocalDate();
@@ -2457,10 +2471,11 @@ public final class MainActivity extends Activity {
         if (packageName != null) {
             try {
                 ImageView icon = new ImageView(this);
-                icon.setImageDrawable(getPackageManager().getApplicationIcon(packageName));
+                android.graphics.drawable.Drawable appIcon = getPackageManager().getApplicationIcon(packageName);
+                icon.setImageDrawable(appIcon);
                 icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                icon.setBackground(rounded(Color.WHITE, size / 2));
                 icon.setPadding(dp(2), dp(2), dp(2), dp(2));
+                UiKit.appIconPlate(icon, appIcon, dark, SURFACE, dp(size));
                 icon.setContentDescription(description);
                 return icon;
             } catch (PackageManager.NameNotFoundException ignored) { }
@@ -2476,7 +2491,7 @@ public final class MainActivity extends Activity {
         String brand=BrandCatalog.bank(name);
         if(brand!=null) {
             int res=brandLogo(brand);
-            if(res!=0)return UiKit.logoBadge(this,res,brand,description,size,dark?0:BORDER);
+            if(res!=0)return UiKit.logoBadge(this,res,brand,description,size,dark?0:BORDER,dark,SURFACE);
         }
         for(String packageName:getSharedPreferences("notification_settings",MODE_PRIVATE)
                 .getStringSet("sources",java.util.Collections.emptySet())) {
@@ -3645,12 +3660,20 @@ public final class MainActivity extends Activity {
         private List<Long> ids(){List<Long> ids=new ArrayList<>();for(String id:draft.getString("ids","").split(","))if(!id.isEmpty())ids.add(Long.parseLong(id));return ids;}
         @Override void build(LinearLayout body,UiComponents components){
             List<Long> ids=ids();components.caption("مراجعة "+ids.size()+" مصروف · الأرقام والحسابات والمصدر لن تتغير",body);
+            boolean open=!ids.isEmpty();for(Long id:ids)open&=openTransferRow(id);
+            String[] choices=open?withOwnTransfer(CATEGORIES):CATEGORIES;
+            if(open)components.caption(OPEN_TRANSFER_HINT,body);
             Button category=components.button(draft.getString("category"),false,false,()->{});components.caption("التصنيف الجديد",body);body.addView(category);
-            category.setOnClickListener(v->chooseValue("التصنيف الجديد",CATEGORIES,draft.getString("category"),value->{draft.putString("category",value);category.setText(value);}));
+            category.setOnClickListener(v->chooseValue("التصنيف الجديد",choices,draft.getString("category"),value->{draft.putString("category",value);category.setText(value);}));
             for(Long id:ids){ExpenseDb.Transaction tx=db.transactionById(id);if(tx!=null)components.caption(tx.merchant+" · "+money(tx.amountMinor,tx.currency),body);}
         }
         @Override String saveLabel(){return "اعتماد التصنيف";}
-        @Override boolean save(){int count=db.updateCategories(ids(),draft.getString("category"));bulkSelected.clear();bulkMode=false;toast("تم تصنيف "+count+" مصروف");return true;}
+        private List<Long> ownTransfers;
+        @Override boolean save(){
+            if(OWN_TRANSFER_CHOICE.equals(draft.getString("category"))){ownTransfers=ids();bulkSelected.clear();bulkMode=false;return true;}
+            int count=db.updateCategories(ids(),draft.getString("category"));bulkSelected.clear();bulkMode=false;toast("تم تصنيف "+count+" مصروف");return true;
+        }
+        @Override void onSaved(){if(ownTransfers!=null)reconcileTransfers(ownTransfers);}
         @Override boolean restoreAfterRecreation(){return true;}
     }
 
@@ -4428,7 +4451,9 @@ public final class MainActivity extends Activity {
         }).show();
     }
 
-    private void reconcileTransferDialog(ExpenseDb.Transaction item) {
+    private void reconcileTransferDialog(ExpenseDb.Transaction item) { reconcileTransferDialog(item, null); }
+
+    private void reconcileTransferDialog(ExpenseDb.Transaction item, Runnable afterLinked) {
         LinearLayout content=form();
         content.addView(label("أصل التحويل + الرسوم لازم يساوي الخصم. اختار فقط رسائل استلام نفس التحويل؛ راجع المصدر الأصلي عند الشك.",13,MUTED,false));
         EditText principal=input("أصل المبلغ المحوّل",content);
@@ -4438,7 +4463,7 @@ public final class MainActivity extends Activity {
         fee.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);fee.setText(String.format(Locale.ROOT,"%.2f",db.transferFee(item.id)/100.0));
         List<ExpenseDb.PaymentSource> accounts=new ArrayList<>();
         for(ExpenseDb.PaymentSource source:db.accountSources(false))
-            if("حساب".equals(source.kind)||"محفظة".equals(source.kind))accounts.add(source);
+            if("حساب".equals(source.kind)||"محفظة".equals(source.kind)||ExpenseDb.APP_SOURCE_KIND.equals(source.kind))accounts.add(source);
         Spinner from=spinner("من حساب",sourceNames(accounts),content),to=spinner("إلى حسابك",sourceNames(accounts),content);
         for(int i=0;i<accounts.size();i++) {
             if(item.paymentSourceId!=null && accounts.get(i).id==db.accountId(item.paymentSourceId)) from.setSelection(i+1);
@@ -4472,6 +4497,7 @@ public final class MainActivity extends Activity {
                         if(omitFee)db.reconcileOwnTransferWithoutFee(item.id,amount,bankFee,source,destination,receipts);
                         else db.reconcileOwnTransfer(item.id,amount,bankFee,source,destination,receipts);
                         dialog.dismiss();selectedTransaction=db.transactionById(item.id);render();
+                        if(afterLinked!=null)afterLinked.run();
                     } catch(ExpenseDb.TransferFeeUnavailable error) {
                         feeFailure.setText(error.mayOmit()?"الرسوم دي محذوفة أو عليها تجاهل، فمش هنقدر نسجلها. تقدر تربط بدون رسوم بعد مراجعة المبلغ المستبعد.":"الرسوم دي مسجلة قبل كده؛ راجع العملية الأصلية قبل الربط.");
                         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setVisibility(error.mayOmit()?View.VISIBLE:View.GONE);
@@ -4826,7 +4852,7 @@ public final class MainActivity extends Activity {
             copy.addView(label("لقينا خصم متكرر من " + item.merchant, 13, INK, true));
             copy.addView(label("سداد شهري متكرر · " + money(item.amountMinor, item.currency), 11, MUTED, false));
             // Task D2: dismissed for good under its recurring key; the card and the row hint never offer it again.
-            TextView dismiss = label("مش التزام · تجاهل", 12, ACCENT, true);
+            TextView dismiss = label("مش التزام · ما تقترحوش تاني", 12, ACCENT, true);
             dismiss.setMinHeight(dp(UiTheme.TOUCH)); dismiss.setGravity(Gravity.CENTER_VERTICAL);
             dismiss.setOnClickListener(v -> { db.dismissRecurringSuggestion(item); refreshLedger(true); render(); });
             copy.addView(dismiss);
@@ -6441,7 +6467,7 @@ public final class MainActivity extends Activity {
     private View merchantBadge(String name, String category, int size) {
         String id=BrandCatalog.merchant(name);
         int logo=brandLogo(id);
-        if (logo != 0) return UiKit.logoBadge(this, logo, id, name, size, dark ? 0 : BORDER);
+        if (logo != 0) return UiKit.logoBadge(this, logo, id, name, size, dark ? 0 : BORDER, dark, SURFACE);
         View appIcon=applicationBadge(BrandCatalog.merchantPackage(name),name,size);
         if(appIcon!=null)return appIcon;
         if ("سحب نقدي".equals(category) || "رسوم بنكية".equals(category) || "تحويلات".equals(category) ||
@@ -7297,11 +7323,34 @@ public final class MainActivity extends Activity {
     }
 
     private void purposeDialog(List<Long> ids) {
-        String[] purposes = PURPOSES;
+        String[] purposes = withOwnTransfer(PURPOSES);
         new ChoiceDialogBuilder().setTitle("غرض التحويلات دي").setItems(purposes, (d, which) -> {
+            if (which == 0) { reconcileTransfers(ids); return; }
             int changed = db.updateCategories(ids, purposes[which]);
             toast("اتحدد غرض " + changed + " تحويل"); render();
         }).setNegativeButton("إلغاء", null).show();
+    }
+
+    private static String[] withOwnTransfer(String[] choices) {
+        String[] result = new String[choices.length + 1]; result[0] = OWN_TRANSFER_CHOICE;
+        System.arraycopy(choices, 0, result, 1, choices.length);
+        return result;
+    }
+
+    /** One reconcile dialog after another: each transfer chooses its own accounts and receipt. */
+    private void reconcileTransfers(List<Long> ids) {
+        for (int i = 0; i < ids.size(); i++) {
+            ExpenseDb.Transaction tx = db.transactionById(ids.get(i));
+            if (tx == null || !"expense".equals(tx.kind)) continue;
+            List<Long> rest = new ArrayList<>(ids.subList(i + 1, ids.size()));
+            reconcileTransferDialog(tx, rest.isEmpty() ? null : () -> reconcileTransfers(rest));
+            return;
+        }
+    }
+
+    private boolean openTransferRow(long id) {
+        ExpenseDb.Transaction tx = db.transactionById(id);
+        return tx != null && MoneyFlow.bucket(tx.kind, tx.category) == MoneyFlow.Bucket.OPEN_TRANSFER;
     }
 
     private void budgetsSection() {
@@ -7653,6 +7702,8 @@ public final class MainActivity extends Activity {
                 StringBuilder text = new StringBuilder();
                 if (report.recategorized > 0) text.append("• ").append(report.recategorized)
                         .append(" عملية كانت غير مصنفة واتعرف تصنيفها (زي اشتراك ChatGPT).\n");
+                if (report.sourcesInferred > 0) text.append("• ").append(report.sourcesInferred)
+                        .append(" عملية قديمة اتعرف حسابها من رسالتها، فاتربطت تحويلاتها بين حساباتك.\n");
                 if (report.promotions > 0) text.append("• ").append(report.promotions)
                         .append(" رسالة إعلان كانت متسجلة مصروف: اتشالت، ومتأرشفة بدليلها.\n");
                 if (report.trailingSigns > 0) text.append("• ").append(report.trailingSigns)

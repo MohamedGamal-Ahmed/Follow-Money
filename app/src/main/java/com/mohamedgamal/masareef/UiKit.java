@@ -370,6 +370,62 @@ final class UiKit {
         return icon;
     }
 
+    /**
+     * Owner acceptance (0.4.0), dark mode: no white plate or ring. The circle takes the logo's own edge colour (so a logo
+     * on its own background fills it), or the card surface when the logo's edge is transparent; the outline is the card
+     * surface, never a light frame. Light mode is unchanged.
+     */
+    static ImageView logoBadge(Context context, int logo, String brandId, String description, int sizeDp, int border, boolean dark, int surface) {
+        ImageView icon = logoBadge(context, logo, brandId, description, sizeDp, border);
+        if (!dark) return icon;
+        float density = context.getResources().getDisplayMetrics().density;
+        GradientDrawable plate = new GradientDrawable();
+        plate.setColor(whiteOnlyLogo(brandId) ? context.getColor(R.color.brand_forest) : edgeColor(context.getDrawable(logo), surface));
+        plate.setCornerRadius(sizeDp / 2f * density);
+        plate.setStroke(Math.max(1, Math.round(density)), surface);
+        icon.setBackground(plate);
+        icon.setClipToOutline(true);
+        return icon;
+    }
+
+    /** An installed app's icon in a badge: in dark mode on its own edge colour, clipped round, without the white disc. */
+    static void appIconPlate(ImageView icon, android.graphics.drawable.Drawable drawable, boolean dark, int surface, int sizePx) {
+        GradientDrawable plate = new GradientDrawable();
+        plate.setColor(dark ? edgeColor(drawable, surface) : android.graphics.Color.WHITE);
+        plate.setCornerRadius(sizePx / 2f);
+        if (dark) plate.setStroke(Math.max(1, Math.round(sizePx / 40f)), surface);
+        icon.setBackground(plate);
+        if (dark) { icon.setPadding(0, 0, 0, 0); icon.setClipToOutline(true); }
+    }
+
+    /**
+     * The colour along a drawable's edge (its own background), sampled around the border of a small rendering; fallback
+     * when the edge is transparent or mixed.
+     */
+    static int edgeColor(android.graphics.drawable.Drawable drawable, int fallback) {
+        if (drawable == null) return fallback;
+        int size = 48;
+        android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+        try {
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
+            android.graphics.drawable.Drawable copy = drawable.getConstantState() == null ? drawable : drawable.getConstantState().newDrawable().mutate();
+            copy.setBounds(0, 0, size, size); copy.draw(canvas);
+            int[][] points = {{2, 2}, {size / 2, 1}, {size - 3, 2}, {1, size / 2}, {size - 2, size / 2}, {2, size - 3}, {size / 2, size - 2}, {size - 3, size - 3}};
+            java.util.Map<Integer, Integer> votes = new java.util.HashMap<>();
+            for (int[] p : points) {
+                int pixel = bitmap.getPixel(p[0], p[1]);
+                if (android.graphics.Color.alpha(pixel) < 230) continue;
+                int opaque = pixel | 0xff000000;
+                votes.merge(opaque, 1, Integer::sum);
+            }
+            int best = fallback, count = 0;
+            for (java.util.Map.Entry<Integer, Integer> vote : votes.entrySet()) if (vote.getValue() > count) { best = vote.getKey(); count = vote.getValue(); }
+            return count >= 5 ? best : fallback; // most of the edge agrees, or it is not a background
+        } finally {
+            bitmap.recycle();
+        }
+    }
+
     /** " •1234" for a known card/account suffix, nothing otherwise (never the text "null"). */
     static String last4Suffix(String last4) {
         return last4 == null || last4.isBlank() ? "" : " •" + last4.trim();

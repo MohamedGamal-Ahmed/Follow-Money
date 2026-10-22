@@ -88,6 +88,13 @@ final class SmsPreview {
             "(?iu)(?:(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)\\.?\\s*[0-9][0-9,.]*|[0-9][0-9,.]*\\s*(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)(?![\\p{L}]))");
 
     static boolean hasAmount(String body) { return body!=null && AMOUNT.matcher(ExpenseParser.normalizeDigits(body)).find(); }
+    /** An amount with a non-zero digit («0.00 جنيه» is not one; an unclear «EUR 1.250» is). */
+    static boolean hasPositiveAmount(String body) {
+        if(body==null)return false;
+        java.util.regex.Matcher amount=AMOUNT.matcher(ExpenseParser.normalizeDigits(body));
+        while(amount.find())if(amount.group().matches("(?s).*[1-9].*"))return true;
+        return false;
+    }
 
     /**
      * Lossy diagnostic grouping only: every variable value becomes the same slot regardless of its length.

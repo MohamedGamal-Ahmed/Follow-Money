@@ -101,8 +101,8 @@ final class ShadowStore {
         sql.insert("shadow_observations", null, row);
         bound(sql, origin);
         // m6: what waits on «رسائل من بنوكك ما اتسجلتش» (MissedMessages decides; a dismissed shape never comes back).
-        if (raw != null && MissedMessages.listed(source, o, MessageNormalizer.normalize(raw).text, ParserShadow.learning()))
-            rememberUnunderstood(sql, raw, content, source, o);
+        if (raw != null && MissedMessages.listed(source, o, MessageNormalizer.normalize(raw).text, ParserShadow.learning(), userBanks(sql)))
+            rememberUnunderstood(sql, raw, content, source, o, receivedAt, "REPLAY".equals(dedupe.capture));
     }
 
     /**
@@ -203,19 +203,35 @@ final class ShadowStore {
         return found;
     }
 
-    private static void rememberUnunderstood(SQLiteDatabase sql, MessageNormalizer.Raw raw, String hash, String source, ParserShadow.Observation o) {
+    /** SourceIdentity.bank of the user's live sources: the banks whose messages may wait on the missed-messages page. */
+    static java.util.Set<String> userBanks(SQLiteDatabase sql) {
+        java.util.Set<String> banks = new java.util.HashSet<>();
+        try (Cursor c = sql.rawQuery("SELECT name FROM payment_sources WHERE archived=0", null)) {
+            while (c.moveToNext()) { String bank = SourceIdentity.bank(c.getString(0)); if (bank != null) banks.add(bank); }
+        }
+        return banks;
+    }
+
+    /**
+     * first_seen/last_seen are delivery times. seen_count grows only for a new delivery (owner acceptance: a message from
+     * one day showed «وصلت 11 مرات»): not a replay of the same delivery, and not the same message received again within
+     * the duplicate window (an import or a re-read of a message already counted).
+     */
+    private static void rememberUnunderstood(SQLiteDatabase sql, MessageNormalizer.Raw raw, String hash, String source, ParserShadow.Observation o,
+                                             long receivedAt, boolean replay) {
         String reasons = String.join(",", o.reasons);
-        try (Cursor c = sql.rawQuery("SELECT 1 FROM ununderstood_messages WHERE message_hash=?", new String[]{hash})) {
+        try (Cursor c = sql.rawQuery("SELECT last_seen FROM ununderstood_messages WHERE message_hash=?", new String[]{hash})) {
             if (c.moveToFirst()) {
-                sql.execSQL("UPDATE ununderstood_messages SET last_seen=?, seen_count=seen_count+1, reasons=?, policy=? WHERE message_hash=?",
-                        new Object[]{o.observedAt, reasons, o.policy, hash});
+                boolean newDelivery = !replay && Math.abs(receivedAt - c.getLong(0)) > ParsingPolicy.DUPLICATE_CANDIDATE_WINDOW_MS;
+                if (newDelivery) sql.execSQL("UPDATE ununderstood_messages SET last_seen=?, seen_count=seen_count+1, reasons=?, policy=? WHERE message_hash=?",
+                        new Object[]{Math.max(receivedAt, c.getLong(0)), reasons, o.policy, hash});
                 return;
             }
         }
         ContentValues row = new ContentValues();
         row.put("message_hash", hash);
-        row.put("first_seen", o.observedAt);
-        row.put("last_seen", o.observedAt);
+        row.put("first_seen", receivedAt);
+        row.put("last_seen", receivedAt);
         row.put("channel", o.channel);
         row.put("source", source);
         row.put("reasons", reasons);

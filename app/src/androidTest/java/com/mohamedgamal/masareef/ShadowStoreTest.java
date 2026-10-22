@@ -87,11 +87,17 @@ final class ShadowStoreTest {
             String sealed = first(sql, "SELECT encrypted_body FROM shadow_observations WHERE id=" + row.id);
             check(sealed != null && !sealed.contains("4500") && !sealed.contains("QA Market"), "Values sealed by the Keystore");
 
-            // 3. Not understood: the text is kept, sealed, once per message.
+            // 3. Not understood, from the user's bank (QABANK has a source since section 2): the text is kept, sealed, once
+            // per message; the count grows with a new delivery only, never with the same delivery read again (owner
+            // acceptance: «وصلت 11 مرات» for a message of one day).
             db.captureSms("QABANK", "Paid EUR 1.250 at Cafe Nine", now + 1000);
             db.captureSms("QABANK", "Paid EUR 1.250 at Cafe Nine", now + 2000);
+            check(ShadowStore.ununderstood(sql, 10).get(0).count == 1, "The same message read again within a minute is not another delivery");
+            db.captureSms("QABANK", "Paid EUR 1.250 at Cafe Nine", now + 121_000L);
             List<ShadowStore.Ununderstood> unknown = ShadowStore.ununderstood(sql, 10);
             check(unknown.size() == 1 && unknown.get(0).count == 2 && unknown.get(0).text.contains("Cafe Nine"), "Ununderstood message kept once, opened on device");
+            db.captureSms("we-Landline", "Paid EUR 1.250 at Cafe Nine", now + 3000);
+            check(ShadowStore.ununderstood(sql, 10).size() == 1, "A sender the user has no source with is never kept");
             check(!first(sql, "SELECT encrypted_body FROM ununderstood_messages").contains("Cafe"), "Ununderstood text sealed");
 
             // 4. The same notification delivered again (same Android key and post time) is one operation and a replay.

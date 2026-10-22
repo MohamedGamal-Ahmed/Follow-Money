@@ -117,6 +117,21 @@ final class PipelineDecider {
         return legacy;
     }
 
+    /**
+     * The digits that name a saved message's own source (card, account, or an HSBC statement line's partial account), as
+     * the pipeline reads it now; null when it names none. For the data check's source inference.
+     */
+    static String sourceDigits(String sender, String body, boolean notification) {
+        try {
+            MessageNormalizer.Raw raw = notification ? MessageNormalizer.Raw.notification(sender, 0, sender, body, null, null, null, null)
+                    : MessageNormalizer.Raw.sms(sender, body);
+            ParserShadow.Observation o = ParserShadow.observe(raw, "SOURCE_INFERENCE", null, System.currentTimeMillis(), System.currentTimeMillis());
+            return o == null ? null : PipelineDecision.sourceLast4(o.values);
+        } catch (RuntimeException | LinkageError unreadable) {
+            return null;
+        }
+    }
+
     /** The reading an import row is written with: the one it was listed with, or (a row built elsewhere) decided now. */
     static Result forImport(ExpenseDb db, SmsPreview row) {
         if (row.failure != null) return new Failed(row.failure);

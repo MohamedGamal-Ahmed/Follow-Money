@@ -1644,6 +1644,48 @@ final class AuditRegressionTest {
         ok(transfers==2&&fees==1&&incomes==1&&db.transactionCount()==4,"Two internal transfers, a 0.50 fee and the 87,650 income:"+ledger);
     }
 
+    /**
+     * Owner acceptance, 22 Oct 2026: rows the older build recorded that morning had no source, so the repair never saw the
+     * transfer. The data check reads each automatic row's saved message, attaches its source and pairs the transfer.
+     */
+    public void testDataCheckInfersMissingSourcesAndPairsTheTransfer(){
+        long morning=LocalDate.of(2026,10,22).atTime(6,47).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        CaptureResult debit=db.captureSms("HSBC","Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre",morning);
+        db.getWritableDatabase().execSQL("UPDATE transactions SET payment_source_id=NULL,destination_source_id=NULL WHERE id="+debit.transaction.id);
+        CaptureResult receipt=db.captureSms("BankMisr","تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ",morning+30_000L);
+        db.getWritableDatabase().execSQL("UPDATE transactions SET payment_source_id=NULL,destination_source_id=NULL WHERE id="+receipt.transaction.id);
+        eq(2,db.transactionCount(),"Two rows without a source before the check");
+        ExpenseDb.RepairReport report=db.repairAll();
+        eq(2,report.sourcesInferred,"Sources read from the saved messages");
+        int transfers=0,fees=0;StringBuilder ledger=new StringBuilder();
+        for(ExpenseDb.Transaction tx:db.transactions()){
+            ledger.append(" | ").append(tx.kind).append(' ').append(tx.amountMinor).append(' ').append(tx.paymentSourceId).append("->").append(tx.destinationSourceId);
+            if("transfer".equals(tx.kind)&&tx.amountMinor==400)transfers++;else if("expense".equals(tx.kind)&&tx.amountMinor==50)fees++;
+        }
+        ok(transfers==1&&fees==1&&db.transactionCount()==2,"One transfer of 4.00 and its 0.50 fee:"+ledger);
+        eq(0,db.repairAll().sourcesInferred,"Nothing left to infer the second time");
+    }
+
+    /** Owner acceptance (dark mode): no white plate or ring around a logo; the circle is the logo's own colour. */
+    public void testDarkLogoBadgeHasNoLightPlate(){
+        int surface=0xff1c1f24, light=context.getColor(R.color.ui_surface_light);
+        int checked=0;
+        for(String brand:new String[]{"hsbc","bank_misr","instapay","google_one","vodafone","netflix","telda"}){
+            int logo=MainActivity.brandLogo(brand);if(logo==0)continue;checked++;
+            android.widget.ImageView dark=UiKit.logoBadge(context,logo,brand,brand,40,0,true,surface);
+            android.graphics.drawable.GradientDrawable plate=(android.graphics.drawable.GradientDrawable)dark.getBackground();
+            int color=plate.getColor().getDefaultColor();
+            int edge=UiKit.edgeColor(context.getDrawable(logo),surface);
+            eq(edge,color,"Dark plate of "+brand+" is the logo's own edge colour");
+            ok(color!=light||edge==light,"Dark plate of "+brand+" is the light surface around a logo that is not white");
+            ok(dark.getClipToOutline(),"Dark badge of "+brand+" is clipped to its circle");
+            android.widget.ImageView day=UiKit.logoBadge(context,logo,brand,brand,40,0);
+            eq(UiKit.whiteOnlyLogo(brand)?context.getColor(R.color.brand_forest):light,((android.graphics.drawable.GradientDrawable)day.getBackground()).getColor().getDefaultColor(),
+                    "Light mode keeps its plate for "+brand);
+        }
+        ok(checked>=3,"Too few brand logos checked: "+checked);
+    }
+
     public void testImportContractFreshRowIsCreatedWithItsSideEffects(){
         long t=at(LocalDate.now(),10),revision=db.changes();
         SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 100 at QA CONTRACT FRESH",t);ok(row!=null);

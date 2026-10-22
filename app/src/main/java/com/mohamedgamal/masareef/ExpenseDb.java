@@ -999,9 +999,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         return result;
     }
-    /** Task D2: the key a «لقينا خصم متكرر» card is dismissed under: recurring:<merchant>|<amount_minor>|<currency>. */
-    static String recurringKey(String merchant, long amountMinor, String currency) {
-        return "recurring:" + (merchant == null ? "" : merchant.trim().toLowerCase(Locale.ROOT)) + "|" + amountMinor + "|" + currency;
+    /**
+     * Task D2 / owner acceptance: the key a «لقينا خصم متكرر» card is dismissed under, recurring:<merchant>|<currency>. No
+     * amount: a charge that moves a little each month must not need another tap.
+     */
+    static String recurringKey(String merchant, String currency) {
+        return "recurring:" + (merchant == null ? "" : merchant.trim().toLowerCase(Locale.ROOT)) + "|" + currency;
     }
 
     /**
@@ -1009,7 +1012,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      * ledger rows, not from a stored suggestion, so the row is written here), never offered again.
      */
     public void dismissRecurringSuggestion(Transaction item) {
-        String key = recurringKey(item.merchant, item.amountMinor, item.currency);
+        String key = recurringKey(item.merchant, item.currency);
         ContentValues row = new ContentValues();
         row.put("hint_key", key); row.put("merchant", item.merchant); row.put("kind", "subscription");
         row.put("amount_minor", item.amountMinor); row.put("currency", item.currency); row.put("cycle", "monthly");
@@ -1023,7 +1026,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public java.util.Set<String> dismissedRecurringKeys() {
         java.util.Set<String> keys = new java.util.HashSet<>();
         try (Cursor c = getReadableDatabase().rawQuery("SELECT hint_key FROM commitment_suggestions WHERE status='dismissed' AND hint_key LIKE 'recurring:%'", null)) {
-            while (c.moveToNext()) keys.add(c.getString(0));
+            while (c.moveToNext()) {
+                // A key stored before the amount was dropped (recurring:<merchant>|<amount>|<currency>) still dismisses it.
+                String[] parts = c.getString(0).split("\\|", -1);
+                keys.add(parts.length == 3 ? parts[0] + "|" + parts[2] : c.getString(0));
+            }
         }
         return keys;
     }
@@ -1365,6 +1372,35 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         addSourceAlias(identity, matched);
         return matched;
+    }
+
+    /**
+     * Owner acceptance (0.4.0): automatic rows an older build recorded with no source (HSBC «to 7392» and the Banque Misr
+     * receipt on the morning of 22 Oct) were invisible to own-transfer matching. Each unedited automatic movement without
+     * a source gets the one its saved message names (the pipeline's card/account digits, or the payment app), through
+     * autoSource as live capture does; repairAll then matches transfers over them. Returns the rows attached.
+     */
+    int inferMissingSources() {
+        java.util.List<long[]> missing = new java.util.ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT id FROM transactions WHERE payment_source_id IS NULL AND destination_source_id IS NULL " +
+                "AND user_edited=0 AND kind IN ('expense','income') AND (source='SMS' OR source LIKE 'إشعار%')", null)) {
+            while (c.moveToNext()) missing.add(new long[]{c.getLong(0)});
+        }
+        int attached = 0;
+        for (long[] row : missing) {
+            for (SourceEvidence evidence : sourceEvidence(row[0])) {
+                if (evidence.failed || evidence.body == null || evidence.sender == null) continue;
+                boolean notification = evidence.source != null && evidence.source.startsWith("إشعار");
+                String digits = PipelineDecider.sourceDigits(evidence.sender, evidence.body, notification);
+                if (digits == null && !notification) continue;
+                Long account = autoSource(evidence.sender, digits, evidence.body);
+                if (account == null) continue;
+                ContentValues values = new ContentValues(); values.put("payment_source_id", account);
+                attached += getWritableDatabase().update("transactions", values, "id=? AND payment_source_id IS NULL", new String[]{Long.toString(row[0])});
+                break;
+            }
+        }
+        return attached;
     }
 
     /** The kind of a wallet/prepaid app source (Telda): no bank to set, no account to link. */
@@ -2228,8 +2264,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         private final java.util.Map<Long,Long> mergedRows=new java.util.HashMap<>();
         long follow(long id){while(mergedRows.containsKey(id))id=mergedRows.get(id);return id;}
         public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures, trailingSigns;
+        /** Automatic rows that had no source and got one from their saved message (owner acceptance, 0.4.0). */
+        public int sourcesInferred;
         public long movedMinor, feesMinor;
-        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns > 0; }
+        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns + sourcesInferred > 0; }
         /** Rows this repair moved into an archive, counted for the import contract that reports them. */
         int mergedRowCount() { return mergedRows.size(); }
     }
@@ -2263,6 +2301,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             migrateAppSources();
             report.trailingSigns=repairTrailingSigns();
             report.recategorized=recategorizeWithCurrentRules();
+            report.sourcesInferred=inferMissingSources();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
             log.put("promotions",report.promotions);log.put("duplicates",report.duplicates);log.put("own_transfers",report.ownTransfers);

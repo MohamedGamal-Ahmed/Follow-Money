@@ -37,6 +37,22 @@ final class SupportAidsUiTest {
     private void set(Object object,String name,Object value)throws Exception{Field field=object.getClass().getDeclaredField(name);field.setAccessible(true);field.set(object,value);}
     private void call(Object object,String name)throws Exception{Method method=object.getClass().getDeclaredMethod(name);method.setAccessible(true);method.invoke(object);}
     private void mainCall(String name){runner.runOnMainSync(()->{try{call(main,name);}catch(Exception error){throw new RuntimeException(error);}});idle();}
+    /** In «مطابقة تحويل بين حساباتك»: from HSBC to Banque Misr, then link. */
+    private void linkOwnTransfer(){
+        ok(has("مطابقة تحويل بين حساباتك"),"Reconcile dialog did not open: "+dump());
+        click("من حساب");clickStarting("HSBC");
+        click("إلى حسابك");clickStarting("Banque Misr");
+        click("اربط المصادر وافصل الرسوم");idle();
+    }
+    private void clickStarting(String prefix){
+        long until=android.os.SystemClock.elapsedRealtime()+4000;
+        do{AccessibilityNodeInfo root=runner.getUiAutomation().getRootInActiveWindow();
+            if(root!=null)for(AccessibilityNodeInfo found:root.findAccessibilityNodeInfosByText(prefix))
+                if(found.getText()!=null&&found.getText().toString().startsWith(prefix))
+                    for(AccessibilityNodeInfo node=found;node!=null;node=node.getParent())if(node.isClickable()&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){idle();return;}
+            android.os.SystemClock.sleep(100);}while(android.os.SystemClock.elapsedRealtime()<until);
+        throw new AssertionError("Cannot pick "+prefix+"; active="+dump());
+    }
     private static long scalar(ExpenseDb db,String query){try(android.database.Cursor c=db.getReadableDatabase().rawQuery(query,null)){return c.moveToFirst()?c.getLong(0):-1;}}
     /** The number on the transactions list's «N تحويل لناس غرضها مش محدد» banner (0 when there is none), after a fresh ledger read. */
     private int openTransfers(){
@@ -146,6 +162,9 @@ final class SupportAidsUiTest {
                 // «رسائل من بنوكك ما اتسجلتش» with its text redacted, to report or dismiss. Other senders never appear there.
                 ExpenseDb store=AppResources.database(target);long now=System.currentTimeMillis();
                 String unread="Payment format SUPPORT_QA ref 44556677 from SECRET PERSON amount EGP 7000.00";
+                store.addPaymentSource("HSBC","حساب","0001"); // only the user's own banks are listed (owner acceptance)
+                store.captureSms("we-Landline","تم الاشتراك بنجاح في WE Home Top-up 140 جيجا لمدة شهر. رصيدك الحالى 0.00 جنيه",now-5000);
+                store.captureSms("VFCashGifts","مبروك كسبت 0.00 جنيه كاش باك على فودافون كاش! استخدمه قبل 30/11/2026",now-4000);
                 store.captureSms("HSBC",unread,now);
                 store.captureSms("QASHOP","QASHOP offer: EGP 100 off your next order today only",now+1000);
                 // Review of task C: offers (a Banque Misr loan with an amount), codes, balances and reminders never land there.
@@ -155,7 +174,7 @@ final class SupportAidsUiTest {
                 settings("capture");ok(has("رسائل من بنوكك ما اتسجلتش"),"Missed bank messages row absent from capture settings");
                 click("رسائل من بنوكك ما اتسجلتش");
                 ok(has("Payment format")&&!has("44556677")&&!has("7000"),"Missed message not shown redacted");
-                ok(!has("QASHOP")&&!has("قرض شخصي")&&!has("minimum due"),"An offer, a reminder or a non-bank sender listed as a missed bank message");
+                ok(!has("QASHOP")&&!has("قرض شخصي")&&!has("minimum due")&&!has("we-Landline")&&!has("VFCashGifts"),"An offer, a reminder or a non-bank sender listed as a missed bank message");
                 ok(has("بلّغ عنها")&&has("تجاهل"),"Report and dismiss actions absent");shot(target,"04-missed-bank-messages");
                 click("بلّغ عنها");ok(has("الرسالة اتقرت غلط؟")&&has("المرسل: HSBC"),"Report draft did not open with the message");
                 Intent missed=interceptMail();
@@ -171,15 +190,18 @@ final class SupportAidsUiTest {
                 store.addManualEntry(now-60_000L,9900,"EGP","QA GYM","اشتراكات",null,"expense",null,null);
                 recurringTab();
                 ok(has("لقينا خصم متكرر من QA GYM"),"Recurring suggestion card absent");
-                ok(has("مش التزام · تجاهل"),"Recurring card has no dismiss action");shot(target,"05-recurring-card");
+                ok(has("مش التزام · ما تقترحوش تاني"),"Recurring card has no dismiss action");shot(target,"05-recurring-card");
                 clickIn("لقينا خصم متكرر من QA GYM","أضفه");
                 ok(has("حوّلها لالتزام شهري")&&has("QA GYM")&&has("99.00")&&has("حفظ الالتزام"),"«أضفه» did not open the filled monthly-commitment page: "+dump());
                 ok(!has("نسجّله التزام شهري؟"),"The old two-button dialog opened");
                 runner.runOnMainSync(main::onBackPressed);idle();
-                recurringTab();clickIn("لقينا خصم متكرر من QA GYM","مش التزام · تجاهل");
+                recurringTab();clickIn("لقينا خصم متكرر من QA GYM","مش التزام · ما تقترحوش تاني");
                 ok(!has("لقينا خصم متكرر من QA GYM"),"Dismissed recurring card still shown");
-                ok(store.dismissedRecurringKeys().contains(ExpenseDb.recurringKey("QA GYM",9900,"EGP")),"Dismissal not stored under its recurring key");
+                ok(store.dismissedRecurringKeys().contains(ExpenseDb.recurringKey("QA GYM","EGP")),"Dismissal not stored under its recurring key");
                 recurringTab();ok(!has("لقينا خصم متكرر من QA GYM"),"Dismissed recurring card came back after a refresh");
+                // Owner acceptance: one tap is enough; next month's charge at another amount is not suggested again.
+                store.addManualEntry(now-30_000L,10400,"EGP","QA GYM","اشتراكات",null,"expense",null,null);
+                recurringTab();ok(!has("لقينا خصم متكرر من QA GYM"),"A charge at another amount brought the dismissed card back");
                 // Task D3: a transfer to a person leaves «تحويلات غرضها مش محدد» once its purpose is set, by each of the three
                 // ways, and stays out after the data check and reopening the app.
                 long sent=now-120_000L;
@@ -220,6 +242,31 @@ final class SupportAidsUiTest {
                 runner.runOnMainSync(main::finish);idle();
                 main=(MainActivity)runner.startActivitySync(new Intent(target,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));idle();
                 ok(openTransfers()==0,"Open transfers came back after reopening: "+openTransfers());
+                // Task E2 (owner acceptance): «تحويلات» is the open bucket itself; a transfer to the user's own account leaves it
+                // through «تحويل بين حساباتي», first in the purpose list, the bulk page and the edit page, each opening the
+                // reconcile dialog (destination account) so the row becomes a transfer.
+                store.addPaymentSource("Banque Misr","حساب","7392");
+                long own=now-90_000L;
+                CaptureResult r1=store.captureSms("QABANK","You sent EGP 31.00 to QA OWN ONE",own);
+                CaptureResult r2=store.captureSms("QABANK","You sent EGP 32.00 to QA OWN TWO",own+1000);
+                CaptureResult r3=store.captureSms("QABANK","You sent EGP 33.00 to QA OWN THREE",own+2000);
+                ok(openTransfers()==3,"Three unlinked transfers expected: "+openTransfers());
+                runner.runOnMainSync(()->{try{Method purpose=MainActivity.class.getDeclaredMethod("purposeDialog",List.class);purpose.setAccessible(true);
+                    purpose.invoke(main,java.util.Collections.singletonList(r1.transaction.id));}catch(Exception error){throw new RuntimeException(error);}});idle();
+                click("تحويل بين حساباتي");linkOwnTransfer();
+                ok(openTransfers()==2,"Purpose list: the own transfer is still open: "+openTransfers());
+                click("حدد");
+                runner.runOnMainSync(()->{try{@SuppressWarnings("unchecked") java.util.Map<Long,android.widget.CheckBox> checks=(java.util.Map<Long,android.widget.CheckBox>)get(main,"bulkChecks");
+                    checks.get(r2.transaction.id).setChecked(true);}catch(Exception error){throw new RuntimeException(error);}});idle();
+                click("تغيير تصنيف المحدد");ok(has("«تحويلات» يعني تحويل لشخص"),"No hint that «تحويلات» keeps a row open");
+                click("غير مصنف");click("تحويل بين حساباتي");click("اعتماد التصنيف");linkOwnTransfer();
+                ok(openTransfers()==1,"Bulk page: the own transfer is still open: "+openTransfers());
+                runner.runOnMainSync(()->{try{Method edit=MainActivity.class.getDeclaredMethod("editTransactionDialog",ExpenseDb.Transaction.class);edit.setAccessible(true);
+                    edit.invoke(main,store.transactionById(r3.transaction.id));}catch(Exception error){throw new RuntimeException(error);}});idle();
+                click("كل التصنيفات");click("تحويل بين حساباتي");click("حفظ");linkOwnTransfer();
+                ok(openTransfers()==0,"Edit page: the own transfer is still open: "+openTransfers());
+                for(CaptureResult r:new CaptureResult[]{r1,r2,r3})ok("transfer".equals(store.transactionById(r.transaction.id).kind),"Not a transfer between own accounts: "+r.transaction.id);
+                store.repairAll();ok(openTransfers()==0,"Own transfers reopened after the data check: "+openTransfers());
             }
             result.putString("stream","Support aids UI checks passed: "+checked+"; mode="+mode+"\n");
         }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Support aids UI FAILED: "+trace);}
