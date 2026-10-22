@@ -3226,7 +3226,7 @@ public final class MainActivity extends Activity {
         LocalDate[] period = statementPeriod();
         MoneyFlow.Statement s = MoneyFlow.statement(db.flowItems(period[0], period[1], ZoneId.systemDefault()), period, ZoneId.systemDefault(), "EGP");
         DateTimeFormatter dayMonth = DateTimeFormatter.ofPattern("d MMMM", new Locale("ar"));
-        final int softInk = 0xffb9d3c8, softCoral = 0xffffb4a8, softSky = 0xffa9d6ff, track = 0x2effffff;
+        final int softInk = 0xffb9d3c8, softGold = 0xfff0c987, softSky = 0xffa9d6ff, track = 0x2effffff;
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setPadding(dp(18), dp(14), dp(18), dp(14));
@@ -3246,7 +3246,7 @@ public final class MainActivity extends Activity {
         TextView caption = label("باقي من دخل الفترة", 13, softInk, false);
         LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-1, -2); captionParams.topMargin = dp(18);
         hero.addView(caption, captionParams);
-        TextView remaining = label((over ? "−" : "") + money(Math.abs(s.remaining), "EGP"), 34, over ? softCoral : Color.WHITE, true);
+        TextView remaining = label((over ? "−" : "") + money(Math.abs(s.remaining), "EGP"), 34, over ? softGold : Color.WHITE, true);
         remaining.setTextDirection(View.TEXT_DIRECTION_LTR); remaining.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
         remaining.setSingleLine(true); remaining.setFontFeatureSettings("tnum");
         remaining.setAutoSizeTextTypeUniformWithConfiguration(22, 34, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
@@ -3255,13 +3255,13 @@ public final class MainActivity extends Activity {
         LinearLayout bar = new LinearLayout(this); bar.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         bar.setBackground(rounded(track, 99)); bar.setClipToOutline(true);
         float filled = Math.min(1f, share);
-        View fill = new View(this); fill.setBackground(rounded(over ? softCoral : LIME, 99));
+        View fill = new View(this); fill.setBackground(rounded(over ? softGold : LIME, 99));
         bar.addView(fill, new LinearLayout.LayoutParams(0, -1, filled));
         bar.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 1f - filled));
         bar.setContentDescription(hint);
         LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(-1, dp(6)); barParams.topMargin = dp(12);
         hero.addView(bar, barParams);
-        TextView hintView = label(hint, 12, over ? softCoral : softInk, false);
+        TextView hintView = label(hint, 12, over ? softGold : softInk, false);
         LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2); hintParams.topMargin = dp(6);
         hero.addView(hintView, hintParams);
 
@@ -3270,7 +3270,7 @@ public final class MainActivity extends Activity {
         String incomeDate = s.salaryWhen > 0 ? "يوم " + Instant.ofEpochMilli(s.salaryWhen).atZone(ZoneId.systemDefault()).toLocalDate().format(dayMonth) : "الفترة";
         View[] columns = {
                 statementStat(LIME, "دخل", (s.income > 0 ? "+" : "") + money(s.income, "EGP"), incomeDate, () -> openStatement(MoneyFlow.Bucket.INFLOW.name(), false)),
-                statementStat(softCoral, "خرج", (s.out > 0 ? "−" : "") + money(s.out, "EGP"), s.outCount + " عملية", () -> openStatement(MoneyFlow.OUT_FILTER, false)),
+                statementStat(softGold, "خرج", (s.out > 0 ? "−" : "") + money(s.out, "EGP"), s.outCount + " عملية", () -> openStatement(MoneyFlow.OUT_FILTER, false)),
                 statementStat(softSky, "صرف يومي", money(s.living, "EGP"), "من خرج", () -> openStatement(MoneyFlow.Bucket.LIVING.name(), false))};
         for (int i = 0; i < columns.length; i++) {
             if (i > 0) {
