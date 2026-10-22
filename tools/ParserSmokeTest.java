@@ -35,6 +35,9 @@ public final class ParserSmokeTest {
     }
 
     public static void main(String[] args) {
+        ExpenseParser.Parsed telda = ExpenseParser.parse("Telda", "Telda تم دفع 15 ج.م. في \"Kashier Butlers\"\nرصيدك: 31.5 ج.م.");
+        if (telda == null || telda.amountMinor != 1500 || !"EGP".equals(telda.currency) || !telda.merchant.contains("Butlers"))
+            throw new AssertionError("Telda notification: " + (telda == null ? "null" : telda.merchant + "/" + telda.amountMinor));
         expect("BANK", "Card purchase at AMAZON EGP 1,250.50. Available balance EGP 300", 125050, "EGP");
         expect("BANK", "تم خصم ٢٥٠٫٠٠ جنيه لدى كارفور من بطاقة ****1234", 25000, "EGP");
         ExpenseParser.Parsed card = ExpenseParser.parse("BANK", "تم خصم ٢٥٠٫٠٠ جنيه لدى كارفور من بطاقة ****1234");
@@ -81,9 +84,17 @@ public final class ParserSmokeTest {
         if (ExpenseParser.eventTime("Balance EGP 300", received) != received)
             throw new AssertionError("Missing date should use message time");
         checked++;
-        for(String body:new String[]{"on 08/10/2026","on 09/10/2026","08OCT26"}) {
+        for(String body:new String[]{"on 08/10/2026","08OCT26"}) {
             if(!"date_only".equals(ExpenseParser.eventTimeWithPrecision(body,received).precision))
-                throw new AssertionError("Missing clock must retain date-only precision");
+                throw new AssertionError("Missing clock on an earlier day must retain date-only precision");
+            checked++;
+        }
+        // Owner rule (22 Oct 2026): a message dated the day it arrived took place when it arrived — the delivery time
+        // is the transaction time, not «تاريخ فقط».
+        for(String body:new String[]{"on 09/10/2026","09OCT26","فى 09-10-2026"}) {
+            ExpenseParser.EventTime sameDay=ExpenseParser.eventTimeWithPrecision(body,received);
+            if(!"exact".equals(sameDay.precision) || sameDay.when!=received)
+                throw new AssertionError("Same-day date without a clock must use the delivery time: "+body+" → "+sameDay.precision);
             checked++;
         }
         for(String body:new String[]{"on 08/10/2026 12:00","on 09/10/2026 14:42","no stated date","on 31/02/2026"}) {
@@ -273,18 +284,11 @@ public final class ParserSmokeTest {
             throw new AssertionError("Mobile-credit subscription was missed");
         checked++;
         expect("1234", "Dear customer, you have successfully purchased Microsoft Apps - Microsoft 365 Basic Subscription - 1 month (Microsoft OneDrive) from Google Play Store and 80 Egyptian pound has been deducted from your credit", 8000, "EGP");
-        if (!ExpenseParser.isCompletedFinancialCandidate(vodafoneRecharge) ||
-                ExpenseParser.isCompletedFinancialCandidate(valuRequest) ||
-                ExpenseParser.isCompletedFinancialCandidate("اقوى خصومات باقات Plus الجديدة 400 ميجا ب20 جنيه بدل 100 العرض سارى") ||
-                ExpenseParser.isCompletedFinancialCandidate("نذكرك بدفع 5.00 ج.م. رسوم استخدام الراوتر"))
-            throw new AssertionError("Coverage audit did not separate completed events from reminders and offers");
-        checked++;
         // Promotions mention amounts but never move money (real Banque Misr campaign, July 2026).
         String carnival = "عميلنا العزيز، استمتع بعروض كرنفال بنك مصر - يوليو 2026 عند استخدام بطاقات بنك مصر الائتمانية في الشراء أونلاين، " +
                 "وعزز فرصتك للفوز بكاش باك يصل إلى 50,000 جنيه. العرض ساري حتى 16 يوليو 2026. للمزيد: bnkmsr.com/BMCarnivalCashBack . تُطبق الشروط والأحكام.";
         skip(carnival);
-        if (ExpenseParser.parseIncome("Banque Misr", carnival) != null || ExpenseParser.parseTransfer(carnival) != null ||
-                ExpenseParser.isCompletedFinancialCandidate(carnival))
+        if (ExpenseParser.parseIncome("Banque Misr", carnival) != null || ExpenseParser.parseTransfer(carnival) != null)
             throw new AssertionError("Promotion read as money movement");
         checked++;
         skip("Get up to 20% cash back when you pay with your card at AMAZON. Offer valid till 30 Oct. T&Cs apply. EGP 500 max");
@@ -325,9 +329,6 @@ public final class ParserSmokeTest {
                 ExpenseParser.isUnsuccessful("هيتم خصم ٧٠٠ جنيه من حسابك بكرة") ||
                 ExpenseParser.isFutureOnly("تم خصم ١٠٠٠ جنيه لدى كارفور، وسيتم خصم رسوم ٥ جنيه"))
             throw new AssertionError("Future wording was confused with failure or completed payment");
-        checked++;
-        if(ExpenseParser.isCompletedFinancialCandidate("سيتم خصم 700 جنيه من حسابك بكرة"))
-            throw new AssertionError("Future alert appeared completed in coverage review");
         checked++;
         String distant="تم خصم رسوم الخدمة " + "تفاصيل ".repeat(25) + "500 جنيه وسيتم خصم رسوم غدًا";
         skip(distant);

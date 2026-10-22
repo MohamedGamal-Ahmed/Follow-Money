@@ -2,6 +2,27 @@ plugins {
     id 'com.android.application'
 }
 
+// Dependency-free JVM fixture integrity gate. This does not claim semantic parser coverage yet.
+def parserCorpusClasses = layout.buildDirectory.dir('parser-corpus/classes')
+tasks.register('compileParserCorpusChecks', JavaCompile) {
+    source rootProject.files('tools/ParserCorpusFixture.java', 'tools/ParserCorpusTest.java')
+    destinationDirectory = parserCorpusClasses
+    classpath = files()
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    options.encoding = 'UTF-8'
+}
+def parserCorpusCheck = tasks.register('parserCorpusCheck', JavaExec) {
+    dependsOn tasks.named('compileParserCorpusChecks')
+    classpath = files(parserCorpusClasses)
+    mainClass = 'com.mohamedgamal.masareef.ParserCorpusTest'
+    workingDir rootProject.projectDir
+    args rootProject.file('tools/fixtures/parser-corpus.tsv').absolutePath
+    inputs.file(rootProject.file('tools/fixtures/parser-corpus.tsv'))
+}
+tasks.named('preBuild').configure { dependsOn parserCorpusCheck }
+tasks.named('check').configure { dependsOn parserCorpusCheck }
+
 android {
     namespace 'com.mohamedgamal.masareef'
     compileSdk 36
@@ -11,8 +32,8 @@ android {
         applicationId 'com.mohamedgamal.masareef'
         minSdk 26
         targetSdk 36
-        versionCode 5
-        versionName '0.3.0'
+        versionCode 10
+        versionName '0.4.0'
         manifestPlaceholders = [appLabel: 'Follow Money']
         testInstrumentationRunner 'com.mohamedgamal.masareef.ReconciliationTest'
     }

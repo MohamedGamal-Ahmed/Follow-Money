@@ -1,12 +1,20 @@
 # Google Play release preparation
 
-Current scope: [feature freeze checkpoint — 14 October 2026](RELEASE_FREEZE_2026-10-14.md). The owner confirmed that Play Console has not been created and registration payment remains deferred to 1 November. Older build/test records below do not validate the latest source automatically.
+Current scope: [feature freeze checkpoint — 14 October 2026](RELEASE_FREEZE_2026-10-14.md). On 21 October 2026 the owner confirmed Play Console registration and payment of the USD 25 fee; account details are awaiting Google's review. This is owner-reported, not a live Console verification or app approval. Older build/test records below do not validate the latest source automatically.
 
-Prepared 12 October 2026. This is a preparation record, not approval or a published release. Correction: the owner clarified that the Google/Gmail account dates to about 2017, but no Play Console developer account exists yet. Gmail age does not exempt a newly created personal developer account from the mandatory closed test: at least 12 opted-in testers continuously for 14 days before applying for production access. Verify the appropriate developer account type for the app before paying registration fees.
+Originally prepared 12 October 2026; account status updated 21 October. This is a preparation record, not approval or a published release. Gmail age does not exempt a newly created personal developer account from the mandatory closed test: at least 12 opted-in testers continuously for 14 days before applying for production access. Account type has not been confirmed in this review.
 
 ## Submission gates
 
-Registration/payment is deferred to the start of November 2026. [Closed test plan and account-type clarification](CLOSED_TESTING_PLAN.md) records the updated account facts and the official-policy uncertainty to resolve before paying.
+Registration/payment is complete per the owner; account verification is pending. Next gates are app setup, declaration review and the applicable testing track. [Closed test plan and account-type clarification](CLOSED_TESTING_PLAN.md). The current phone candidate is 0.3.1 / versionCode 6; no upload is implied.
+
+### Phone candidate — 21 October 2026
+
+- Version 0.3.1 / code 6 follows the owner's installed 0.3.0 / code 5. The existing native UI migration includes shared page/sheet controls, transaction/account editors, searchable settings and financial review pages.
+- Review found that commitment pages closed before queued writes completed. They now close only after a successful write, retain the draft with an inline error on rejection, and suppress repeated submissions while pending. A late completion cannot close a different page.
+- The unified UI matrix is now included in emulator CI; local runners remain restricted to disposable emulators. Existing phone data is not a test fixture.
+- APK application ID and signing certificate must match the installed variant for an in-place update. Beta, original debug and Play-signed installations are distinct; a version number alone does not establish compatibility. Keep a password-encrypted full backup before phone acceptance.
+- Remaining publication gates: final phone/background and permission acceptance, API 26 runtime checks, manual TalkBack coverage, portable signing-key recovery, final store screenshots/reviewer video, Console declarations and the applicable closed test. Account verification does not approve the app or its SMS exception.
 
 | Item | Evidence / remaining action |
 | --- | --- |
@@ -21,7 +29,7 @@ Registration/payment is deferred to the start of November 2026. [Closed test pla
 | Store listing | Draft Arabic/English text below. Synthetic screenshots, final icon/feature graphic and reviewer demo video are pending. |
 | Reviewer access | No app login. Provide synthetic SMS instructions/video; do not expect a reviewer to have Egyptian bank SMS. |
 | Financial QA | Re-run synthetic database/reconciliation checks. Historical financial-audit claims, including the previously mentioned inter-account difference and repair dry run, need a separate local evidence review after timestamp correction. No phone export or repair is authorized by this publishing task. |
-| Account setup | New developer registration is required. Confirm account type, then verify identity/contact details, account/device verification, countries, pricing, target audience and content rating. A new personal account requires the 12-tester/14-day closed test; the old Gmail date is irrelevant. |
+| Account setup | Registration and USD 25 payment reported complete on 21 October; details under review. Confirm account type, account/device verification, countries, pricing, target audience and content rating. A new personal account requires the 12-tester/14-day closed test; the old Gmail date is irrelevant. |
 
 ## Build and upload signing
 

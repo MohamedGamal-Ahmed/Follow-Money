@@ -3,6 +3,6 @@
      1.29:1 against the dark dialog surface #16261F, so the button lost all shape;
      dark mode uses the theme accent (with dark ink text) like every other filled primary control. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#2BBF85" />
+    <solid android:color="@color/ui_accent_dark" />
     <corners android:radius="14dp" />
 </shape>

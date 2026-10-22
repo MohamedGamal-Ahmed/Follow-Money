@@ -1,0 +1,13 @@
+# HELD-OUT BLIND SET 5 (routine messages), owner-written 25 October 2026. Separate from the corpus and sets 1-4. Never use these messages to develop or tune rules.
+# Owner verdict on the raw run (23fded4): decision 10/10; one correction (E2: 8812 is the user account, no counterparty).
+id	channel	body	android.title	android.text	android.bigText	android.textLines	expected_type	expected_decision	expected_amount_minor	expected_currency	expected_direction	expected_party_key	expected_balance_minor	expected_fee_minor	note
+c5E01	sms	تم خصم 230.00 جنيه من بطاقتك المنتهية بـ 5521 لدى CARREFOUR بتاريخ 25/10/2026 الساعة 19:22. الرصيد المتاح 3,270.00 جنيه	\N	\N	\N	\N	transaction	AUTO	23000	EGP	out	carrefour	327000	\N	
+c5E02	sms	تم اضافة مبلغ 2000EGP الى حساب رقم xxx8812 فى 25-Oct-2026 عن طريق التحويل اللحظي	\N	\N	\N	\N	transaction	AUTO	200000	EGP	in	\N	\N	\N	8812 is the user account (account_last4), not a counterparty
+c5E03	sms	فودافون كاش: تم دفع 65.00 جنيه لـ كافيه بينو. رصيدك الحالي 185.00 جنيه. رقم العملية 445566778.	\N	\N	\N	\N	transaction	AUTO	6500	EGP	out	كافيه بينو	18500	\N	
+c5E04	sms	رمز التحقق لعملية الشراء بقيمة 1,299.00 جنيه لدى noon.com هو 553019. صالح لمدة 3 دقائق. لا تشاركه مع أحد.	\N	\N	\N	\N	otp	IGNORE	\N	\N	\N	\N	\N	\N	
+c5E05	sms	Dear Customer, your credit card ending with#9034 was charged for EGP 1,799.00 at AMAZON.EG on 25/10/26 at 21:05. Card available limit is EGP 20,000.00.	\N	\N	\N	\N	transaction	AUTO	179900	EGP	out	amazon	\N	\N	
+c5E06	sms	عزيزي العميل، تم إيداع راتب بمبلغ 18,500.00 جنيه من شركة المقاولون العرب في حسابكم المنتهي بـ 8812. الرصيد 21,340.75 جنيه	\N	\N	\N	\N	transaction	AUTO	1850000	EGP	in	شركه المقاولون العرب	2134075	\N	
+c5E07	notification	\N	InstaPay	تم إرسال 400.00 جنيه إلى mohamed.a@instapay بنجاح. الرسوم 0.00 جنيه		\N	transaction	AUTO	40000	EGP	out	mohamed a instapay	\N	0	
+c5E08	sms	استمتع بكاش باك 15% حتى 100 جنيه على أول عملية شراء ببطاقتك هذا الشهر! للتفاصيل: https://bank.example/cb	\N	\N	\N	\N	promo	IGNORE	\N	\N	\N	\N	\N	\N	
+c5E09	notification	\N	Telda		\N	تم دفع 120 ج.م. في "محطة وطنية"\nرصيدك: 44.5 ج.م.	transaction	AUTO	12000	EGP	out	محطه وطنيه	4450	\N	text only in textLines
+c5E10	sms	تم سحب 500.00 جنيه من ATM 0921 ببطاقتك المنتهية بـ 5521 بتاريخ 25/10/2026. الرصيد المتاح 2,770.00 جنيه	\N	\N	\N	\N	transaction	AUTO	50000	EGP	out	\N	277000	\N	

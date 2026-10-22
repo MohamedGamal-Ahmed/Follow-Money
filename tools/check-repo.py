@@ -43,6 +43,9 @@ allowed_docs.update("docs/screenshots/review-alerts-2026-10-16/"+name for name i
     "README.md", "classification-light.png", "alerts-dark-large.png", "calendar-light.png",
     "details-dark-large.png"))
 allowed_docs.add("docs/refactor-plan.md")
+# 0.4.0: the owner-approved spec and its execution prompt (new pipeline adoption and cleanup).
+allowed_docs.update(("docs/superpowers/specs/2026-10-22-new-engine-adoption-and-cleanup-design.md",
+                     "docs/superpowers/prompts/2026-10-22-opus-new-engine-adoption-and-cleanup.md"))
 private_paths = re.compile(r"(^|/)(\.tmp|\.gradle|\.idea|build|captures|__pycache__)(/|$)|(^|/)local\.properties$|\.(apk|aab|jks|keystore|p12|pfx|dpapi\.xml|db|sqlite\w*|tar|log|hprof)(-|$)|(^|/)\.env($|\.)", re.I)
 credential = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b|\bAIza[A-Za-z0-9_-]{35}\b")
 for name in files:

@@ -32,7 +32,9 @@ final class SmsImportUiTest{
         if(node instanceof ViewGroup){ViewGroup group=(ViewGroup)node;for(int i=0;i<group.getChildCount();i++){View found=findPrefix(group.getChildAt(i),prefix);if(found!=null)return found;}}return null;
     }
     private void click(String text){main(()->{View button=find(activity.getWindow().getDecorView(),text);if(button==null)throw new AssertionError("Missing "+text);button.performClick();});}
-    private void awaitDone()throws Exception{for(int i=0;i<300;i++){runner.waitForIdleSync();String phase=(String)field(field(activity,"session"),"phase");if("done".equals(phase))return;if("ready".equals(phase)||"error".equals(phase))throw new AssertionError("Automatic import stopped at "+phase);Thread.sleep(100);}throw new AssertionError("Import did not finish");}
+    private void awaitDone()throws Exception{for(int i=0;i<300;i++){runner.waitForIdleSync();Object session=field(activity,"session");String phase=(String)field(session,"phase");if("done".equals(phase))return;
+        // Automatic import passes through «ready» while it reads pending cancellations; only a review session stops there.
+        if("ready".equals(phase)&&(Boolean)field(session,"reviewBeforeImport")||"error".equals(phase))throw new AssertionError("Automatic import stopped at "+phase);Thread.sleep(100);}throw new AssertionError("Import did not finish");}
     private void shot(String name)throws Exception{runner.waitForIdleSync();Thread.sleep(600);android.graphics.Bitmap b=runner.getUiAutomation().takeScreenshot();if(b==null)throw new AssertionError("No screenshot");try(FileOutputStream out=new FileOutputStream(new File(captures,name+".png"))){ok(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}}
     @SuppressWarnings("unchecked") void run(boolean dark,float scale){
         int status=-1;Bundle result=new Bundle();android.content.res.Configuration original=null;
@@ -46,14 +48,14 @@ final class SmsImportUiTest{
             if(scale>1)main(()->{android.content.res.Configuration c=new android.content.res.Configuration(activity.getResources().getConfiguration());c.fontScale=scale;activity.getResources().updateConfiguration(c,activity.getResources().getDisplayMetrics());call("show");});
             ok((Boolean)field(activity,"dark")==dark);shot("01-period");ok(find(activity.getWindow().getDecorView(),"مراجعة الرسائل قبل الحفظ (اختياري)")!=null);
             click("من تاريخ تختاره");shot("00-calendar");runner.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);runner.waitForIdleSync();ok("idle".equals(field(field(activity,"session"),"phase")));
-            click("كل الرسائل");awaitDone();ok((Integer)field(field(activity,"session"),"processed")>0);ok(db.transactionCount()>0);shot("02-result");
+            click("كل الرسائل");awaitDone();ImportResult first=(ImportResult)field(field(activity,"session"),"imported");ok(first!=null&&first.committed&&first.survivingCreated>0);ok(db.transactionCount()>0);shot("02-result");
             if(new CaptureEvents(db).pendingHistory(0,Long.MAX_VALUE).isEmpty()){StringBuilder why=new StringBuilder("No pending historical cancellation; now="+System.currentTimeMillis());
                 try(android.database.Cursor c=db.getReadableDatabase().rawQuery("SELECT status,received_at,source FROM capture_events",null)){while(c.moveToNext())why.append(" | ").append(c.getString(0)).append(" at ").append(c.getLong(1)).append(" via ").append(c.getString(2));}
                 for(Object item:(List<?>)field(field(activity,"session"),"items")){SmsPreview r=(SmsPreview)item;if("correction".equals(r.kind))why.append(" | row status ").append(r.captureStatus).append(r.selected?" selected ":" unselected ").append(r.captureAt);}
                 throw new AssertionError(why.toString());}
             ok(findPrefix(activity.getWindow().getDecorView(),"مراجعة الإلغاء · ")!=null);
             main(()->{View pending=findPrefix(activity.getWindow().getDecorView(),"مراجعة الإلغاء · ");pending.getParent().requestChildFocus(pending,pending);});shot("02b-pending-cancellation");
-            long before=db.transactionCount();click("استيراد فترة أخرى");click("كل الرسائل");awaitDone();ok(before==db.transactionCount());ok((Integer)field(field(activity,"session"),"processed")==0);
+            long before=db.transactionCount();click("استيراد فترة أخرى");click("كل الرسائل");awaitDone();ok(before==db.transactionCount());ImportResult repeated=(ImportResult)field(field(activity,"session"),"imported");ok(repeated==null||repeated.committed&&repeated.created==0);
             click("تفاصيل الرسائل");ok("details".equals(field(field(activity,"session"),"phase")));ok(field(activity,"save")==null);shot("03-details");
             main(()->{Method m=SmsImportActivity.class.getDeclaredMethod("showOriginal",SmsPreview.class);m.setAccessible(true);m.invoke(activity,SmsPreview.parse("QA BANK","Card purchase at QA IMPORT EGP 15.00",System.currentTimeMillis()));});shot("04-source");
             runner.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);runner.waitForIdleSync();

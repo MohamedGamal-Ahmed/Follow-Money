@@ -173,7 +173,7 @@ final class AuditRegressionTest {
         SmsPreview bankCopy=SmsPreview.parse("BANK","Card purchase EGP 100 at QA SHOP",t+1000);ok(bankCopy!=null);
         // The repair that follows the import merges the bank copy into the notification row; make that step fail.
         db.getWritableDatabase().execSQL("CREATE TRIGGER qa_repair_fault BEFORE DELETE ON transactions BEGIN SELECT RAISE(ABORT,'qa repair fault'); END");
-        try{SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(bankCopy));throw new AssertionError("Failed repair was reported as a saved import");}
+        try{ImportRun.added(db,Collections.singletonList(bankCopy));throw new AssertionError("Failed repair was reported as a saved import");}
         catch(AssertionError wrong){throw wrong;}
         catch(RuntimeException expected){}
         eq(rows,db.transactionCount());
@@ -183,7 +183,7 @@ final class AuditRegressionTest {
     public void testSavedSmsImportSurvivesFailureReadingReviewList(){
         long t=at(LocalDate.now(),10);
         SmsPreview card=SmsPreview.parse("BANK","Card purchase EGP 55 at QA SHOP",t);ok(card!=null);
-        eq(1,SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(card)));
+        eq(1,ImportRun.added(db,Collections.singletonList(card)));
         // Reading the review list happens after the commit; if it fails the saved import must still be reported as saved.
         db.getWritableDatabase().execSQL("DROP TABLE capture_events");
         eq(0,SmsImportActivity.pendingAfterCommit(db,0,Long.MAX_VALUE).size());
@@ -223,7 +223,7 @@ final class AuditRegressionTest {
         db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES (?)",new Object[]{"fee:"+out});
         SmsPreview sms=SmsPreview.parse("BANK","Card purchase EGP 55 at QA SHOP",t+120000);ok(sms!=null);
         long rows=db.transactionCount();
-        eq(1,SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(sms)));
+        eq(1,ImportRun.added(db,Collections.singletonList(sms)));
         eq(rows+1,db.transactionCount());
         ok("expense".equals(db.transactionById(out).kind));eq(10050,db.transactionById(out).amountMinor);eq(0,db.transferFee(out));ok(db.transactionById(in)!=null);
         ok(db.transactionById(out).needsReview,"TR2: skipped debit has no visible review marker");
@@ -271,7 +271,7 @@ final class AuditRegressionTest {
         db.getWritableDatabase().execSQL("CREATE TRIGGER qa_fee_fault BEFORE INSERT ON transactions WHEN NEW.unique_key LIKE 'fee:%' BEGIN SELECT RAISE(ABORT,'qa fee fault'); END");
         SmsPreview sms=SmsPreview.parse("BANK","Card purchase EGP 55 at QA SHOP",t+120000);ok(sms!=null);
         long rows=db.transactionCount();
-        try{SmsImportActivity.applyBatchWithRepair(db,Collections.singletonList(sms));throw new AssertionError("Import reported success although repair failed");}
+        try{ImportRun.added(db,Collections.singletonList(sms));throw new AssertionError("Import reported success although repair failed");}
         catch(AssertionError wrong){throw wrong;}
         catch(RuntimeException expected){}
         eq(rows,db.transactionCount());ok("expense".equals(db.transactionById(out).kind));
@@ -452,6 +452,56 @@ final class AuditRegressionTest {
         eq(0,db.paymentSources().size());eq(0,scalar("SELECT COUNT(*) FROM source_aliases"));
     }
 
+    public void testExplicitSourceBankCorrectionPreservesIdentityAndFinancialRows(){
+        long card=db.addPaymentSource("10001","بطاقة","4101"),account=db.addPaymentSource("20002","حساب","4102");
+        long when=at(LocalDate.now(),10);ok(db.addManualEntry(when,12345,"EGP","QA shop","بقالة",card,"expense",null,"original"));long tx=db.latestInserted().id;
+        ok(new SourceMutation(db).correctBank(card,"HSBC","كارت المشتريات"));ok(new SourceMutation(db).correctBank(account,"HSBC","حساب المرتب"));
+        eq("HSBC",db.paymentSource(card).name);eq("كارت المشتريات",db.paymentSource(card).displayName);eq("4101",db.paymentSource(card).last4);
+        ok(db.sourceAliasOwner("10001:4101")==card);ok(db.sourceAliasOwner("HSBC:4101")==card);ok(db.paymentSource(card).parentSourceId==null);
+        eq(12345,db.transactionById(tx).amountMinor);eq(when,db.transactionById(tx).when);eq(card,db.transactionById(tx).paymentSourceId);eq("original",db.transactionById(tx).note);
+        db.linkCardToAccount(card,account);eq(account,db.accountId(card));eq(1,db.transactionCount());
+    }
+
+    public void testSourceBankCorrectionAliasFailureRollsBackEverything(){
+        long id=db.addPaymentSource("10001","بطاقة","4101");
+        db.getWritableDatabase().execSQL("CREATE TRIGGER qa_bank_alias_abort BEFORE INSERT ON source_aliases BEGIN SELECT RAISE(ABORT,'qa bank alias fault'); END");
+        try{new SourceMutation(db).correctBank(id,"HSBC","QA label");throw new AssertionError("Failed correction reported saved");}catch(android.database.sqlite.SQLiteException expected){}
+        eq("10001",db.paymentSource(id).name);ok(db.paymentSource(id).displayName==null);eq(1,db.sourceAliasCount(id));ok(db.sourceAliasOwner("HSBC:4101")==null);
+    }
+
+    public void testSourceBankCorrectionDoesNotStealAliasOrChangeConfirmedLinks(){
+        long owner=db.addPaymentSource("HSBC","حساب","4101"),card=db.addPaymentSource("10001","بطاقة","4101");
+        try{new SourceMutation(db).correctBank(card,"HSBC","QA label");throw new AssertionError("Alias was stolen");}catch(IllegalArgumentException expected){}
+        eq("10001",db.paymentSource(card).name);ok(db.sourceAliasOwner("HSBC:4101")==owner);
+        long goodCard=db.addPaymentSource("HSBC","بطاقة","5566");db.linkCardToAccount(goodCard,owner);
+        try{new SourceMutation(db).correctBank(goodCard,"بنك مصر","QA label");throw new AssertionError("Confirmed bank changed");}catch(IllegalArgumentException expected){}
+        eq("HSBC",db.paymentSource(goodCard).name);eq(owner,db.accountId(goodCard));
+    }
+
+    public void testSourceBankCorrectionRejectsDigitsAndMissingAndNestedWrites(){
+        long id=db.addPaymentSource("10001","بطاقة","4101");
+        try{new SourceMutation(db).correctBank(id,"20002","QA");throw new AssertionError("Digits accepted as bank");}catch(IllegalArgumentException expected){}
+        ok(!new SourceMutation(db).correctBank(999999,"HSBC","QA"));
+        SQLiteDatabase sql=db.getWritableDatabase();sql.beginTransaction();try{
+            try{new SourceMutation(db).correctBank(id,"HSBC","QA");throw new AssertionError("Correction escaped outer transaction");}catch(IllegalStateException expected){}
+        }finally{sql.endTransaction();}
+        eq("10001",db.paymentSource(id).name);eq(1,db.paymentSources().size());
+    }
+
+    public void testNewSourceBankAndFriendlyNameAreSeparate(){
+        long id=new SourceMutation(db).createReviewed("HSBC","حساب","9988","حساب المرتب");
+        eq("HSBC",db.paymentSource(id).name);eq("حساب المرتب",db.paymentSource(id).displayName);ok(db.sourceAliasOwner("HSBC:9988")==id);
+    }
+
+    public void testSourceRecognitionQueryUsesExactIdentityAndIncludesIncomingTransfers(){
+        long source=db.addPaymentSource("HSBC","حساب","1111"),other=db.addPaymentSource("HSBC","حساب","2222");long when=at(LocalDate.now(),10);
+        for(int i=0;i<4;i++)ok(db.addManualEntry(when+i,100+i,"EGP","QA source "+i,"بقالة",source,"expense",null,null));
+        ok(db.addManualEntry(when+10,500,"EGP","QA incoming","تحويلات",other,"transfer",source,null));
+        ok(db.addManualEntry(when+20,600,"EGP","QA unrelated","بقالة",other,"expense",null,null));
+        List<ExpenseDb.Transaction> rows=db.recentSourceTransactions(source);eq(3,rows.size());eq("QA incoming",rows.get(0).merchant);eq("QA source 3",rows.get(1).merchant);
+        eq(6,db.transactionCount());
+    }
+
     public void testCaptureResultReportsCommittedDuplicateEvidenceChange(){
         long t=at(LocalDate.now(),10);String body="Card purchase EGP 100 at QA CONTRACT";
         ok(db.captureSms("BANK",body,t).dbChanged);long revision=db.changes();
@@ -601,7 +651,7 @@ final class AuditRegressionTest {
         ok(db.changes()>revision);revision=db.changes();
         ok(!db.captureSms("BANK",CANCEL_NOTICE,t).accepted);eq(revision,db.changes());
         SmsPreview history=SmsPreview.parse("BANK",CANCEL_NOTICE,t+3600000);ok(history!=null);
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(history)));
+        eq(0,ImportRun.added(db,Collections.singletonList(history)));
         eq(1,scalar("SELECT COUNT(*) FROM capture_events WHERE status='needs_confirmation'"));
         eq(1,scalar("SELECT COUNT(*) FROM sms_import_receipts"));eq(0,db.transactionCount());
     }
@@ -755,10 +805,10 @@ final class AuditRegressionTest {
         eq(500,db.transactions().size());eq(501,db.transactionCount());
         SmsPreview a=SmsPreview.parse("BANK","Card purchase EGP 8 at QA SHOP A",t+1000);
         SmsPreview b=SmsPreview.parse("BANK","Card purchase EGP 9 at QA SHOP B",t+2000);ok(a!=null&&b!=null);
-        eq(2,SmsImportActivity.applySelected(db,Arrays.asList(a,b)));eq(503,db.transactionCount());
-        eq(0,SmsImportActivity.applySelected(db,Arrays.asList(a,b)));eq(503,db.transactionCount());
+        eq(2,ImportRun.added(db,Arrays.asList(a,b)));eq(503,db.transactionCount());
+        eq(0,ImportRun.added(db,Arrays.asList(a,b)));eq(503,db.transactionCount());
         SmsPreview c=SmsPreview.parse("BANK","Card purchase EGP 7 at QA SHOP C",t+3000);
-        try{SmsImportActivity.applySelected(db,Arrays.asList(c,null));throw new AssertionError("Failed batch committed");}
+        try{ImportRun.added(db,Arrays.asList(c,null));throw new AssertionError("Failed batch committed");}
         catch(NullPointerException expected){/* Regression fixture injects a failure midway. */}
         eq(503,db.transactionCount());eq(0,db.smsCaptureStatus(c.sender,c.body,c.captureAt));
     }
@@ -1226,13 +1276,13 @@ final class AuditRegressionTest {
     // row that the selection never named, a refused insert and a side-effect-only import all report 0. ----
     private long receipts(){return scalar("SELECT COUNT(*) FROM sms_import_receipts");}
     private long evidenceCount(){return scalar("SELECT COUNT(*) FROM capture_evidence");}
-    private long imported(SmsPreview... rows){return new ImportBatch(db).execute(Arrays.asList(rows));}
-    private long selectedDirect(SmsPreview... rows){return new ImportBatch(db).applySelected(Arrays.asList(rows));}
+    private long imported(SmsPreview... rows){return ImportRun.added(db,Arrays.asList(rows));}
+    private long selectedDirect(SmsPreview... rows){return ImportRun.added(db,Arrays.asList(rows));}
 
     public void testImportBaselineFreshRowCommitsOneRowWithReceiptAndEvidence(){
         long t=at(LocalDate.now(),10),rows=db.transactionCount(),revision=db.changes();
         SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 100 at QA IMPORT FRESH",t);ok(row!=null);
-        eq(1,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(1,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows+1,db.transactionCount());eq(1,receipts());eq(1,evidenceCount());ok(db.changes()>revision);
         ExpenseDb.Transaction created=db.latestInserted();
         eq(10000,created.amountMinor);ok("expense".equals(created.kind));ok(!created.needsReview);
@@ -1244,7 +1294,7 @@ final class AuditRegressionTest {
         String body="Card purchase EGP 120 at QA DUPLICATE";
         SmsPreview first=SmsPreview.parse("BANK",body,t),second=SmsPreview.parse("BANK",body,t);
         ok(first!=null&&second!=null);ok(first.body.equals(second.body));
-        eq(1,new ImportBatch(db).execute(Arrays.asList(first,second)));
+        eq(1,ImportRun.added(db,Arrays.asList(first,second)));
         eq(rows+1,db.transactionCount());eq(1,receipts());eq(1,evidenceCount());ok(db.changes()>revision);
     }
 
@@ -1254,7 +1304,7 @@ final class AuditRegressionTest {
         SmsPreview second=SmsPreview.parse("BANK","Card  purchase EGP 200 at QA SEMANTIC",t+1000);
         ok(first!=null&&second!=null);ok(!first.body.equals(second.body));
         long rows=db.transactionCount(),revision=db.changes();
-        eq(1,new ImportBatch(db).execute(Arrays.asList(first,second)));
+        eq(1,ImportRun.added(db,Arrays.asList(first,second)));
         eq(rows+1,db.transactionCount());eq(2,receipts());eq(2,evidenceCount());ok(db.changes()>revision);
         eq(1,scalar("SELECT COUNT(*) FROM transactions WHERE amount_minor=20000"));
     }
@@ -1264,7 +1314,7 @@ final class AuditRegressionTest {
         ok(db.addSms("BANK",body,t));
         SmsPreview row=SmsPreview.parse("BANK",body,t);ok(row!=null);
         long rows=db.transactionCount(),revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows,db.transactionCount());eq(0,receipts());eq(1,evidenceCount());eq(revision,db.changes());
         eq(1,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
     }
@@ -1275,7 +1325,7 @@ final class AuditRegressionTest {
         db.getWritableDatabase().execSQL("INSERT INTO excluded_messages(unique_key) VALUES(?)",
                 new Object[]{CaptureIdentity.smsKey(row.sender,row.body,t)});
         long rows=db.transactionCount(),revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
         eq(2,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
     }
@@ -1286,7 +1336,7 @@ final class AuditRegressionTest {
         ok(SmsPreview.parse("BANK",null,t)==null);
         SmsPreview kept=SmsPreview.parse("BANK","Card purchase EGP 500 at QA NULL GUARD",t);ok(kept!=null);
         long rows=db.transactionCount(),revision=db.changes();
-        try{new ImportBatch(db).execute(Arrays.asList(kept,null));throw new AssertionError("A null row was accepted into the batch");}
+        try{ImportRun.added(db,Arrays.asList(kept,null));throw new AssertionError("A null row was accepted into the batch");}
         catch(AssertionError wrong){throw wrong;}
         catch(RuntimeException expected){}
         eq(rows,db.transactionCount());eq(0,receipts());eq(revision,db.changes());
@@ -1298,7 +1348,7 @@ final class AuditRegressionTest {
         SmsPreview row=SmsPreview.parse("BANK","Account ending 1234 available balance EGP 1000",t);
         ok(row!=null);ok("balance".equals(row.kind));
         long revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(0,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
         eq(1,scalar("SELECT COUNT(*) FROM balance_snapshots"));eq(100000,scalar("SELECT balance_minor FROM balance_snapshots"));
         ok(db.changes()>revision);eq(1,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
@@ -1308,7 +1358,7 @@ final class AuditRegressionTest {
         long t=at(LocalDate.now(),10);
         SmsPreview row=SmsPreview.parse("BANK",CANCEL_NOTICE,t);ok(row!=null);ok("correction".equals(row.kind));
         long revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(0,db.transactionCount());eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
         eq(1,scalar("SELECT COUNT(*) FROM capture_events WHERE status='needs_confirmation'"));
         eq(0,evidenceCount());eq(1,receipts());ok(db.changes()>revision);
@@ -1321,7 +1371,7 @@ final class AuditRegressionTest {
         db.getWritableDatabase().execSQL("UPDATE transactions SET user_edited=0 WHERE id=?",new Object[]{debit});
         SmsPreview row=SmsPreview.parse("BANK",CANCEL_NOTICE,t);ok(row!=null);
         long rows=db.transactionCount(),revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows,db.transactionCount());eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
         ok(db.transactionById(debit)!=null,"A historical cancellation archived the debit it should only flag");
         eq(22700,db.transactionById(debit).amountMinor);ok("expense".equals(db.transactionById(debit).kind));
@@ -1339,7 +1389,7 @@ final class AuditRegressionTest {
         SmsPreview row=SmsPreview.parse("BankMisr","تم تحويل مبلغ 100.50 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222",t);
         ok(row!=null);ok(row.isTransaction(),"the selected row is not a ledger candidate");
         long rows=db.transactionCount(),revision=db.changes();
-        eq(1,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(1,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows+1,db.transactionCount());
         long transfer=scalar("SELECT id FROM transactions WHERE kind='transfer' LIMIT 1");
         eq(10000,db.transactionById(transfer).amountMinor);eq(50,db.transferFee(transfer));
@@ -1354,7 +1404,7 @@ final class AuditRegressionTest {
         ok(db.addNotification("qa.bank","QA PAY","You paid EGP 100 to QA SHOP",t));
         SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 100 at QA SHOP",t+150000);ok(row!=null);
         long rows=db.transactionCount(),revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows,db.transactionCount());
         eq(1,scalar("SELECT COUNT(*) FROM transaction_archive"));eq(1,scalar("SELECT COUNT(*) FROM transactions"));
         ok(db.changes()>revision);
@@ -1367,7 +1417,7 @@ final class AuditRegressionTest {
         ok(first!=null&&fault!=null);
         db.getWritableDatabase().execSQL("CREATE TRIGGER qa_import_fault BEFORE INSERT ON transactions WHEN NEW.merchant='QA FAULT' BEGIN SELECT RAISE(ABORT,'qa import fault'); END");
         long rows=db.transactionCount(),revision=db.changes();
-        try{new ImportBatch(db).execute(Arrays.asList(first,fault));throw new AssertionError("A faulty batch was reported as imported");}
+        try{ImportRun.added(db,Arrays.asList(first,fault));throw new AssertionError("A faulty batch was reported as imported");}
         catch(AssertionError wrong){throw wrong;}
         catch(RuntimeException expected){}
         eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
@@ -1386,7 +1436,7 @@ final class AuditRegressionTest {
         SmsPreview row=SmsPreview.parse("BankMisr","تم تحويل مبلغ 100.50 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222",t);
         ok(row!=null);
         long rows=db.transactionCount(),revision=db.changes();
-        try{new ImportBatch(db).execute(Collections.singletonList(row));throw new AssertionError("A failed repair was reported as a saved import");}
+        try{ImportRun.added(db,Collections.singletonList(row));throw new AssertionError("A failed repair was reported as a saved import");}
         catch(AssertionError wrong){throw wrong;}
         catch(RuntimeException expected){}
         eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(0,scalar("SELECT COUNT(*) FROM transaction_archive"));
@@ -1397,12 +1447,12 @@ final class AuditRegressionTest {
 
     public void testImportBaselineCallerTransactionNeverReportsACommittedImport(){
         long t=at(LocalDate.now(),10);
-        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA PENDING",t);ok(row!=null);
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA CALLER",t);ok(row!=null); // not "pending": the pipeline reads that word as an unexecuted operation
         SQLiteDatabase sql=db.getWritableDatabase();
         long rows=db.transactionCount(),revision=db.changes(),value;
         sql.beginTransaction();
         try{
-            value=new ImportBatch(db).execute(Collections.singletonList(row));
+            value=ImportRun.added(db,Collections.singletonList(row));
             eq(1,value);eq(rows+1,db.transactionCount());eq(1,receipts());ok(sql.inTransaction());
         }finally{sql.endTransaction();}
         eq(rows,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
@@ -1411,7 +1461,7 @@ final class AuditRegressionTest {
 
     public void testImportBaselineEmptySelectionWritesNothing(){
         long revision=db.changes();
-        eq(0,new ImportBatch(db).execute(java.util.Collections.<SmsPreview>emptyList()));
+        eq(0,ImportRun.added(db,java.util.Collections.<SmsPreview>emptyList()));
         eq(0,db.transactionCount());eq(0,receipts());eq(0,evidenceCount());eq(revision,db.changes());
     }
 
@@ -1419,7 +1469,7 @@ final class AuditRegressionTest {
         long t=at(LocalDate.now(),10);db.putMerchantRule("QA IGNORED IMPORT","تسوق",true);
         SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 40 at QA IGNORED IMPORT",t);ok(row!=null);
         long rows=db.transactionCount(),revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
         ok(db.changes()>revision,"a refused insert still committed its receipt");
         eq(1,db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt));
@@ -1430,7 +1480,7 @@ final class AuditRegressionTest {
         SmsPreview row=SmsPreview.parse("AnotherFinance","نذكرك بسداد القسط الشهري، يرجى مراجعة التطبيق للمبلغ",t);
         ok(row!=null);ok("commitment".equals(row.kind));
         long revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(0,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
         eq(1,scalar("SELECT COUNT(*) FROM commitment_suggestions"));
         eq(1,scalar("SELECT COUNT(*) FROM commitment_observations"));ok(db.changes()>revision);
@@ -1442,7 +1492,7 @@ final class AuditRegressionTest {
         long commitment=scalar("SELECT id FROM recurring ORDER BY id DESC LIMIT 1");
         SmsPreview row=SmsPreview.parse("Billing","Netflix bill paid successfully",t);ok(row!=null);ok(!row.isTransaction());
         long revision=db.changes();
-        eq(0,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(0,ImportRun.added(db,Collections.singletonList(row)));
         eq(0,db.transactionCount());eq(0,evidenceCount());eq(1,receipts());
         eq(0,scalar("SELECT COUNT(*) FROM recurring WHERE id="+commitment+" AND last_paid_date IS NOT NULL"));
         eq(1,db.pendingCommitmentConfirmations().size());eq(0,db.recurringById(commitment).paidCount);
@@ -1544,11 +1594,96 @@ final class AuditRegressionTest {
     // fixture states the primary outcome of each selected row, and asserts the invariant that the primary
     // outcomes add up to offered; side effects and repair are asserted separately, never folded into them. ----
     private ImportResult detailed(SmsPreview... rows){return new ImportBatch(db).executeDetailed(Arrays.asList(rows));}
-    private ImportResult applyDetailed(SmsPreview... rows){return new ImportBatch(db).applySelectedDetailed(Arrays.asList(rows));}
     private void invariant(ImportResult result){
         eq(result.offered,result.rows.size());
         eq(result.offered,result.created+result.matchedExisting+result.skippedDuplicate+result.excluded+result.refused+result.noLedgerChange);
         ok(result.survivingCreated<=result.created);
+    }
+
+    /**
+     * The owner's day, 22 Oct 2026 (tools/fixtures/owner-day-2026-10-22.tsv): messages 1-3 and 5 imported from the inbox,
+     * then 4 and 6 delivered live. The import decides with the new pipeline, discovers the sources silently, and ends with
+     * the same ledger as live capture: two internal transfers, one fee and one income, no standalone income.
+     */
+    public void testOwnerDayImportThenLiveEndsInTwoInternalTransfers(){
+        long morning=LocalDate.of(2026,10,22).atTime(6,47).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        long september=LocalDate.of(2026,9,25).atTime(10,0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        String[][] inbox={
+                {"HSBC","Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre",Long.toString(morning)},
+                {"BankMisr","تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ",Long.toString(morning+30_000L)},
+                {"BankMisr","تم تحويل 30.00 جنيه بنجاح إلى talda من حساب رقم xxx7392 عن طريق التحويل اللحظي",Long.toString(morning+10*60_000L)},
+                {"HSBC","From HSBC: 25SEP26 Phone Banking Transfer to ********0001 from HEBATALLAH SAMI EGP 87,650.00+ Avl Bal EGP 87,700.00",Long.toString(september)}};
+        PipelineDecider.Context batch=PipelineDecider.context(db,"import");
+        List<SmsPreview> rows=new java.util.ArrayList<>();
+        for(String[] m:inbox){
+            SmsPreview row=PipelineDecider.importRow(batch,m[0],m[1],Long.parseLong(m[2]),Long.parseLong(m[2]));
+            ok(row!=null&&row.isTransaction(),"Imported as a movement: "+m[1]);
+            ok(row.decision!=null&&row.decision.records,"Decided by the new pipeline: "+m[1]);
+            row.captureStatus=db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe);rows.add(row);
+        }
+        SmsPreview.selectForImport(rows);
+        ImportResult result=new ImportBatch(db).executeDetailed(rows);ok(result.committed,"Batch committed");
+        db.captureNotification("io.telda.app","Telda","تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية",morning+34*60_000L);
+        db.captureNotification("com.egyptianbanks.instapay","InstaPay","إستلام نقود لقد استلمت 4.00 جنيه من mo.gamalhsbc@instapay",morning+5*60_000L);
+        Long hsbc=null,misr=null,telda=null;
+        for(ExpenseDb.PaymentSource s:db.paymentSources()){
+            if("0001".equals(s.last4))hsbc=s.id;
+            if("7392".equals(s.last4))misr=s.id;
+            if("TELDA".equals(SourceIdentity.bank(s.name)))telda=s.id;
+        }
+        ok(hsbc!=null&&misr!=null&&telda!=null,"Sources HSBC 0001, Banque Misr 7392 and Telda discovered: "+db.paymentSources().size());
+        int transfers=0,fees=0,incomes=0;StringBuilder ledger=new StringBuilder();
+        for(ExpenseDb.Transaction tx:db.transactions()){
+            ledger.append(" | ").append(tx.kind).append(' ').append(tx.amountMinor).append(' ').append(tx.paymentSourceId).append("->").append(tx.destinationSourceId);
+            if("transfer".equals(tx.kind)&&tx.amountMinor==400&&hsbc.equals(tx.paymentSourceId)&&misr.equals(tx.destinationSourceId))transfers++;
+            else if("transfer".equals(tx.kind)&&tx.amountMinor==3000&&misr.equals(tx.paymentSourceId)&&telda.equals(tx.destinationSourceId))transfers++;
+            else if("expense".equals(tx.kind)&&tx.amountMinor==50)fees++;
+            else if("income".equals(tx.kind)&&tx.amountMinor==8765000)incomes++;
+            else throw new AssertionError("Unexpected row:"+ledger);
+        }
+        ok(transfers==2&&fees==1&&incomes==1&&db.transactionCount()==4,"Two internal transfers, a 0.50 fee and the 87,650 income:"+ledger);
+    }
+
+    /**
+     * Owner acceptance, 22 Oct 2026: rows the older build recorded that morning had no source, so the repair never saw the
+     * transfer. The data check reads each automatic row's saved message, attaches its source and pairs the transfer.
+     */
+    public void testDataCheckInfersMissingSourcesAndPairsTheTransfer(){
+        long morning=LocalDate.of(2026,10,22).atTime(6,47).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        CaptureResult debit=db.captureSms("HSBC","Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre",morning);
+        db.getWritableDatabase().execSQL("UPDATE transactions SET payment_source_id=NULL,destination_source_id=NULL WHERE id="+debit.transaction.id);
+        CaptureResult receipt=db.captureSms("BankMisr","تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ",morning+30_000L);
+        db.getWritableDatabase().execSQL("UPDATE transactions SET payment_source_id=NULL,destination_source_id=NULL WHERE id="+receipt.transaction.id);
+        eq(2,db.transactionCount(),"Two rows without a source before the check");
+        ExpenseDb.RepairReport report=db.repairAll();
+        eq(2,report.sourcesInferred,"Sources read from the saved messages");
+        int transfers=0,fees=0;StringBuilder ledger=new StringBuilder();
+        for(ExpenseDb.Transaction tx:db.transactions()){
+            ledger.append(" | ").append(tx.kind).append(' ').append(tx.amountMinor).append(' ').append(tx.paymentSourceId).append("->").append(tx.destinationSourceId);
+            if("transfer".equals(tx.kind)&&tx.amountMinor==400)transfers++;else if("expense".equals(tx.kind)&&tx.amountMinor==50)fees++;
+        }
+        ok(transfers==1&&fees==1&&db.transactionCount()==2,"One transfer of 4.00 and its 0.50 fee:"+ledger);
+        eq(0,db.repairAll().sourcesInferred,"Nothing left to infer the second time");
+    }
+
+    /** Owner acceptance (dark mode): no white plate or ring around a logo; the circle is the logo's own colour. */
+    public void testDarkLogoBadgeHasNoLightPlate(){
+        int surface=0xff1c1f24, light=context.getColor(R.color.ui_surface_light);
+        int checked=0;
+        for(String brand:new String[]{"hsbc","bank_misr","instapay","google_one","vodafone","netflix","telda"}){
+            int logo=MainActivity.brandLogo(brand);if(logo==0)continue;checked++;
+            android.widget.ImageView dark=UiKit.logoBadge(context,logo,brand,brand,40,0,true,surface);
+            android.graphics.drawable.GradientDrawable plate=(android.graphics.drawable.GradientDrawable)dark.getBackground();
+            int color=plate.getColor().getDefaultColor();
+            int edge=UiKit.edgeColor(context.getDrawable(logo),surface);
+            eq(edge,color,"Dark plate of "+brand+" is the logo's own edge colour");
+            ok(color!=light||edge==light,"Dark plate of "+brand+" is the light surface around a logo that is not white");
+            ok(dark.getClipToOutline(),"Dark badge of "+brand+" is clipped to its circle");
+            android.widget.ImageView day=UiKit.logoBadge(context,logo,brand,brand,40,0);
+            eq(UiKit.whiteOnlyLogo(brand)?context.getColor(R.color.brand_forest):light,((android.graphics.drawable.GradientDrawable)day.getBackground()).getColor().getDefaultColor(),
+                    "Light mode keeps its plate for "+brand);
+        }
+        ok(checked>=3,"Too few brand logos checked: "+checked);
     }
 
     public void testImportContractFreshRowIsCreatedWithItsSideEffects(){
@@ -1754,7 +1889,7 @@ final class AuditRegressionTest {
 
     public void testImportContractPendingCallerDetailCannotLookSuccessful(){
         long t=at(LocalDate.now(),10);
-        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA CONTRACT PENDING",t);ok(row!=null);
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA CONTRACT CALLER",t);ok(row!=null); // not "pending": the pipeline reads that word as an unexecuted operation
         SQLiteDatabase sql=db.getWritableDatabase();
         long rows=db.transactionCount(),revision=db.changes();ImportResult result;
         sql.beginTransaction();
@@ -1780,25 +1915,12 @@ final class AuditRegressionTest {
         eq(0,db.transactionCount());
     }
 
-    public void testImportContractSelectedOnlyEntryPointRunsNoRepair(){
-        long t=at(LocalDate.now(),10);
-        SmsPreview fresh=SmsPreview.parse("BANK","Card purchase EGP 90 at QA CONTRACT APPLY",t);
-        SmsPreview balance=SmsPreview.parse("BANK","Account ending 1234 available balance EGP 1000",t+1000);
-        ok(fresh!=null&&balance!=null);
-        long rows=db.transactionCount();
-        ImportResult result=applyDetailed(fresh,balance);
-        invariant(result);
-        eq(1,result.created);eq(1,result.noLedgerChange);
-        eq(0,result.repair.ownTransfers);eq(0,result.repair.feesCreated);
-        eq(0,result.repair.archivedRows);eq(0,result.repair.mergedRows);
-        eq(1,db.transactionCount()-rows);
-    }
 
     public void testImportContractLegacyValueStaysTheLedgerDeltaAfterTheNewEntryPointExists(){
         long t=at(LocalDate.now(),10);
         SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 150 at QA CONTRACT LEGACY",t);ok(row!=null);
         long rows=db.transactionCount();
-        eq(1,new ImportBatch(db).execute(Collections.singletonList(row)));
+        eq(1,ImportRun.added(db,Collections.singletonList(row)));
         eq(rows+1,db.transactionCount());
         // The same row is now known: the detailed result reports a skip and still no ledger change.
         ImportResult again=detailed(row);

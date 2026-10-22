@@ -28,10 +28,17 @@ public final class ReconciliationTest extends Instrumentation {
     private String confirmedCardLink;
     private boolean captureBalances;
     private boolean captureRing;
-    private String rescanAudit,expectedBefore;
-    @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));rescanAudit=args.getString("rescan_audit");expectedBefore=args.getString("expected_before");featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
+    @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
     @Override public void onStart() {
+        if(featureAudit!=null&&featureAudit.startsWith("source_link_")){new SourceLinkUiTest(this).run(!"source_link_light".equals(featureAudit),"source_link_max".equals(featureAudit)?2f:1f);return;}
+        if(featureAudit!=null&&featureAudit.startsWith("transactions_")){new TransactionPagesUiTest(this).run(!"transactions_light".equals(featureAudit),"transactions_max".equals(featureAudit)?2f:1f);return;}
+        if(featureAudit!=null&&featureAudit.startsWith("unified_")){
+            new UnifiedUiTest(this).run(!"unified_light".equals(featureAudit),"unified_max".equals(featureAudit)?2f:1f);return;
+        }
         if("points_ui".equals(featureAudit)){new DailyPointsUiTest(this).run();return;}
+        if("notification_capture".equals(featureAudit)){new NotificationCaptureTest(this).run();return;}
+        if("shadow_store".equals(featureAudit)){new ShadowStoreTest(this).run();return;}
+        if("merchant_badges".equals(featureAudit)){new MerchantBadgeUiTest(this).run();return;}
         if("commitment_ui".equals(featureAudit)){new CommitmentPaymentUiTest(this).run();return;}
         if("commitment_cycle_ui".equals(featureAudit)){new CommitmentCycleUiTest(this).run();return;}
         if("period_ui".equals(featureAudit)){new PeriodFilterUiTest(this).run();return;}
@@ -46,14 +53,13 @@ public final class ReconciliationTest extends Instrumentation {
         if("lifetime".equals(featureAudit)){new ResourceLifetimeTest(this).run();return;}
         if(featureAudit!=null&&featureAudit.startsWith("review_alerts_")){new ReviewAlertsUiTest(this).run(!"review_alerts_light".equals(featureAudit),"review_alerts_large".equals(featureAudit)?1.3f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("sms_ui_")){new SmsImportUiTest(this).run(!"sms_ui_light".equals(featureAudit),"sms_ui_large".equals(featureAudit)?1.3f:1f);return;}
-        if(featureAudit!=null&&featureAudit.startsWith("menus_")){new SelectionUiTest(this).run(!"menus_light".equals(featureAudit),"menus_large".equals(featureAudit)?1.3f:1f);return;}
+        if(featureAudit!=null&&featureAudit.startsWith("menus_")){new SelectionUiTest(this).run(!"menus_light".equals(featureAudit),"menus_max".equals(featureAudit)?2f:"menus_large".equals(featureAudit)?1.3f:1f);return;}
         if("card_ui_large".equals(featureAudit)){new CardJourneyUiTest(this).run(true,1.3f);return;}
         if("card_ui_light".equals(featureAudit)||"card_ui_dark".equals(featureAudit)){new CardJourneyUiTest(this).run("card_ui_dark".equals(featureAudit));return;}
         if("card".equals(featureAudit)){new CardCancellationTest(this).run();return;}
         if("visual".equals(featureAudit)){new ReleaseVisualTest(this).run();return;}
         if("regressions".equals(featureAudit)){new AuditRegressionTest(this).run();return;}
         if(journeyUi){new JourneyUiTest(this).run();return;}
-        if(rescanAudit!=null){new RescanAudit(this).run(rescanAudit,expectedBefore);return;}
         if (featureAudit != null) { new FeatureAuditTest(this).run(featureAudit); return; }
         if(captureBalances) {
             Bundle result=new Bundle();
@@ -536,14 +542,16 @@ public final class ReconciliationTest extends Instrumentation {
 
     public void testSubscriptionDiscoveryAndSeparatePlans() {
         String one="Dear customer, you have successfully purchased Microsoft Apps - Basic Subscription - 1 month (Microsoft OneDrive) from Google Play Store and 39 Egyptian pound has been deducted from your credit";
-        assertTrue(db.addSms("7030",one,AT));
+        // Owner decision (21 Oct 2026): a subscription paid from prepaid line credit is information only, never the
+        // ledger (the money left at the top-up); its commitment suggestion is still proposed.
+        db.addSms("7030",one,AT);
         assertTrue(db.addSms("AnyBank","تم خصم مبلغ EGP 89.99 فيGoogle One بتاريخ 10/10/2026",AT));
         assertTrue(db.addSms("AnyBank","تم خصم مبلغ EGP 179.99 فيGoogle One بتاريخ 10/10/2026",AT+1000));
         assertEquals(3,db.commitmentSuggestions().size());
         ExpenseDb.Suggestion hint=null;
         for(ExpenseDb.Suggestion s:db.commitmentSuggestions()) if(s.merchant.equals("OneDrive")) hint=s;
         assertNotNull(hint);assertEquals("subscription",hint.kind);assertEquals(3900,hint.amount);
-        assertEquals(3,db.transactions().size());
+        assertEquals(2,db.transactions().size()); // the two bank debits; the prepaid-credit purchase is information only
         long id=db.putCommitment(null,hint.merchant,hint.amount,hint.currency,hint.date,hint.cycle,hint.kind,null,0,1,"onedrive",null);
         db.acceptSuggestion(hint.key,id);
         assertEquals(2,db.commitmentSuggestions().size());
@@ -570,8 +578,9 @@ public final class ReconciliationTest extends Instrumentation {
 
     public void testSubscriptionPriceHistoryAndCompletionReference() {
         long september=LocalDate.of(2026,9,10).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        assertTrue(db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 30 Egyptian pound has been deducted from your credit",september));
-        assertTrue(db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 39 Egyptian pound has been deducted from your credit",AT));
+        // Prepaid-credit subscriptions are information only (owner decision, 21 Oct 2026); their price history still builds.
+        db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 30 Egyptian pound has been deducted from your credit",september);
+        db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 39 Egyptian pound has been deducted from your credit",AT);
         assertEquals(1,db.commitmentSuggestions().size());
         assertEquals(3900,db.commitmentSuggestions().get(0).amount);
         assertEquals(2,db.commitmentHistory(db.commitmentSuggestions().get(0).key).size());
@@ -591,7 +600,7 @@ public final class ReconciliationTest extends Instrumentation {
         assertTrue(db.reopenRecurring(id));
         db.addSms("OtherProvider",completion,AT+86400000);
         assertFalse(db.recurringById(id).isDone());assertEquals(14,db.recurringById(id).paidCount);
-        assertEquals(2,db.transactions().size()); // The plan and its completion are not expenses.
+        assertEquals(0,db.transactions().size()); // The plan, its completion and the prepaid-credit purchases are not expenses.
     }
 
     public void testDismissedOldSuggestionStaysDismissed() {
@@ -635,7 +644,7 @@ public final class ReconciliationTest extends Instrumentation {
         db=new ExpenseDb(context);
         assertEquals(1072,scalar("SELECT COUNT(*) FROM transactions"));
         List<String> lines=Files.readAllLines(new File(fixture,"messages.tsv").toPath(),StandardCharsets.UTF_8);
-        replay(lines);db.repairOwnTransfers(true);
+        replay(lines);db.repairAll();
         assertNull(db.transactionById(1072));assertNull(db.transactionById(1073));
         assertNotNull(db.transactionById(1069));assertNotNull(db.transactionById(1071));
         assertEquals(Long.valueOf(3),db.transactionById(1071).destinationSourceId);
@@ -653,7 +662,7 @@ public final class ReconciliationTest extends Instrumentation {
         long count=scalar("SELECT COUNT(*) FROM transactions"),sum=scalar("SELECT SUM(amount_minor) FROM transactions WHERE currency='EGP'"),
                 evidence=scalar("SELECT COUNT(*) FROM capture_evidence"),paid=scalar("SELECT SUM(paid_count) FROM recurring");
         exportSnapshot(new File(fixture,"first.db"));
-        replay(lines);db.repairOwnTransfers(true);
+        replay(lines);db.repairAll();
         exportSnapshot(new File(fixture,"second.db"));
         assertEquals(count,scalar("SELECT COUNT(*) FROM transactions"));
         assertEquals(sum,scalar("SELECT SUM(amount_minor) FROM transactions WHERE currency='EGP'"));
@@ -686,7 +695,7 @@ public final class ReconciliationTest extends Instrumentation {
                 org.json.JSONArray ids=item.getJSONArray("sources");for(int j=0;j<ids.length();j++) sources.add(ids.getLong(j));
                 target.reconcileIncome(item.getLong("id"),sources);
             }
-            if(plan.optBoolean("repair_other_transfers",true))target.repairOwnTransfers(true);
+            if(plan.optBoolean("repair_other_transfers",true))target.repairAll();
             writable.setTransactionSuccessful();
         } finally {writable.endTransaction();}
     }

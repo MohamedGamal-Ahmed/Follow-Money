@@ -83,7 +83,9 @@ public final class AuditStructureTest {
         int guards = 0, inputs = 0;
         for (String line : main.split("\n")) {
             String trimmed = line.trim();
-            if (trimmed.contains("rejectMisreadAmount(") && !trimmed.startsWith("private")) guards++;
+            // Pages use the same predicate directly so the error can stay next to the amount field.
+            if ((trimmed.contains("rejectMisreadAmount(") || trimmed.contains("ExpenseParser.manualAmountMisread("))
+                    && !trimmed.startsWith("private")) guards++;
             if (trimmed.contains("parseMinor(ExpenseParser.normalizeDigits(")) inputs++;
         }
         check(guards == inputs && inputs >= 13,

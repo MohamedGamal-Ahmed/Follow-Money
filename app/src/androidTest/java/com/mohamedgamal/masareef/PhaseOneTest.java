@@ -335,12 +335,14 @@ public final class PhaseOneTest {
         android.view.accessibility.AccessibilityNodeInfo dialog=runner.getUiAutomation().getRootInActiveWindow();
         List<android.view.accessibility.AccessibilityNodeInfo> choices=dialog.findAccessibilityNodeInfosByText("افتكر التصنيف للتاجر ده في العمليات الجديدة");
         ok(choices.size()==1 && choices.get(0).isCheckable());
+        choices.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());runner.waitForIdleSync();
         ok(choices.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();
         dialog=runner.getUiAutomation().getRootInActiveWindow();
         ok(dialog.findAccessibilityNodeInfosByText("افتكر التصنيف للتاجر ده في العمليات الجديدة").get(0).isChecked());
         saveScreen(captures,"learning");
         List<android.view.accessibility.AccessibilityNodeInfo> save=dialog.findAccessibilityNodeInfosByViewId("android:id/button1");
-        ok(save.size()==1 && save.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();
+        ok(save.size()==1);save.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());runner.waitForIdleSync();
+        ok(save.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();
         try(ExpenseDb live=new ExpenseDb(target)) {
             ok(live.merchantRules().stream().anyMatch(rule->"=espresso lab".equals(rule.matchText) && "مقاهي".equals(rule.category)));
         }

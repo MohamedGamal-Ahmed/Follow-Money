@@ -54,7 +54,8 @@ final class EvidenceVault {
     }
 
     /** Every table whose encrypted_body column holds Keystore-encrypted source text; all have a rowid. */
-    static final String[] ENCRYPTED_TABLES = {"capture_evidence", "capture_events", "commitment_payments", "commitment_suggestions", "commitment_observations"};
+    static final String[] ENCRYPTED_TABLES = {"capture_evidence", "capture_events", "commitment_payments", "commitment_suggestions", "commitment_observations",
+            "shadow_observations", "ununderstood_messages"};
 
     /**
      * Backup: replaces every stored ciphertext inside a snapshot copy of the database with its plain text, because the

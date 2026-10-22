@@ -16,6 +16,18 @@ public final class MerchantClassificationTest {
     public static void main(String[] args) {
         purchase("KASHIER*BUTLERS & CO C","Butlers","أكل وشرب");
         purchase("paymob * BUTLERS & CO CAIRO","Butlers","أكل وشرب");
+        purchase("Kashier Butlers","Butlers","أكل وشرب");
+        eq("Butlers",ExpenseParser.parse("Telda","تم دفع 15 ج.م. في \"Kashier Butlers\"\nرصيدك: 16.5 ج.م.").merchant);
+        eq("أكل وشرب",ExpenseParser.parse("Telda","تم دفع 15 ج.م. في \"Kashier Butlers\"\nرصيدك: 16.5 ج.م.").category);
+        eq("butlers",BrandCatalog.merchant("Kashier Butlers"));
+        eq("Kashier QA Unknown",MerchantClassifier.displayName("Kashier QA Unknown"));
+        eq(null,MerchantClassifier.category("Kashier ButlersXYZ"));
+        eq("com.android.vending",BrandCatalog.merchantPackage("google play"));
+        eq("com.android.vending",BrandCatalog.merchantPackage("GOOGLE PLAY STORE"));
+        eq(null,BrandCatalog.merchantPackage("Google One"));
+        eq(null,BrandCatalog.merchantPackage("Google Playground"));
+        eq("io.telda.app",BrandCatalog.sourcePackage("Telda"));
+        eq(null,BrandCatalog.sourcePackage("QA Unknown Bank"));
         purchase("SEOUDI MARKET SODIC E","Seoudi","بقالة");
         purchase("SEOUDI-Sodic East","Seoudi","بقالة");
         purchase("سعودى ماركت","Seoudi","بقالة");
@@ -46,6 +58,9 @@ public final class MerchantClassificationTest {
             eq(pair[0],BrandCatalog.merchant(pair[1]));
         for(String[] pair:new String[][]{{"sharafdg","Sharaf DG"},{"centrepoint","Centrepoint"},{"max","MAX"},{"lcwaikiki","LC WAIKIKI"},{"raya","راية"},{"aman","Aman"}})
             eq(pair[0],BrandCatalog.merchant(pair[1]));
+        for(String[] pair:new String[][]{{"paymob","PAYMOB-"},{"mahalawy","El Mahalawy"},{"pizzaking","PIZZA KING"}})
+            eq(pair[0],BrandCatalog.merchant(pair[1]));
+        eq("أكل وشرب",MerchantClassifier.category("PIZZA KING"));
         eq("تسوق",MerchantClassifier.category("LC Waikiki"));eq("تسوق",MerchantClassifier.category("Sharaf DG"));
         eq("nbe",BrandCatalog.bank("NBE"));eq("bdc",BrandCatalog.bank("Banque du Caire"));eq("bdc",BrandCatalog.bank("بنك القاهرة"));eq("cib",BrandCatalog.bank("CIB"));
         eq("أكل وشرب",MerchantClassifier.category("Etoile"));eq("رعاية صحية",MerchantClassifier.category("العزبي"));

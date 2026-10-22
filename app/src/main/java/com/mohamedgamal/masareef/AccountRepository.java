@@ -183,6 +183,17 @@ final class AccountRepository {
         }
     }
 
+    Long sourceAliasOwner(String identity) {
+        try(Cursor cursor=db.getReadableDatabase().rawQuery("SELECT payment_source_id FROM source_aliases WHERE identity=?",new String[]{identity})) {
+            return cursor.moveToFirst()?cursor.getLong(0):null;
+        }
+    }
+
+    int updateSourceBankRow(long id,String bank,String displayName) {
+        ContentValues values=new ContentValues();values.put("name",bank);values.put("display_name",displayName.trim());values.put("reviewed",1);
+        return db.getWritableDatabase().update("payment_sources",values,"id=?",new String[]{Long.toString(id)});
+    }
+
     void deletePaymentSource(long id) {
         if(new CardSettlements(db).sourceRelated(id))throw new IllegalArgumentException("Undo card repayment allocations before deleting accounts");
         ContentValues values = new ContentValues(); values.putNull("payment_source_id");

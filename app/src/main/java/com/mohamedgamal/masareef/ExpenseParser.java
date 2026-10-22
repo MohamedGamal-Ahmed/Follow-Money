@@ -41,6 +41,8 @@ public final class ExpenseParser {
             "(?i)([0-9][0-9., ]*)\\s*(EGP|LE|E£|ج\\.?م\\.?|جنيه\\s+استرليني|جنيه|USD|EUR|GBP|دولار|يورو)(?![A-Za-z])");
     private static final Pattern MERCHANT = Pattern.compile(
             "(?i)(?:\\b(?:at|from|to)\\b|لدى|عند|على|لصالح|الى|إلى|من)\\s+([^.,;\\n]{2,45})");
+    private static final Pattern QUOTED_MERCHANT = Pattern.compile(
+            "(?i)(?:\\bat\\b|في|فى|عند|لدى)\\s*[\"“”«]([^\"“”»\\n]{2,60})[\"“”»]");
     /** An amount after the merchant name, in either order (EGP 200.00 / 200 EGP), and everything after it. */
     private static final Pattern MERCHANT_AMOUNT_TAIL = Pattern.compile(
             "(?i)\\s*(?:(?<![A-Za-z])(?:EGP|LE|E£|USD|EUR|GBP|ج\\.?م\\.?|جنيه|دولار|يورو)\\s*[0-9][0-9., ]*" +
@@ -116,6 +118,12 @@ public final class ExpenseParser {
             "(?i)(عروض|عرض\\s+خاص|العرض\\s+سار|استمتع|فرصت|فرصة|للفوز|الفوز|اربح|إربح|جائز|جوائز|كاش\\s*باك|" +
             "يصل\\s+(?:إلى|الى|الي|ل)|حتى\\s+[0-9]+\\s*%|الشروط\\s+و\\s*الأحكام|الشروط\\s+والاحكام|تطبق\\s+الشروط|" +
             "\\boffers?\\b|\\bpromo(?:tion)?\\b|\\bwin\\b|\\bchance\\b|\\bup\\s+to\\b|\\bcash\\s*back\\b|terms\\s+(?:and|&)\\s+conditions|\\bT&Cs?\\b)");
+    private static final Pattern PRICE_NOTICE = Pattern.compile(
+            "(?i)(?:تحديث|تعديل|تغيير|زيادة|رفع|خفض)\\s+(?:سعر|أسعار|اسعار|رسوم|تكلفة|قيمة)|" +
+            "\\b(?:subscription|service|membership|plan)\\s+(?:price|fee|rate)\\b[^.!?\\n]{0,60}\\b(?:change|update|increase|decrease)");
+    /** Adding product features is not a monetary credit, even when the announcement quotes a price. */
+    private static final Pattern FEATURE_ADDITION = Pattern.compile(
+            "(?<![\\p{L}])تم\\s*(?:اضافة|إضافة)\\s+(?:مزايا|مميزات|ميزات|خصائص)(?![\\p{L}])");
     /** Wording a bank uses only once money actually moved. */
     private static final Pattern COMPLETED_EVENT = Pattern.compile(
             "(?i)((?<![\\p{L}])تم\\s+(?:(?:الآن|الان)\\s+)?(?:خصم|سحب|دفع|سداد|تسديد|شراء|تحويل|تنفيذ|إجراء|اجراء|استخدام|ايداع|إيداع|اضافة|إضافة|استلام|إستلام|رد|إرسال|ارسال|شحن)|" +
@@ -166,7 +174,9 @@ public final class ExpenseParser {
     static boolean isPromotion(String body) {
         if (body == null) return false;
         String text = normalizeDigits(body).replaceAll("[\\u064B-\\u0652\\u0640]", "");
-        return PROMOTION.matcher(text).find() && !COMPLETED_EVENT.matcher(text).find();
+        String moneyEvents = FEATURE_ADDITION.matcher(text).replaceAll("");
+        return (PROMOTION.matcher(text).find() || PRICE_NOTICE.matcher(text).find())
+                && !COMPLETED_EVENT.matcher(moneyEvents).find();
     }
 
     private static final Pattern EVENT_DATE_TEXT = Pattern.compile(
@@ -439,18 +449,6 @@ public final class ExpenseParser {
                 .matcher(text).find();
     }
 
-    /** Prioritizes completed-looking messages for review without booking them as expenses. */
-    public static boolean isCompletedFinancialCandidate(String body) {
-        if (!isFinancialCandidate(body) || isPromotion(body) || isUnsuccessful(body) || isFutureOnly(body)) return false;
-        String text = normalizeDigits(body);
-        if (Pattern.compile("(?i)(نذكرك|بنفكرك|يرجى|جاهز[ة]?\\s+للدفع|طلب\\s+سداد|" +
-                "للتقديم|خصومات|خصم\\s+على|العرض\\s+سار|offer\\s+valid|payment\\s+due)")
-                .matcher(text).find()) return false;
-        return Pattern.compile("(?i)(successfully\\s+purchased|has\\s+been\\s+deducted|" +
-                "you\\s+have\\s+added\\s+balance|تم\\s+تنفيذ\\s+تحويل|تم\\s+شحن|" +
-                "تم\\s+(?:خصم|دفع|سداد)|successful\\s+transaction)")
-                .matcher(text).find();
-    }
 
     /** Uses a stated transaction date/time when available; otherwise keeps the message timestamp. */
     public static long eventTime(String body, long receivedAt) {
@@ -464,6 +462,10 @@ public final class ExpenseParser {
     }
 
     /** Precision of the chosen timestamp, not a claim that receipt time was stated by the bank. */
+    private static boolean sameDay(LocalDate date, long receivedAt) {
+        return Instant.ofEpochMilli(receivedAt).atZone(ZoneId.systemDefault()).toLocalDate().equals(date);
+    }
+
     public static EventTime eventTimeWithPrecision(String body,long receivedAt) {
         if (body == null) return new EventTime(receivedAt,"exact");
         Matcher match = EVENT_DATE.matcher(normalizeDigits(body));
@@ -473,10 +475,9 @@ public final class ExpenseParser {
                 int month = Integer.parseInt(match.group(1) != null ? match.group(2) : match.group(5));
                 int day = Integer.parseInt(match.group(1) != null ? match.group(3) : match.group(4));
                 LocalDate date = LocalDate.of(year, month, day);
-                LocalTime time = match.group(7) == null
-                        ? Instant.ofEpochMilli(receivedAt).atZone(ZoneId.systemDefault()).toLocalDate().equals(date)
-                            ? Instant.ofEpochMilli(receivedAt).atZone(ZoneId.systemDefault()).toLocalTime()
-                            : LocalTime.NOON
+                // Dated the day it arrived, with no clock: the delivery time is the transaction time (owner rule, 22 Oct 2026).
+                if (match.group(7) == null && sameDay(date, receivedAt)) return new EventTime(receivedAt, "exact");
+                LocalTime time = match.group(7) == null ? LocalTime.NOON
                         : LocalTime.of(Integer.parseInt(match.group(7)), Integer.parseInt(match.group(8)));
                 long event = LocalDateTime.of(date, time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
@@ -491,8 +492,9 @@ public final class ExpenseParser {
                 int month = ("JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".indexOf(textDate.group(2).toUpperCase(Locale.ROOT)) / 4) + 1;
                 int year = Integer.parseInt(textDate.group(3));
                 if (year < 100) year += 2000;
-                long event = LocalDate.of(year, month, day).atTime(12, 0)
-                        .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                LocalDate date = LocalDate.of(year, month, day);
+                if (sameDay(date, receivedAt)) return new EventTime(receivedAt, "exact");
+                long event = date.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
                         event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return new EventTime(event,"date_only");
             } catch (NumberFormatException | java.time.DateTimeException ignored) { }
@@ -618,8 +620,10 @@ public final class ExpenseParser {
             String found = dated.group(1).split("\\*")[0].trim();
             if (found.length() >= 2) return found.length() > 36 ? found.substring(0, 36).trim() : found;
         }
+        // Wallet apps quote the shop: Telda's «تم دفع 15 ج.م. في "Kashier Butlers"».
+        Matcher quoted = QUOTED_MERCHANT.matcher(body);
         Matcher matcher = MERCHANT.matcher(body);
-        String candidate = matcher.find() ? matcher.group(1).trim() : "";
+        String candidate = quoted.find() ? quoted.group(1).trim() : matcher.find() ? matcher.group(1).trim() : "";
         candidate = SENSITIVE_TAIL.matcher(candidate).replaceFirst("").trim();
         candidate = CARD_TAIL.matcher(candidate).replaceAll("").trim();
         candidate = candidate.replaceAll("(?i)(?:\\bon\\b|في|بتاريخ|يوم).*$", "").trim();
@@ -648,7 +652,8 @@ public final class ExpenseParser {
     /** The display name current rules give a stored merchant (e.g. "OPENAI *CHATGPT SUBSCR" → "ChatGPT"). */
     static String normalizeMerchant(String raw) { return raw == null ? "" : merchantName(raw); }
 
-    private static String merchantName(String raw) {
+    /** The name the ledger shows for a merchant as written (catalog spelling, known services); shared with DecisionNames. */
+    static String merchantName(String raw) {
         if (MerchantClassifier.category(raw) != null) return MerchantClassifier.displayName(raw);
         String name = raw.trim().replaceAll("\\s+", " ");
         String upper = name.toUpperCase(Locale.ROOT);

@@ -171,7 +171,8 @@ final class ImportResult {
             case FUTURE_ONLY: return Reason.FUTURE_ONLY;
             case UNSUCCESSFUL: return Reason.UNSUCCESSFUL;
             case INSERT_NOT_APPLIED: return Reason.INSERT_NOT_APPLIED;
-            case NO_LEDGER_CANDIDATE: return Reason.NO_LEDGER_CANDIDATE;
+            // The new pipeline records nothing for it: for the import, the same "no ledger candidate".
+            case NO_LEDGER_CANDIDATE: case NEW_PIPELINE_SKIPPED: return Reason.NO_LEDGER_CANDIDATE;
             case SERVICE_MATCH_ACCEPTED: return Reason.SERVICE_MATCH_ACCEPTED;
             case COMMITMENT_REVIEW_REQUIRED: return Reason.REVIEW_REQUIRED;
             case NOTICE_RECORDED: return Reason.REVIEW_REQUIRED;

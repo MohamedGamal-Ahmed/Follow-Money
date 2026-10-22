@@ -57,6 +57,9 @@ final class BrandCatalog {
         new Entry("lcwaikiki",false,new String[]{"LC Waikiki","LCW","إل سي وايكيكي","ال سي وايكيكي"}),
         new Entry("raya",false,new String[]{"Raya","Raya Shop","راية","راية شوب"}),
         new Entry("aman",false,true,new String[]{"Aman","Aman Egypt","أمان"}),
+        new Entry("paymob",false,new String[]{"Paymob","PAYMOB-","باي موب"}),
+        new Entry("mahalawy",false,new String[]{"El Mahalawy","Elmahalawy","El Mahalawy Stores","Mahalawy","المحلاوي","المحلاوى"}),
+        new Entry("pizzaking",false,new String[]{"Pizza King","PIZZA KING","بيتزا كينج","بيتزا كنج"}),
         new Entry("butlers",false,new String[]{"Butlers","Butlers & Co"}),
         new Entry("seoudi",false,new String[]{"Seoudi","Saudi Market","سعودي","سعودى"}),
         new Entry("chatgpt",false,new String[]{"ChatGPT","OpenAI ChatGPT","OpenAI"}),
@@ -75,6 +78,18 @@ final class BrandCatalog {
     };
     static String merchant(String name){return match(MerchantClassifier.displayName(name),false);}
     static String bank(String name){return match(name,true);}
+    /** Keep Play separate from Google One; use the installed store's authentic icon. */
+    static String merchantPackage(String name){
+        String value=name==null?"":normalize(name);
+        return value.equals("google play")||value.startsWith("google play ") ? "com.android.vending" : null;
+    }
+    static String sourcePackage(String name){
+        String bank=SourceIdentity.bank(name);
+        if("BANKMISR".equals(bank))return "com.BanqueMisr.MobileBanking";
+        if("HSBC".equals(bank))return "com.htsu.hsbcpersonalbanking";
+        if("TELDA".equals(bank)||"تيلدا".equals(bank))return "io.telda.app";
+        return null;
+    }
     private static String match(String name,boolean bank) {
         if(name==null)return null;String value=normalize(name);
         for(Entry e:ENTRIES)if(e.bank==bank)for(String raw:e.aliases) {

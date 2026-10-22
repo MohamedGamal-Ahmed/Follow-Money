@@ -15,6 +15,11 @@ import java.util.Locale;
 final class UiKit {
     private UiKit() {}
 
+    /** Chart labels in sp at the 11sp floor, so they grow with the system font size like every other label. */
+    static float labelPx(View view) {
+        return android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, 11, view.getResources().getDisplayMetrics());
+    }
+
     /** Seven compact day bars used in the home summary card. */
     static final class MiniBars extends View {
         private final Paint bar = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -39,8 +44,8 @@ final class UiKit {
         @Override protected void onDraw(Canvas canvas) {
             if (values.length == 0) return;
             float density = getResources().getDisplayMetrics().density;
-            float labelHeight = 14 * density;
-            text.setTextSize(9 * density);
+            text.setTextSize(labelPx(this));
+            float labelHeight = text.getTextSize() + 5 * density;
             long max = 1;
             for (long value : values) max = Math.max(max, value);
             float slot = getWidth() / (float) values.length;
@@ -114,8 +119,8 @@ final class UiKit {
         @Override protected void onDraw(Canvas canvas) {
             if (values.length == 0) return;
             float density = getResources().getDisplayMetrics().density;
-            float labelHeight = labels.length > 0 ? 16 * density : 0;
-            text.setTextSize((values.length > 16 ? 8 : 10) * density);
+            text.setTextSize(labelPx(this));
+            float labelHeight = labels.length > 0 ? text.getTextSize() + 6 * density : 0;
             long max = 1;
             for (long[] column : values) { long sum = 0; for (long v : column) sum += v; max = Math.max(max, sum); }
             float chartHeight = getHeight() - labelHeight - 2 * density;
@@ -223,41 +228,6 @@ final class UiKit {
         }
     }
 
-    /**
-     * The statement ring on the home card: a soft track and one arc for the share of the income that has gone out,
-     * full when more went out than came in. Colors and stroke are set by the caller, so the ring reads on the
-     * brand background in both themes.
-     */
-    static final class Donut extends View {
-        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private float fraction, strokeDp = 14;
-
-        Donut(Context context) {
-            super(context);
-            for (Paint paint : new Paint[]{track, fill}) {
-                paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeCap(Paint.Cap.ROUND);
-            }
-        }
-
-        void set(float value, int trackColor, int fillColor, float stroke) {
-            fraction = Math.max(0f, Math.min(1f, value));
-            track.setColor(trackColor); fill.setColor(fillColor); strokeDp = stroke;
-            invalidate();
-        }
-
-        @Override protected void onDraw(Canvas canvas) {
-            float stroke = strokeDp * getResources().getDisplayMetrics().density;
-            track.setStrokeWidth(stroke); fill.setStrokeWidth(stroke);
-            float size = Math.min(getWidth(), getHeight());
-            RectF box = new RectF(stroke / 2 + (getWidth() - size) / 2, stroke / 2 + (getHeight() - size) / 2,
-                    (getWidth() + size) / 2 - stroke / 2, (getHeight() + size) / 2 - stroke / 2);
-            canvas.drawArc(box, 0, 360, false, track);
-            if (fraction > 0) canvas.drawArc(box, -90, Math.max(4f, 360 * fraction), false, fill);
-        }
-    }
-
     /** How a known bank's card face looks: display name and gradient colors. */
     static final class CardFace {
         final String name;
@@ -328,6 +298,19 @@ final class UiKit {
         return MONOGRAM_COLORS[Math.floorMod(key.hashCode(), MONOGRAM_COLORS.length)];
     }
 
+    /** {@code amount} of {@code top} over {@code base}, opaque. */
+    static int blend(int top, int base, float amount) {
+        int r = Math.round(((top >> 16) & 0xff) * amount + ((base >> 16) & 0xff) * (1 - amount));
+        int g = Math.round(((top >> 8) & 0xff) * amount + ((base >> 8) & 0xff) * (1 - amount));
+        int b = Math.round((top & 0xff) * amount + (base & 0xff) * (1 - amount));
+        return 0xff000000 | (r << 16) | (g << 8) | b;
+    }
+
+    /** The monogram letter on its soft plate: the merchant's hue pulled toward the ink so it stays readable. */
+    static int monogramInk(int hue, int ink, boolean dark) {
+        return dark ? blend(hue, 0xffffffff, 0.45f) : blend(hue, ink, 0.6f);
+    }
+
     /** "example@instapay" reads better as "example"; the InstaPay pill says where it came from. */
     static boolean isInstaPay(String name) {
         return name != null && name.toLowerCase(Locale.ROOT).contains("@instapay");
@@ -348,12 +331,15 @@ final class UiKit {
         return "•";
     }
 
-    /** Forest plate behind logos that are white on transparency; a white plate would hide them. */
-    static final int LOGO_PLATE_FOR_WHITE = 0xff0b3d2e;
-
     /** Catalog assets drawn entirely in white. Keep in sync with docs/brand-catalog-2026-10-10/README.md. */
     static boolean whiteOnlyLogo(String brandId) {
         return "alexbank".equals(brandId) || "fabmisr".equals(brandId);
+    }
+
+    /** Logos drawn on their own solid colour: they fill the whole circle instead of sitting inside a white ring. */
+    static boolean fullBleedLogo(String brandId) {
+        return brandId != null && java.util.Arrays.asList("bdc", "bookingdotcom", "butlers", "cib", "costa", "etoile", "ezaby",
+                "illy", "lcwaikiki", "seoudi", "sharafdg", "tru", "zaher", "paymob", "mahalawy", "pizzaking").contains(brandId);
     }
 
     /**
@@ -366,16 +352,78 @@ final class UiKit {
         icon.setImageResource(logo);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         GradientDrawable plate = new GradientDrawable();
-        plate.setColor(whiteOnlyLogo(brandId) ? LOGO_PLATE_FOR_WHITE : 0xffffffff);
+        // Authentic logo plates keep their brand colors in either theme; read shared resources instead of a second palette.
+        plate.setColor(context.getColor(whiteOnlyLogo(brandId) ? R.color.brand_forest : R.color.ui_surface_light));
         plate.setCornerRadius(sizeDp / 2f * density);
         if (border != 0) plate.setStroke(Math.max(1, Math.round(density)), border);
         icon.setBackground(plate);
-        int inset = Math.round(Math.max(4, sizeDp * 0.16f) * density);
-        icon.setPadding(inset, inset, inset, inset);
+        if (fullBleedLogo(brandId)) {
+            icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            icon.setClipToOutline(true);
+        } else {
+            int inset = Math.round(Math.max(4, sizeDp * 0.14f) * density);
+            icon.setPadding(inset, inset, inset, inset);
+        }
         icon.setContentDescription(description);
         icon.setImportantForAccessibility(description == null || description.isEmpty()
                 ? View.IMPORTANT_FOR_ACCESSIBILITY_NO : View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         return icon;
+    }
+
+    /**
+     * Owner acceptance (0.4.0), dark mode: no white plate or ring. The circle takes the logo's own edge colour (so a logo
+     * on its own background fills it), or the card surface when the logo's edge is transparent; the outline is the card
+     * surface, never a light frame. Light mode is unchanged.
+     */
+    static ImageView logoBadge(Context context, int logo, String brandId, String description, int sizeDp, int border, boolean dark, int surface) {
+        ImageView icon = logoBadge(context, logo, brandId, description, sizeDp, border);
+        if (!dark) return icon;
+        float density = context.getResources().getDisplayMetrics().density;
+        GradientDrawable plate = new GradientDrawable();
+        plate.setColor(whiteOnlyLogo(brandId) ? context.getColor(R.color.brand_forest) : edgeColor(context.getDrawable(logo), surface));
+        plate.setCornerRadius(sizeDp / 2f * density);
+        plate.setStroke(Math.max(1, Math.round(density)), surface);
+        icon.setBackground(plate);
+        icon.setClipToOutline(true);
+        return icon;
+    }
+
+    /** An installed app's icon in a badge: in dark mode on its own edge colour, clipped round, without the white disc. */
+    static void appIconPlate(ImageView icon, android.graphics.drawable.Drawable drawable, boolean dark, int surface, int sizePx) {
+        GradientDrawable plate = new GradientDrawable();
+        plate.setColor(dark ? edgeColor(drawable, surface) : android.graphics.Color.WHITE);
+        plate.setCornerRadius(sizePx / 2f);
+        if (dark) plate.setStroke(Math.max(1, Math.round(sizePx / 40f)), surface);
+        icon.setBackground(plate);
+        if (dark) { icon.setPadding(0, 0, 0, 0); icon.setClipToOutline(true); }
+    }
+
+    /**
+     * The colour along a drawable's edge (its own background), sampled around the border of a small rendering; fallback
+     * when the edge is transparent or mixed.
+     */
+    static int edgeColor(android.graphics.drawable.Drawable drawable, int fallback) {
+        if (drawable == null) return fallback;
+        int size = 48;
+        android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+        try {
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
+            android.graphics.drawable.Drawable copy = drawable.getConstantState() == null ? drawable : drawable.getConstantState().newDrawable().mutate();
+            copy.setBounds(0, 0, size, size); copy.draw(canvas);
+            int[][] points = {{2, 2}, {size / 2, 1}, {size - 3, 2}, {1, size / 2}, {size - 2, size / 2}, {2, size - 3}, {size / 2, size - 2}, {size - 3, size - 3}};
+            java.util.Map<Integer, Integer> votes = new java.util.HashMap<>();
+            for (int[] p : points) {
+                int pixel = bitmap.getPixel(p[0], p[1]);
+                if (android.graphics.Color.alpha(pixel) < 230) continue;
+                int opaque = pixel | 0xff000000;
+                votes.merge(opaque, 1, Integer::sum);
+            }
+            int best = fallback, count = 0;
+            for (java.util.Map.Entry<Integer, Integer> vote : votes.entrySet()) if (vote.getValue() > count) { best = vote.getKey(); count = vote.getValue(); }
+            return count >= 5 ? best : fallback; // most of the edge agrees, or it is not a background
+        } finally {
+            bitmap.recycle();
+        }
     }
 
     /** " •1234" for a known card/account suffix, nothing otherwise (never the text "null"). */

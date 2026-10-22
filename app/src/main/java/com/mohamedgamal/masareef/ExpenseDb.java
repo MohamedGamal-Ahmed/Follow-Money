@@ -30,7 +30,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     static final String DATABASE_NAME = "masareef.db";
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
-    static final int SCHEMA_VERSION = 25;
+    static final int SCHEMA_VERSION = 26;
 
     public ExpenseDb(Context context) {
         super(context, DATABASE_NAME, null, SCHEMA_VERSION);
@@ -166,6 +166,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         db.execSQL("ALTER TABLE recurring ADD COLUMN last_paid_due TEXT");
         CardSettlements.create(db);CaptureEvents.create(db);createImportReceipts(db);
         CommitmentPayments.create(db);LedgerRevision.create(db);
+        ShadowStore.create(db);
     }
 
     /** v20: an incoming payment that returns money spent on someone else's behalf, linked to that purchase. */
@@ -300,6 +301,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             LedgerRevision.create(db);
         }
         if(oldVersion==24)LedgerRevision.create(db);
+        if(oldVersion<26)ShadowStore.create(db);
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
@@ -357,10 +359,16 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      */
     CaptureResult.Write addHistoricalSmsObserved(SmsPreview row){
         lastCaptureEvent=null;lastCapturedId=-1;
+        // Known identities (capture evidence, import receipts, exclusions) are skipped before anything is decided or written.
         if(smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe)!=0)return null;
-        CaptureResult.Write write=addAutomaticCapture(row.sender,row.sender,row.body,row.captureAt,"SMS",row.receiptKeySafe?row.receivedAt:row.captureAt,false);
+        // The new pipeline's reading, as the row was listed; null when it failed and the legacy parser writes the row.
+        PipelineDecider.Result decided=PipelineDecider.forImport(this,row);
+        PipelineDecision decision=PipelineDecider.importDecision(this,row,decided);
+        // automaticCancellation=false: a historical cancellation waits for review and never archives a debit unattended.
+        CaptureResult.Write write=addAutomaticCapture(row.sender,row.sender,row.body,row.captureAt,"SMS",row.receiptKeySafe?row.receivedAt:row.captureAt,false,decision);
         rememberCapture(write.inserted?write.rowId:-1,write.event);
         ContentValues receipt=new ContentValues();receipt.put("unique_key",sha256(row.sender+"\n"+row.captureAt+"\n"+row.body));getWritableDatabase().insertWithOnConflict("sms_import_receipts",null,receipt,SQLiteDatabase.CONFLICT_IGNORE);
+        PipelineDecider.storeImport(this,row,decided,write);
         return write;
     }
 
@@ -442,10 +450,24 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return capture.execute(CaptureRequest.notification(packageName, appLabel, body, when));
     }
 
+    /** Same legacy capture; shadow carries the separate extras for the shadow pipeline only. */
+    CaptureResult captureNotification(String packageName, String appLabel, String body, long when, MessageNormalizer.Raw shadow) {
+        return capture.execute(CaptureRequest.notification(packageName, appLabel, body, when, shadow));
+    }
+
     /** Storage seam for CaptureTransaction; the connection and transaction policy stay here. */
     CaptureResult.Write addAutomaticCapture(CaptureRequest request) {
+        return addAutomaticCapture(request, null);
+    }
+
+    /**
+     * decided: the new pipeline's decision, or null when the pipeline failed and the legacy parser decides. With a
+     * decision, the ledger row and its fields come from it; the legacy
+     * non-ledger paths (excluded messages, notices, hints, balances, commitments) still run when it records nothing.
+     */
+    CaptureResult.Write addAutomaticCapture(CaptureRequest request, PipelineDecision decided) {
         return addAutomaticCapture(request.sourceKey, request.label, request.body, request.captureAt,
-                request.channel, request.legacyReceivedAt, true);
+                request.channel, request.legacyReceivedAt, true, decided);
     }
 
     private long lastCapturedId = -1;
@@ -457,9 +479,15 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public Transaction lastCaptured() { return lastCapturedId < 0 ? null : transactionById(lastCapturedId); }
 
     private CaptureResult.Write addAutomaticCapture(String sourceKey,String label,String body,long receivedAt,String channel,long legacyReceivedAt,boolean automaticCancellation){
+        return addAutomaticCapture(sourceKey,label,body,receivedAt,channel,legacyReceivedAt,automaticCancellation,null);
+    }
+
+    private CaptureResult.Write addAutomaticCapture(String sourceKey,String label,String body,long receivedAt,String channel,long legacyReceivedAt,boolean automaticCancellation,PipelineDecision decided){
         CaptureResult.Write result=new CaptureResult.Write();
+        // With a new-pipeline decision that records, its reading wins over the legacy skip/notice checks below.
+        boolean newRecords = decided != null && decided.records;
         if (body == null) {result.reason=CaptureResult.Reason.MISSING_BODY;return result;}
-        if (ExpenseParser.isVerificationMessage(body)) {result.reason=CaptureResult.Reason.VERIFICATION;return result;}
+        if (!newRecords && ExpenseParser.isVerificationMessage(body)) {result.reason=CaptureResult.Reason.VERIFICATION;return result;}
         SQLiteDatabase writable = getWritableDatabase();
         writable.beginTransaction();
         try {
@@ -471,6 +499,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             String hash = sha256(sourceKey + "\n" + body.trim());
             ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(body,receivedAt);
             long eventAt = event.when;
+            // Legacy guards stand even when the new pipeline records: a future-only alert, an unsuccessful attempt or a
+            // notice (cancellation, reversal) never becomes a ledger row; CaptureTransaction notes LEGACY_GUARD on it.
             if (ExpenseParser.isFutureOnly(body)) {
                 result.reason=CaptureResult.Reason.FUTURE_ONLY;
                 result.rowId=markRejectedCaptureForReview(hash, eventAt);
@@ -490,10 +520,19 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             recordHint(label,body,receivedAt);
             recordBalanceFromMessage(label, body, receivedAt);
-            ExpenseParser.Transfer transfer = ExpenseParser.parseTransfer(body);
-            ExpenseParser.Parsed parsed = ExpenseParser.parse(label, body);
+            ExpenseParser.Transfer transfer = null;
+            ExpenseParser.Parsed parsed;
             String direction = "expense";
-            if (parsed == null) { parsed = ExpenseParser.parseIncome(label, body); direction = "income"; }
+            if (decided != null) {
+                // The new pipeline decides whether there is a ledger row and what it says.
+                parsed = decided.records ? new ExpenseParser.Parsed(decided.amountMinor, decided.currency, decided.merchant, decided.category, decided.cardLast4) : null;
+                if (decided.records) direction = decided.kind();
+            } else {
+                // The pipeline failed on this message: the legacy parser decides it.
+                transfer = ExpenseParser.parseTransfer(body);
+                parsed = ExpenseParser.parse(label, body);
+                if (parsed == null) { parsed = ExpenseParser.parseIncome(label, body); direction = "income"; }
+            }
             if (transfer != null) {
                 direction = transfer.incoming ? "income" : "expense";
                 parsed = new ExpenseParser.Parsed(transfer.amountMinor, "EGP", transfer.counterpart,
@@ -507,8 +546,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     result.added=result.reason==CaptureResult.Reason.SERVICE_MATCH_ACCEPTED||result.reason==CaptureResult.Reason.COMMITMENT_REVIEW_REQUIRED;
                     if(result.added)result.evidence=CaptureResult.Evidence.PROVIDER_BODY;
                 }
+                // The user's ignore rule refused the row (as insertEntry refuses it for legacy); otherwise the pipeline skipped it.
+                if (decided != null && result.reason == CaptureResult.Reason.NO_LEDGER_CANDIDATE)
+                    result.reason=decided.ignoredByUser?CaptureResult.Reason.INSERT_NOT_APPLIED:CaptureResult.Reason.NEW_PIPELINE_SKIPPED;
                 writable.setTransactionSuccessful(); return result;
             }
+            // A repayment of the user's own credit card: the debit account is the source, the card the destination, whoever decided.
             if(CaptureNotice.cardRepayment(body))parsed=new ExpenseParser.Parsed(parsed.amountMinor,parsed.currency,parsed.merchant,parsed.category,ExpenseParser.debitAccountLast4(body));
             Long account = autoSource(label, parsed.cardLast4, body);
             String normalized = CaptureIdentity.normalized(label, body);
@@ -522,12 +565,19 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     existing = prefixRow;
             }
             boolean added = false;
-            if (existing >= 0) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision);
+            // Nothing recorded earlier is changed when the new pipeline decides: a match only gains this evidence.
+            if (existing >= 0) { if (decided == null) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision); }
             else {
-                String kind = transfer != null && isOwnHandle(transfer.counterpart) ? "transfer" : direction;
+                // Step 7: a debit whose other party is only an account/card tail that belongs to exactly one of the user's
+                // own sources went between the user's accounts (owner test, 22 Oct 2026: HSBC «to 7392» = Banque Misr 7392).
+                Long ownDestination = decided != null && "expense".equals(direction) ? ownSourceByTail(PipelineDecision.counterpartyTail(decided.counterparty), account) : null;
+                boolean ownHandle = transfer != null ? isOwnHandle(transfer.counterpart) :
+                        decided != null && decided.counterparty != null && decided.counterparty.contains("@") && isOwnHandle(decided.counterparty);
+                String kind = ownHandle || ownDestination != null ? "transfer" : direction;
+                if (ownDestination != null) parsed = new ExpenseParser.Parsed(parsed.amountMinor, parsed.currency, "تحويل بين حساباتي", parsed.category, parsed.cardLast4);
                 // A debit to one of the user's own credit cards keeps that card as destination (the statement treats it as
                 // internal); the settlement dialog stays optional for allocating it to purchases.
-                Long destination = "transfer".equals(kind) && "income".equals(direction) ? account :
+                Long destination = ownDestination != null ? ownDestination : "transfer".equals(kind) && "income".equals(direction) ? account :
                         "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
                 added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
                         "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
@@ -536,9 +586,18 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 if (added) {
                     existing = latestInserted().id;
                     ContentValues precision=new ContentValues();precision.put("time_precision",event.precision);
+                    // A new-pipeline REVIEW (or a return with no expense to link) waits for the user; its reason is on the observation.
+                    if (decided != null && decided.review) precision.put("needs_review",1);
                     writable.update("transactions",precision,"id=?",new String[]{Long.toString(existing)});
+                    // A return of an earlier charge is an expense offset: an income linked to that expense.
+                    if (decided != null && decided.offsetOfTransactionId != null && "income".equals(kind)) linkReimbursement(existing, decided.offsetOfTransactionId);
                 }
             }
+            // Task D1: the pipeline read a balance and the row has its source (a Telda notification names no digits, so
+            // the legacy balance reading never finds its source): the source's last balance at the message's time.
+            if (existing >= 0 && account != null && decided != null && decided.balanceMinor != null)
+                putBalance(account, decided.balanceCurrency != null ? decided.balanceCurrency : decided.currency, decided.balanceMinor,
+                        eventAt, receivedAt, channel, sha256("balance:" + label + "\n" + receivedAt + "\n" + body));
             if (existing >= 0) {
                 result.evidence=captureEvidence.record(key,existing,hash,normalized,reference,channel,label,receivedAt,direction,body);
                 if (automaticCancellation && added && !CaptureNotice.cardRepayment(body) && "expense".equals(direction))
@@ -940,6 +999,42 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         return result;
     }
+    /**
+     * Task D2 / owner acceptance: the key a «لقينا خصم متكرر» card is dismissed under, recurring:<merchant>|<currency>. No
+     * amount: a charge that moves a little each month must not need another tap.
+     */
+    static String recurringKey(String merchant, String currency) {
+        return "recurring:" + (merchant == null ? "" : merchant.trim().toLowerCase(Locale.ROOT)) + "|" + currency;
+    }
+
+    /**
+     * «مش التزام · تجاهل» on a recurring card: kept as a dismissed suggestion under its recurring key (the card comes from
+     * ledger rows, not from a stored suggestion, so the row is written here), never offered again.
+     */
+    public void dismissRecurringSuggestion(Transaction item) {
+        String key = recurringKey(item.merchant, item.currency);
+        ContentValues row = new ContentValues();
+        row.put("hint_key", key); row.put("merchant", item.merchant); row.put("kind", "subscription");
+        row.put("amount_minor", item.amountMinor); row.put("currency", item.currency); row.put("cycle", "monthly");
+        row.put("estimated_date", LocalDate.now().toString()); row.put("explanation", "مش التزام");
+        row.put("received_at", System.currentTimeMillis());
+        getWritableDatabase().insertWithOnConflict("commitment_suggestions", null, row, SQLiteDatabase.CONFLICT_IGNORE);
+        dismissSuggestion(key);
+    }
+
+    /** Recurring keys the user dismissed («مش التزام · تجاهل»). */
+    public java.util.Set<String> dismissedRecurringKeys() {
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT hint_key FROM commitment_suggestions WHERE status='dismissed' AND hint_key LIKE 'recurring:%'", null)) {
+            while (c.moveToNext()) {
+                // A key stored before the amount was dropped (recurring:<merchant>|<amount>|<currency>) still dismisses it.
+                String[] parts = c.getString(0).split("\\|", -1);
+                keys.add(parts.length == 3 ? parts[0] + "|" + parts[2] : c.getString(0));
+            }
+        }
+        return keys;
+    }
+
     public void dismissSuggestion(String key) {
         ContentValues values=new ContentValues();values.put("status","dismissed");
         getWritableDatabase().update("commitment_suggestions",values,"hint_key=?",new String[]{key});
@@ -1184,6 +1279,24 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return items;
     }
 
+    /**
+     * The one active source (account or card) whose last digits are this tail and that is not the paying source itself;
+     * two sources with the same digits, or none, give null (no guess). Digits compare without leading zeros, as
+     * SourceIdentity does («001» and «0001» are the same tail).
+     */
+    Long ownSourceByTail(String tail, Long payingSource) {
+        if (tail == null) return null;
+        String wanted = tail.replaceFirst("^0+(?=\\d)", "");
+        Long found = null;
+        for (PaymentSource source : paymentSources()) {
+            if (source.archived || source.last4 == null || !source.last4.replaceFirst("^0+(?=\\d)", "").equals(wanted)) continue;
+            if (payingSource != null && accountId(source.id) == accountId(payingSource)) continue;
+            if (found != null) return null;
+            found = source.id;
+        }
+        return found;
+    }
+
     /** The user's live credit card with these last four digits, or null when none (or more than one) matches. */
     Long ownCreditCard(String last4) {
         if (last4 == null) return null;
@@ -1198,7 +1311,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     private Long autoSource(String sender, String last4, String body) {
         String identity = SourceIdentity.key(sender, last4);
-        if (identity == null) return null;
+        if (identity == null) return appSource(sender, body);
         try (Cursor alias = getReadableDatabase().rawQuery(
                 "SELECT payment_source_id FROM source_aliases WHERE identity=?", new String[]{identity})) {
             if (alias.moveToFirst()) {
@@ -1230,6 +1343,83 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return created > 0 ? created : null;
     }
 
+    /**
+     * A wallet/prepaid app (Telda) writes no digits, so its movements had no source and the bank leg of a top-up could
+     * never be paired with them (owner test, 22 Oct 2026). One source per app: an alias once learned, else the single
+     * live source the user already named after the app (any digits), else a new «Telda» payment-app source (task D1: an
+     * app is not a card waiting for its bank account). Two such sources: no guess.
+     */
+    private Long appSource(String sender, String body) {
+        String identity = SourceIdentity.appKey(sender);
+        if (identity == null) return null;
+        try (Cursor alias = getReadableDatabase().rawQuery(
+                "SELECT payment_source_id FROM source_aliases WHERE identity=?", new String[]{identity})) {
+            if (alias.moveToFirst()) return alias.getLong(0);
+        }
+        String app = SourceIdentity.bank(sender);
+        Long matched = null;
+        for (PaymentSource source : paymentSources()) {
+            if (source.archived || !app.equals(SourceIdentity.bank(source.name))) continue;
+            if (matched != null) return null;
+            matched = source.id;
+        }
+        if (matched == null) {
+            String name = sender == null ? "" : sender.replaceAll("[^\\p{L} ]", " ").trim();
+            if (name.isEmpty() || name.length() > 24) name = app;
+            long created = addPaymentSource(name, APP_SOURCE_KIND, null);
+            if (created <= 0) return null;
+            matched = created;
+        }
+        addSourceAlias(identity, matched);
+        return matched;
+    }
+
+    /**
+     * Owner acceptance (0.4.0): automatic rows an older build recorded with no source (HSBC «to 7392» and the Banque Misr
+     * receipt on the morning of 22 Oct) were invisible to own-transfer matching. Each unedited automatic movement without
+     * a source gets the one its saved message names (the pipeline's card/account digits, or the payment app), through
+     * autoSource as live capture does; repairAll then matches transfers over them. Returns the rows attached.
+     */
+    int inferMissingSources() {
+        java.util.List<long[]> missing = new java.util.ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT id FROM transactions WHERE payment_source_id IS NULL AND destination_source_id IS NULL " +
+                "AND user_edited=0 AND kind IN ('expense','income') AND (source='SMS' OR source LIKE 'إشعار%')", null)) {
+            while (c.moveToNext()) missing.add(new long[]{c.getLong(0)});
+        }
+        int attached = 0;
+        for (long[] row : missing) {
+            for (SourceEvidence evidence : sourceEvidence(row[0])) {
+                if (evidence.failed || evidence.body == null || evidence.sender == null) continue;
+                boolean notification = evidence.source != null && evidence.source.startsWith("إشعار");
+                String digits = PipelineDecider.sourceDigits(evidence.sender, evidence.body, notification);
+                if (digits == null && !notification) continue;
+                Long account = autoSource(evidence.sender, digits, evidence.body);
+                if (account == null) continue;
+                ContentValues values = new ContentValues(); values.put("payment_source_id", account);
+                attached += getWritableDatabase().update("transactions", values, "id=? AND payment_source_id IS NULL", new String[]{Long.toString(row[0])});
+                break;
+            }
+        }
+        return attached;
+    }
+
+    /** The kind of a wallet/prepaid app source (Telda): no bank to set, no account to link. */
+    static final String APP_SOURCE_KIND = "تطبيق دفع";
+
+    /**
+     * Task D1, once: a Telda source created as an unlinked «بطاقة» before 0.4.0 becomes a payment app. Kind only; its rows,
+     * aliases and balances stay. Returns the number of sources moved.
+     */
+    int migrateAppSources() {
+        int moved = 0;
+        for (PaymentSource source : paymentSources()) {
+            if (!"بطاقة".equals(source.kind) || source.parentSourceId != null || SourceIdentity.appKey(source.name) == null) continue;
+            ContentValues kind = new ContentValues(); kind.put("kind", APP_SOURCE_KIND);
+            moved += getWritableDatabase().update("payment_sources", kind, "id=?", new String[]{Long.toString(source.id)});
+        }
+        return moved;
+    }
+
     private static String sourceKind(String body) {
         if (body == null) return null;
         String value = body.toLowerCase(Locale.ROOT);
@@ -1250,7 +1440,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 new String[]{Long.toString(id), kind});
     }
 
-    private void addSourceAlias(String identity, long sourceId) { accounts.addSourceAlias(identity,sourceId); }
+    void addSourceAlias(String identity, long sourceId) { accounts.addSourceAlias(identity,sourceId); }
 
     private static void mergeDuplicateAutomaticSources(SQLiteDatabase db) {
         java.util.Map<String, Long> primary = new java.util.HashMap<>();
@@ -1312,6 +1502,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     "budgets", "balance_snapshots", "merchant_rules", "budget_plan_categories", "budget_plans",
                     "assets", "debts", "own_handles", "capture_evidence", "transaction_archive", "commitment_suggestions", "commitment_observations",
                     "reimbursements", "dismissed_patterns", "repair_log", "sms_import_receipts", "capture_events", "card_settlement_allocations", "card_settlements", "commitment_payments", "commitment_cycles"}) db.delete(table, null, null);
+            ShadowStore.clearAll(db);
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }
     }
@@ -1480,6 +1671,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     public List<Transaction> transactions() { return transactionRows.transactions(); }
 
     public List<Transaction> recentTransactions(int limit) { return transactionRows.recentTransactions(limit); }
+    public List<Transaction> recentSourceTransactions(long sourceId) { return transactionRows.recentSourceTransactions(sourceId); }
 
     public List<Transaction> recurringCandidateTransactions() { return transactionRows.recurringCandidateTransactions(); }
 
@@ -1727,6 +1919,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     int updateSourceProfileRow(long id,String displayName,boolean archived,boolean reviewed) { return accounts.updateSourceProfileRow(id,displayName,archived,reviewed); }
 
     boolean hasSourceAlias(String identity) { return accounts.hasSourceAlias(identity); }
+    Long sourceAliasOwner(String identity) { return accounts.sourceAliasOwner(identity); }
+    int updateSourceBankRow(long id,String bank,String displayName) { return accounts.updateSourceBankRow(id,bank,displayName); }
 
     public List<PaymentSource> accountSources(boolean includeArchived) { return accounts.accountSources(includeArchived); }
 
@@ -2070,8 +2264,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         private final java.util.Map<Long,Long> mergedRows=new java.util.HashMap<>();
         long follow(long id){while(mergedRows.containsKey(id))id=mergedRows.get(id);return id;}
         public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures, trailingSigns;
+        /** Automatic rows that had no source and got one from their saved message (owner acceptance, 0.4.0). */
+        public int sourcesInferred;
         public long movedMinor, feesMinor;
-        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns > 0; }
+        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns + sourcesInferred > 0; }
         /** Rows this repair moved into an archive, counted for the import contract that reports them. */
         int mergedRowCount() { return mergedRows.size(); }
     }
@@ -2102,8 +2298,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
             report.promotions=archivePromotions(report);
+            migrateAppSources();
             report.trailingSigns=repairTrailingSigns();
             report.recategorized=recategorizeWithCurrentRules();
+            report.sourcesInferred=inferMissingSources();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
             log.put("promotions",report.promotions);log.put("duplicates",report.duplicates);log.put("own_transfers",report.ownTransfers);
@@ -2155,6 +2353,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             if(mergeEntries(duplicate.keepId,duplicate.removeId,"same payment: bank SMS and app notification")){
                 report.mergedRows.put(duplicate.removeId,duplicate.keepId);report.duplicates++;
+            }
+        }
+        // The receipt of an already settled own transfer, delivered again by a payment app: the settled transfer is
+        // user-edited (reconciliation marks it so), so it is read here with every row and only the copy is removed.
+        for (RepairRules.Duplicate again:RepairRules.lateReceiptDuplicates(repairRows(from,to))) {
+            if(mergeEntries(again.keepId,again.removeId,"receipt of an own transfer seen again")){
+                report.mergedRows.put(again.removeId,again.keepId);report.duplicates++;
             }
         }
         rows.clear();
@@ -2264,6 +2469,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      * Rows an older parser booked from HSBC's trailing-sign alerts: a "+" credit saved as spending, or the bank name
      * saved as the merchant. Reads the stored source message; user edits, linked rows (refund, card settlement,
      * commitment payment, reconciled transfer) and unreadable evidence are left alone.
+     * m7 (0.4.0): kept with REPAIR_VERSION 3 for one more round. Rows written by the legacy parser before 0.3.1 on
+     * Beta 0.2.x phones have not run this repair yet; remove it in 0.4.x once every tester has upgraded.
      */
     private int repairTrailingSigns() {
         java.util.Map<Long,String[]> evidence=new java.util.LinkedHashMap<>();
@@ -2477,86 +2684,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
     }
 
-    /** Only combines already confirmed own-transfer legs with unique matching accounts and amounts.
-     * Amount/time alone never establishes ownership. Unconfirmed expenses stay visible for review. */
-    public long lastRepairSum;
-    public int repairOwnTransfers(boolean apply) {
-        int pairs=0; lastRepairSum=0;
-        java.util.Set<Long> used=new java.util.HashSet<>();
-        List<Transaction> rows=transactionsBetween(LocalDate.of(1970,1,1),LocalDate.now().plusDays(1));
-        SQLiteDatabase writable=getWritableDatabase();
-        if(apply) writable.beginTransaction();
-        try {
-            for(Transaction debit:rows) {
-                if(!"transfer".equals(debit.kind) || debit.paymentSourceId==null || debit.destinationSourceId!=null || used.contains(debit.id)) continue;
-                List<Transaction> candidates=new ArrayList<>();
-                for(Transaction credit:rows) {
-                    if(used.contains(credit.id) || !"transfer".equals(credit.kind) || credit.paymentSourceId!=null || credit.destinationSourceId==null ||
-                            debit.paymentSourceId.equals(credit.destinationSourceId) || debit.amountMinor!=credit.amountMinor ||
-                            !debit.currency.equals(credit.currency) || Math.abs(debit.when-credit.when)>120000) continue;
-                    candidates.add(credit);
-                }
-                if(candidates.size()!=1) continue;
-                Transaction credit=candidates.get(0);
-                int reverse=0;
-                for(Transaction other:rows) if("transfer".equals(other.kind) && other.paymentSourceId!=null && other.destinationSourceId==null &&
-                        !other.paymentSourceId.equals(credit.destinationSourceId) && other.amountMinor==credit.amountMinor &&
-                        other.currency.equals(credit.currency) && Math.abs(other.when-credit.when)<=120000) reverse++;
-                if(reverse!=1) continue;
-                if(apply&&!mergeEntries(debit.id,credit.id,"confirmed own transfer: debit and credit legs"))continue;
-                used.add(debit.id);used.add(credit.id);pairs++;lastRepairSum+=debit.amountMinor;
-            }
-            if(apply) writable.setTransactionSuccessful();
-            return pairs;
-        } finally { if(apply) writable.endTransaction(); }
-    }
 
-    /** Aggregates only (no message text) that explain where a period's totals come from. */
-    public String diagnostics(LocalDate start, LocalDate end) {
-        long from = start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        long to = end.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        String[] range = {Long.toString(from), Long.toString(to)};
-        StringBuilder out = new StringBuilder("تشخيص Follow Money · " + start + " → " + end.minusDays(1) + "\n");
-        out.append("\n== حسب النوع والتصنيف (EGP) ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT kind, category, COUNT(*), SUM(amount_minor) FROM transactions " +
-                "WHERE currency='EGP' AND occurred_at>=? AND occurred_at<? GROUP BY kind, category ORDER BY SUM(amount_minor) DESC", range)) {
-            while (c.moveToNext()) out.append(c.getString(0)).append(" · ").append(c.getString(1)).append(" · ")
-                    .append(c.getInt(2)).append(" عملية · ").append(String.format(Locale.ROOT, "%,.2f", c.getLong(3) / 100.0)).append("\n");
-        }
-        out.append("\n== حسب المصدر والحساب ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT t.kind, t.source, COALESCE(p.name || ' ' || COALESCE(p.last4,''), 'بدون حساب'), " +
-                "COUNT(*), SUM(t.amount_minor) FROM transactions t LEFT JOIN payment_sources p ON p.id=COALESCE(t.payment_source_id, t.destination_source_id) " +
-                "WHERE t.currency='EGP' AND t.occurred_at>=? AND t.occurred_at<? GROUP BY 1,2,3 ORDER BY 5 DESC LIMIT 25", range)) {
-            while (c.moveToNext()) out.append(c.getString(0)).append(" · ").append(c.getString(1)).append(" · ").append(c.getString(2))
-                    .append(" · ").append(c.getInt(3)).append(" · ").append(String.format(Locale.ROOT, "%,.2f", c.getLong(4) / 100.0)).append("\n");
-        }
-        out.append("\n== حسب الشهر: دخل / خرج / بين حساباتك ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT strftime('%Y-%m', occurred_at/1000, 'unixepoch', 'localtime') m, " +
-                "SUM(CASE WHEN kind='income' THEN amount_minor ELSE 0 END), SUM(CASE WHEN kind='expense' THEN amount_minor ELSE 0 END), " +
-                "SUM(CASE WHEN kind='transfer' THEN amount_minor ELSE 0 END) FROM transactions WHERE currency='EGP' AND occurred_at>=? AND occurred_at<? " +
-                "GROUP BY m ORDER BY m", range)) {
-            while (c.moveToNext()) out.append(c.getString(0)).append(String.format(Locale.ROOT, " · %,.0f / %,.0f / %,.0f\n",
-                    c.getLong(1) / 100.0, c.getLong(2) / 100.0, c.getLong(3) / 100.0));
-        }
-        out.append("\n== مكرر محتمل: نفس النوع والمبلغ في خلال دقيقتين ==\n");
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT a.kind, a.source, b.source, COUNT(*), SUM(a.amount_minor) FROM transactions a " +
-                "JOIN transactions b ON a.id>b.id AND a.amount_minor=b.amount_minor AND a.kind=b.kind AND a.currency=b.currency " +
-                "AND ABS(a.occurred_at-b.occurred_at)<=120000 WHERE a.currency='EGP' AND a.occurred_at>=? AND a.occurred_at<? " +
-                "GROUP BY 1,2,3 ORDER BY 5 DESC", range)) {
-            boolean any = false;
-            while (c.moveToNext()) {
-                any = true;
-                out.append(c.getString(0)).append(" · ").append(c.getString(1)).append(" + ").append(c.getString(2)).append(" · ")
-                        .append(c.getInt(3)).append(" زوج · ").append(String.format(Locale.ROOT, "%,.2f", c.getLong(4) / 100.0)).append("\n");
-            }
-            if (!any) out.append("مفيش\n");
-        }
-        int pairs = repairOwnTransfers(false);
-        out.append("\n== تحويلات بين حساباتك لسه متسجلة صرف ودخل ==\n").append(pairs).append(" زوج · ")
-                .append(String.format(Locale.ROOT, "%,.2f", lastRepairSum / 100.0)).append(" (كل السنين)\n");
-        out.append("\nعدد الحسابات المكتشفة: ").append(paymentSources().size()).append("\n");
-        return out.toString();
-    }
 
     /** InstaPay bill payments name the service without an amount; they can still close a matching commitment. */
 

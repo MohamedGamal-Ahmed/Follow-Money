@@ -82,7 +82,21 @@ final class CommitmentPaymentUiTest {
             show(plan,11);ok(db.recurringById(plan).paidCount==0,"Partial payment finalized a cycle");screen("01-partial");
             click("علّمه مدفوع");click("اربط عملية مسجلة");click("اختار العملية");screen("02-candidates");click("QA UI provider");
             ok(node("راجع ربط الدفعة")!=null,"Allocation preview missing");ok(db.transactionCount()==2,"Preview created an expense");screen("02-preview");
-            click("اعتماد الربط");waitPaid(plan,1);ok(db.transactionCount()==2,"Link duplicated spending");screen("03-paid");
+            // A background import/edit can invalidate the reviewed payment before the queued write.
+            long paymentId=db.latestInserted().id;
+            db.getWritableDatabase().execSQL("UPDATE transactions SET amount_minor=5000 WHERE id=?",new Object[]{paymentId});
+            click("اعتماد الربط");
+            for(int i=0;i<100&&node("لم تُحفظ التسوية")==null;i++)pause();
+            ok(node("لم تُحفظ التسوية")!=null,"Rejected save must keep the review page and show its error");
+            ok(node("راجع ربط الدفعة")!=null&&db.recurringById(plan).paidCount==0,"Failed write kept the draft without settling the cycle");
+            ok(db.transactionCount()==2,"Failed write added no expense");
+            db.getWritableDatabase().execSQL("UPDATE transactions SET amount_minor=4000 WHERE id=?",new Object[]{paymentId});
+            java.util.concurrent.CountDownLatch queued=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);
+            CaptureQueue.submit(()->{queued.countDown();try{release.await(15,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}});
+            ok(queued.await(5,java.util.concurrent.TimeUnit.SECONDS),"Queue barrier started");
+            try{click("اعتماد الربط");click("اعتماد الربط");ok(node("راجع ربط الدفعة")!=null,"Pending save keeps the page for repeated taps");}
+            finally{release.countDown();}
+            waitPaid(plan,1);ok(db.transactionCount()==2,"Link duplicated spending");screen("03-paid");
             click("عرض التسويات وفك الربط");click("ربط راجعته");click("فك الربط");waitPaid(plan,0);ok(db.transactionCount()==2,"Undo deleted the payment");screen("04-undo");
             show(plan,2);click("راجع التأكيدات");click("Netflix");
             ok(node("Netflix bill paid successfully")!=null,"Saved provider source not shown");ok(db.pendingCommitmentConfirmations().size()==1,"Ambiguous confirmation disappeared");screen("05-provider-review");

@@ -96,17 +96,20 @@ final class JourneyUiTest {
             main(()->activity.onBackPressed());ok((Integer)get("selectedTab")==6);ok("Seoudi".equals(get("transactionSearch")));ok(((ScrollView)get("pageScroll")).getScrollY()==y);
             // The state bundle carries both nested parents and list scroll positions.
             Bundle saved=new Bundle();main(()->invoke("onSaveInstanceState",new Class<?>[]{Bundle.class},saved));ok("Seoudi".equals(saved.getString("search")));ok(saved.getBundle("scroll_positions")!=null);
-            main(()->{set("selectedTab",0);invoke("render",new Class<?>[0]);});ok(has("101.00"));ok(has("نصيبك في Seoudi: 124.00"));screen("06-home");
+            // Home now shows the month statement; the daily allowance remains available in its detail sheet.
+            main(()->{set("selectedTab",0);invoke("render",new Class<?>[0]);});ok(has("كشف الشهر"));screen("06-home");
             main(()->((ScrollView)get("pageScroll")).scrollTo(0,((android.view.View)get("page")).getHeight()));
-            ok(((ScrollView)get("pageScroll")).getScrollY()>0);screen("06-transfers");
-            main(()->invoke("dailyDetailsDialog",new Class<?>[0]));click("صرف النهارده");ok((Integer)get("selectedTab")==6);ok(((LocalDate[])get("transactionPeriod"))[0].equals(today));
+            ok(((ScrollView)get("pageScroll")).getScrollY()>0);ok(has("نصيبك في Seoudi: 124.00"));screen("06-transfers");
+            main(()->invoke("dailyDetailsDialog",new Class<?>[0]));ok(has("101.00"));click("صرف النهارده");ok((Integer)get("selectedTab")==6);ok(((LocalDate[])get("transactionPeriod"))[0].equals(today));
             main(()->activity.onBackPressed());ok(has("ميزانية النهارده"));click("إغلاق");
             main(()->invoke("pointsDialog",new Class<?>[]{String.class},"EGP"));click("تفعيل النقاط");ok(has("+10 نقطة"));ok(!has("+10.1"));ok(has("مؤقتة"));ok(has("رصيدك المعتمد"));ok(has("محطتك الجاية: 100 نقطة"));ok(has("امبارح"));screen("07-points");
             click("النقاط بتتحسب إزاي؟");ok(has("طريقة حساب النقاط"));click("تمام");
             click("سجل الأيام");ok(has("حد اليوم"));click("رجوع للملخص");ok(has("رصيدك المعتمد"));
             click("راجع عمليات اليوم ←");ok((Integer)get("selectedTab")==6);main(()->activity.onBackPressed());ok(has("نقاط الالتزام"));click("إغلاق");
-            DailyPointsStore.observe(target,"EGP",today.minusDays(1)); // Synthetic closed-day fixture for the confirmation journey.
-            main(()->invoke("pointsDialog",new Class<?>[]{String.class},"EGP"));ok(has("مستنية تأكيدك"));click("تأكيد اكتمال تسجيل اليوم");ok(has("كل مصروفات"));click("التسجيل كامل");ok(has("معتمدة"));ok(has("-5 نقطة"));ok(has("فاضلك 105 نقطة"));screen("08-points-confirmed");click("إغلاق");
+            // Seed explicit historical-limit evidence; observe(yesterday) deliberately cannot rewind today's clock.
+            target.getSharedPreferences(DailyPointsStore.SETTINGS,0).edit()
+                    .putLong("limit_EGP_"+today.minusDays(1),25000L).commit();
+            main(()->invoke("pointsDialog",new Class<?>[]{String.class},"EGP"));ok(has("معتمدة"));ok(has("-5 نقطة"));ok(has("فاضلك 105 نقطة"));ok(!has("تأكيد اكتمال تسجيل اليوم"));screen("08-points-confirmed");click("إغلاق");
             result.putString("stream","Journey UI checks passed: "+checked+"; failed: 0\nSynthetic captures: "+captures+"\n");
         } catch(Throwable e){status=0;try{if(captures!=null)screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();e.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Journey UI FAILED: "+trace+"\n");}
         finally{

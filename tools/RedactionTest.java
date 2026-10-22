@@ -22,21 +22,13 @@ public final class RedactionTest {
             for(int i=1;i<sample.length;i++)ok(!redacted.contains(sample[i]),"Unmasked value "+sample[i]+" in "+redacted);
             ok(!java.util.regex.Pattern.compile("[\\p{Nd}]{3,}").matcher(redacted).find(),"Long digit sequence remained");
         }
-        String unknown="Payment format XYZ ref 12345678 amount EGP 120.00";
-        ok(SmsPreview.canReport("HSBC",unknown),"Unsupported known-bank message must be reportable");
-        ok(!SmsPreview.canReport("+201234567890",unknown),"Personal number must not be reportable");
-        ok(!SmsPreview.canReport("Mohamed",unknown),"Personal name must not be reportable");
-        ok(!SmsPreview.canReport("HSBC","OTP verification code 123456 for payment"),"OTP must not be reportable");
-        ok(!SmsPreview.canReport("HSBC","Offer cashback up to EGP 5000 on your card purchase"),"Promotion must not be reportable");
-        ok(!SmsPreview.canReport("HSBC","Purchase of EGP 120.00 at CARREFOUR"),"Recognized purchase must not be reportable");
-        // 20 October samples: notices from known banks without an amount are not formats to fix.
-        ok(!SmsPreview.canReport("bank_misr","عميلنا العزيز، تم إضافة الراتب لبطاقتكم اليوم. الان يمكنك الحصول على قرض شخصي خلال ساعة بدون مستندات أو مصاريف، للتقديم اضغط https://bnkmsr.com/12wzUrm"),"Salary teaser without an amount must not be reportable");
-        ok(!SmsPreview.canReport("qnb","عزيزي العميل، تم اصدار بطاقة الخصم المباشر وجارى تسليمها لسيادتكم من خلال شركة الشحن في محل الإقامة، ولتفعيل البطاقة ارسل اخر 4 ارقام للبطاقة ثم علامة * ثم اخر 4 ارقام من بطاقة الرقم القومي على 19700"),"Card delivery notice must not be reportable");
-        ok(!SmsPreview.canReport("bank_misr","عميلنا العزيز، يرجى العلم بأنه سيتم إجراء تحديثات على نظام بطاقات الخصم المباشر يوم الأحد الموافق 20 يوليو 2026، وذلك من الساعة 12:00 ظهراً حتى 4:00 مساءً، مما قد يؤثر على استخدام بطاقة الخصم المباشر الخاصة بكم خلال فترة التحديث"),"Maintenance notice must not be reportable");
+        // m6 (0.4.0): a missed message waits for the user only when it names an amount; notices without one never do.
+        ok(SmsPreview.hasAmount("Payment format XYZ ref 12345678 amount EGP 120.00"),"An unknown format with an amount is a possible miss");
+        ok(!SmsPreview.hasAmount("عزيزي العميل، تم اصدار بطاقة الخصم المباشر وجارى تسليمها لسيادتكم"),"A card-delivery notice names no amount");
         ok(SmsPreview.hasAmount("Debited EGP 1,250.00 from 1234")&&SmsPreview.hasAmount("تم خصم 250 ج.م من بطاقتك")&&SmsPreview.hasAmount("USD 20.5 received")&&!SmsPreview.hasAmount("ارسل اخر 4 ارقام على 19700"),"amount detector");
-        ok("From HSBC: #MMM# Phone Banking Transfer from #-#**-# USD #- Your available balance is USD #".equals(SmsPreview.shape("From HSBC: 05JUL26 Phone Banking Transfer from 123-456***-789 USD 1,700.00- Your available balance is USD 12,345.67")),"digit runs collapse to one shape: "+SmsPreview.shape("From HSBC: 05JUL26 Phone Banking Transfer from 123-456***-789 USD 1,700.00- Your available balance is USD 12,345.67"));
-        ok("IPN transfer received with amount of EGP # on # on # at # PM. Ref# ###. For more details call #.".equals(SmsPreview.shape("IPN transfer received with amount of EGP 1250.50 on 1234 on 12/08 at 03:12 PM. Ref# 1a2b3c4d. For more details call 19700.")),"reference tokens collapse: "+SmsPreview.shape("IPN transfer received with amount of EGP 1250.50 on 1234 on 12/08 at 03:12 PM. Ref# 1a2b3c4d. For more details call 19700."));
-        ok("تم اضافة مبلغ #EGP الى حساب رقم xxx# فى #-MMM-# عن طريق التحويل اللحظي".equals(SmsPreview.shape("تم اضافة مبلغ 56000EGP الى حساب رقم xxx1234 فى 26-SEP-2026 عن طريق التحويل اللحظي")),"amount glued to its currency keeps the currency: "+SmsPreview.shape("تم اضافة مبلغ 56000EGP الى حساب رقم xxx1234 فى 26-SEP-2026 عن طريق التحويل اللحظي"));
+        ok("from hsbc: <slot> phone banking transfer from <slot> <slot> your available balance is <slot>".equals(SmsPreview.shape("From HSBC: 05JUL26 Phone Banking Transfer from 123-456***-789 USD 1,700.00- Your available balance is USD 12,345.67")),"one slot per value: "+SmsPreview.shape("From HSBC: 05JUL26 Phone Banking Transfer from 123-456***-789 USD 1,700.00- Your available balance is USD 12,345.67"));
+        ok("ipn transfer received with amount of <slot> on <slot> on <slot> at <slot>. ref# <slot>. for more details call <slot>.".equals(SmsPreview.shape("IPN transfer received with amount of EGP 1250.50 on 1234 on 12/08 at 03:12 PM. Ref# 1a2b3c4d. For more details call 19700.")),"reference tokens collapse: "+SmsPreview.shape("IPN transfer received with amount of EGP 1250.50 on 1234 on 12/08 at 03:12 PM. Ref# 1a2b3c4d. For more details call 19700."));
+        ok("تم اضافة مبلغ <slot> الي حساب رقم <slot> في <slot> عن طريق التحويل اللحظي".equals(SmsPreview.shape("تم اضافة مبلغ 56000EGP الى حساب رقم xxx1234 فى 26-SEP-2026 عن طريق التحويل اللحظي")),"amount glued to currency is one slot: "+SmsPreview.shape("تم اضافة مبلغ 56000EGP الى حساب رقم xxx1234 فى 26-SEP-2026 عن طريق التحويل اللحظي"));
         Throwable error=new NumberFormatException("EGP 1250.00 from SECRET PERSON card 1234567890");
         error.initCause(new IllegalStateException("SMS SECRET RAW BODY 987654"));
         String trace=Redaction.crashTrace(error);

@@ -1,0 +1,28 @@
+# HELD-OUT BLIND SET, owner-written 22 October 2026. Never use these messages to develop or tune rules.
+# First run on unchanged code is recorded in held-out-blind-results.md. Party = merchant key, else normalized counterparty; '|' separates accepted alternatives.
+id	channel	body	android.title	android.text	android.textLines	expected_type	expected_decision	expected_amount_minor	expected_currency	expected_direction	expected_party_key	expected_balance_minor	expected_fee_minor	note
+h01	sms	Dear Customer, EGP 1,250.00 has been debited from your account 1234XXXX5678 on 22/10/2026 for standing order to ORANGE EGYPT. Available balance EGP 3,210.45.	\N	\N	\N	transaction	AUTO	125000	EGP	out	orange	321045	\N	account 5678; balance 3210.45
+h02	sms	تم سحب مبلغ 2000.00 جنيه من ماكينة الصراف الآلي ATM0421 ببطاقتكم المنتهية بـ 9911 بتاريخ 22/10/2026 15:10. الرصيد 6,540.00 جنيه	\N	\N	\N	transaction	AUTO	200000	EGP	out	\N	654000	\N	cash_withdrawal; ATM0421 is not a merchant; card 9911
+h03	sms	رمز التحقق الخاص بك لعملية شراء بقيمة 850 جنيه لدى Amazon هو 483921. لا تشاركه مع أحد.	\N	\N	\N	otp	IGNORE	\N	\N	\N	\N	\N	\N	trap: amount and merchant inside an OTP
+h04	sms	Your OTP for a purchase of EGP 850.00 at AMAZON.EG is 483921. Never share it.	\N	\N	\N	otp	IGNORE	\N	\N	\N	\N	\N	\N	
+h05	sms	تم استلام تحويل بقيمة ١,٢٠٠٫٠٠ جنيه من محمد أ. على حسابك المنتهي بـ ٣٣٤٤ عبر إنستاباي	\N	\N	\N	transaction	AUTO	120000	EGP	in	محمد ا	\N	\N	counterparty; Arabic-Indic digits and Arabic decimal separator; account 3344
+h06	sms	سيتم خصم 15 جنيه رسوم خدمة الرسائل القصيرة من حسابكم المنتهي بـ 1122 بتاريخ 01/11/2026	\N	\N	\N	reminder	IGNORE	\N	\N	\N	\N	\N	\N	future event
+h07	sms	Payment of EGP 3,400.00 to NEW CAIRO ELECTRICITY was unsuccessful. Please try again or contact 19123.	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	UNSUCCESSFUL_EVENT
+h08	sms	تم شحن محفظة أورنچ كاش بمبلغ 200 جنيه بنجاح. رصيدك 215.50 جنيه. الرقم المرجعي OC9981	\N	\N	\N	transaction	REVIEW	20000	EGP	in	\N	21550	\N	wallet_topup / pending_internal; letter چ
+h09	sms	Your Vodafone Cash wallet was debited EGP 60.00 for merchant payment to KOSHARY ABOU TAREK. Balance EGP 140.00. TXN 55667788.	\N	\N	\N	transaction	AUTO	6000	EGP	out	koshary abou tarek	14000	\N	
+h10	sms	CIB: Your card ending with#4455 was charged for USD 12.00 at NETFLIX.COM on 22/10/26 at 02:10. Card available limit is EGP 15,000.00.	\N	\N	\N	transaction	AUTO	1200	USD	out	netflix	\N	\N	no EGP equivalent so the amount stays USD; credit limit 15000.00 EGP; a limit in another currency is not ambiguity
+h11	sms	تم إيداع مبلغ 15,000.00 جنيه نقدًا بحسابكم المنتهي بـ 7788 بفرع مدينة نصر بتاريخ 22/10/2026	\N	\N	\N	transaction	AUTO	1500000	EGP	in	\N	\N	\N	cash_deposit; the branch is not a party
+h12	sms	Reminder: Your credit card payment of EGP 4,500.00 is due on 25/10/2026. Minimum due EGP 450.00. Pay now via mobile banking.	\N	\N	\N	reminder	IGNORE	\N	\N	\N	\N	\N	\N	two amounts, no completed event
+h13	sms	تم سداد مستحقات بطاقتكم الائتمانية المنتهية بـ 6611 بمبلغ 4,500.00 جنيه من حسابكم الجاري المنتهي بـ 7788 بتاريخ 22/10/2026	\N	\N	\N	transaction	REVIEW	450000	EGP	out	\N	\N	\N	POSSIBLE_INTERNAL_TRANSFER: own card paid from own account
+h14	sms	Fawry: You paid EGP 199.00 for WE internet bill (acct 0223XXXX11). Fees EGP 3.00. Total EGP 202.00. Ref 11223344.	\N	\N	\N	transaction	AUTO	19900	EGP	out	we	\N	300	Total 202.00 is neither the amount nor a balance
+h15	sms	تم خصم 49.00 ج.م رسوم اشتراك Plus الشهري من بطاقتكم المنتهية بـ 1234. الرصيد المتاح 2,310.00 ج.م	\N	\N	\N	transaction	AUTO	4900	EGP	out	plus	231000	\N	actual debit for the 49 promo (p170); must be told apart
+h16	sms	Congratulations! You've won 500 EGP cashback. Shop with your card before 31/10 to claim. T&C apply.	\N	\N	\N	promo	IGNORE	\N	\N	\N	\N	\N	\N	
+h17	sms	تم إلغاء عملية الشراء بمبلغ 320.00 جنيه لدى جوميا وإعادة المبلغ لبطاقتكم المنتهية بـ 4455. الرصيد المتاح 5,120.00 جنيه	\N	\N	\N	transaction	AUTO	32000	EGP	in	جوميا	512000	\N	reversal / expense_offset
+h18	notification	\N	Telda	\N	تم استلام 300 ج.م. من Sara M.\nرصيدك: 316.5 ج.م.	transaction	AUTO	30000	EGP	in	sara m	31650	\N	text only in textLines; counterparty
+h19	sms	تحويل صادر 5,000.00 EGP الى حساب 1234XXXX5678 - محمد سعيد - عبر خدمة التحويل اللحظي IPN. الرسوم: 0.00 EGP. المرجع: 7A3F9C2E	\N	\N	\N	transaction	AUTO	500000	EGP	out	محمد سعيد	\N	0	counterparty; hex reference is not an amount
+h20	sms	Account statement for Sept 2026 is ready. Total debits EGP 12,340.00, total credits EGP 15,000.00. View in mobile banking.	\N	\N	\N	other	IGNORE	\N	\N	\N	\N	\N	\N	no event
+h21	sms	EGP 75.00 was refunded to your wallet for order #88213 (cancelled).	\N	\N	\N	transaction	AUTO	7500	EGP	in	\N	\N	\N	reversal / expense_offset; #88213 is not an amount
+h22	sms	تم خصم مبلغ 1500 جنيه قسط شهر أكتوبر لقرض السيارة من حسابكم المنتهي بـ 7788	\N	\N	\N	transaction	AUTO	150000	EGP	out	\N	\N	\N	installment_payment
+h23	sms	Paid 15 L.E. at Cilantro - Zamalek via Telda. Balance: 1.5 L.E.	\N	\N	\N	transaction	AUTO	1500	EGP	out	cilantro|cilantro zamalek	150	\N	branch suffix zamalek accepted
+h24	sms	رصيدك الحالي 1,250.00 جنيه. آخر عملية: خصم 100 جنيه لدى كارفور بتاريخ 20/10	\N	\N	\N	balance_inquiry	IGNORE	\N	\N	\N	\N	\N	\N	the last-operation line is not booked again
+h25	sms	INSTAPAY: EGP 250.00 sent to 01012345678 successfully. Fees EGP 0.00	\N	\N	\N	transaction	AUTO	25000	EGP	out	01012345678	\N	0	counterparty

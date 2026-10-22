@@ -32,6 +32,7 @@ final class MerchantClassifier {
         new Entry("LC Waikiki", "تسوق", true, "LC Waikiki", "LCW", "إل سي وايكيكي", "ال سي وايكيكي"),
         new Entry("Raya", "تسوق", true, "Raya", "Raya Shop", "راية", "راية شوب"),
         new Entry("illy", "مقاهي", true, "illy", "illy caffe"),
+        new Entry("Pizza King", "أكل وشرب", true, "Pizza King", "بيتزا كينج", "بيتزا كنج"),
         new Entry("Etoile", "أكل وشرب", true, "Etoile", "Etoile Patisserie", "إتوال"),
         new Entry("Ted's", "أكل وشرب", true, "Ted's", "Teds"),
         new Entry("Zaher", "بقالة", true, "Zaher", "زاهر"),
@@ -61,8 +62,15 @@ final class MerchantClassifier {
     }
     private static Entry find(String raw) {
         if(raw==null) return null;
-        // A processor is a prefix, not the merchant. Strip only explicit processor delimiters.
+        // Bare processor prefixes are accepted only when the remainder is a known merchant.
         String value=textKey(withoutProcessor(raw));
+        Entry direct=findKey(value);
+        if(direct!=null)return direct;
+        for(String processor:new String[]{"kashier ","paymob "})
+            if(value.startsWith(processor))return findKey(value.substring(processor.length()));
+        return null;
+    }
+    private static Entry findKey(String value) {
         for(Entry entry:ENTRIES) for(String key:entry.aliases) {
             if(value.equals(key) || entry.branches && key.length()>=4 && value.startsWith(key+" ")) return entry;
         }
@@ -77,6 +85,17 @@ final class MerchantClassifier {
     }
     private static String withoutProcessor(String raw) {
         return raw==null?"":raw.trim().replaceFirst("(?i)^(?:KASHIER|PAYMOB)\\s*\\*\\s*", "");
+    }
+    /** Read-only catalog view for the shadow MerchantCatalogIndex: {name, "branches"|"whole", textKey aliases...}. */
+    static java.util.List<String[]> catalog() {
+        java.util.List<String[]> rows=new java.util.ArrayList<>();
+        for(Entry entry:ENTRIES){
+            String[] row=new String[entry.aliases.length+2];
+            row[0]=entry.name; row[1]=entry.branches?"branches":"whole";
+            System.arraycopy(entry.aliases,0,row,2,entry.aliases.length);
+            rows.add(row);
+        }
+        return rows;
     }
     static String category(String raw) { Entry entry=find(raw); return entry==null?null:entry.category; }
     static String identity(String raw) { return textKey(displayName(raw)); }

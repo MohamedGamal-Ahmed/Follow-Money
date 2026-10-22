@@ -56,9 +56,9 @@ public final class RepairRulesTest {
         // Account 7392 pays the credit card 2700 the same second.
         rows.add(row(736, "2026-07-01T08:46:37", 753258, "expense", "تحويلات", "SMS", "expense", 6L, null));
         rows.add(row(1137, "2026-07-01T08:46:48", 753258, "income", "دخل", "SMS", "income", 1L, null));
-        // A real transfer to a person, and an unrelated income an hour later: must stay as they are.
+        // A real transfer to a person, and an unrelated income ninety minutes later: must stay as they are.
         rows.add(row(900, "2026-08-01T10:00:00", 500000, "expense", "تحويلات", "SMS", "expense", 6L, null));
-        rows.add(row(901, "2026-08-01T11:00:00", 500000, "income", "دخل", "SMS", "income", 4L, null));
+        rows.add(row(901, "2026-08-01T11:30:00", 500000, "income", "دخل", "SMS", "income", 4L, null));
         // The debit card paying into its own account is not a move between accounts.
         rows.add(row(950, "2026-08-02T10:00:00", 10000, "expense", "تحويلات", "SMS", "expense", 3L, null));
         rows.add(row(951, "2026-08-02T10:00:30", 10000, "income", "دخل", "SMS", "income", 6L, null));
@@ -78,6 +78,48 @@ public final class RepairRulesTest {
         boolean pairedAmbiguous = false;
         for (RepairRules.OwnTransfer o : RepairRules.ownTransfers(rows, accountOf)) if (o.outId == 783) pairedAmbiguous = true;
         check(!pairedAmbiguous, "ambiguous receipt not paired");
+        // 2b) Step 7 writes a debit whose counterparty digits named one of the user's own accounts as a transfer with
+        // that destination already set (HSBC 0001 → Banque Misr 7392, 22 Oct 2026). The receipt must still be paired
+        // with it, and only when it landed on that destination.
+        rows.clear();
+        rows.add(row(2001, "2026-10-22T06:46:00", 450, "transfer", "تحويلات", "SMS", "expense", 4L, 6L));
+        rows.add(row(2002, "2026-10-22T06:46:30", 400, "income", "دخل", "SMS", "income", 6L, null));
+        List<RepairRules.OwnTransfer> addressed = RepairRules.ownTransfers(rows, accountOf);
+        check(addressed.size() == 1 && addressed.get(0).outId == 2001 && addressed.get(0).inId == 2002 && addressed.get(0).fee == 50
+                && addressed.get(0).toAccount == 6, "debit with its own destination pairs with the receipt on that account");
+        rows.clear();
+        rows.add(row(2001, "2026-10-22T06:46:00", 450, "transfer", "تحويلات", "SMS", "expense", 4L, 6L));
+        rows.add(row(2003, "2026-10-22T06:46:30", 400, "income", "دخل", "SMS", "income", 8L, null));
+        check(RepairRules.ownTransfers(rows, accountOf).isEmpty(), "a receipt on another account is not that transfer");
+        // 2c) Owner decision (22 Oct 2026): a wallet/prepaid card may post its receipt well after the bank debit
+        // (Telda: 35 left Banque Misr 06:09, arrived 06:33). Within an hour pairs; beyond it stays apart.
+        rows.clear();
+        rows.add(row(3001, "2026-10-22T06:09:00", 3500, "expense", "تحويلات", "SMS", "expense", 6L, null));
+        rows.add(row(3002, "2026-10-22T06:33:00", 3500, "income", "دخل", "إشعار: Telda", "income", 9L, null));
+        List<RepairRules.OwnTransfer> late = RepairRules.ownTransfers(rows, accountOf);
+        check(late.size() == 1 && late.get(0).outId == 3001 && late.get(0).inId == 3002 && late.get(0).fee == 0, "receipt 24 minutes later is still the same transfer");
+        rows.clear();
+        rows.add(row(3001, "2026-10-22T06:09:00", 3500, "expense", "تحويلات", "SMS", "expense", 6L, null));
+        rows.add(row(3003, "2026-10-22T07:10:00", 3500, "income", "دخل", "إشعار: Telda", "income", 9L, null));
+        check(RepairRules.ownTransfers(rows, accountOf).isEmpty(), "a receipt more than an hour later is not paired");
+        // 2d) Owner test (22 Oct 2026, second round): after the bank debit and the receipt were reconciled into one transfer,
+        // the receipt's app notification arrived again (InstaPay +1.00, Telda +10.00) and became a second income row,
+        // because a reconciled transfer is user-edited and no longer an income. A notification income of the same amount
+        // within the duplicate window, on the transfer's destination (or with no source), is that receipt seen again.
+        rows.clear();
+        RepairRules.Row settled = new RepairRules.Row(4001, at("2026-10-22T10:25:00"), at("2026-10-22T10:25:00"), 1000, "EGP", "transfer", "تحويلات", "SMS", "expense", 6L, 9L, true, "تحويل بين حساباتي");
+        rows.add(settled);
+        rows.add(row(4002, "2026-10-22T10:25:40", 1000, "income", "دخل", "إشعار: Telda", "income", 9L, null));
+        rows.add(row(4003, "2026-10-22T10:50:10", 1000, "income", "دخل", "إشعار: InstaPay", "income", null, null)); // the receipt itself was 24 minutes late
+        List<RepairRules.Duplicate> again = RepairRules.lateReceiptDuplicates(rows);
+        check(again.size() == 2 && again.get(0).keepId == 4001 && again.get(1).keepId == 4001
+                && again.get(0).removeId == 4002 && again.get(1).removeId == 4003, "both app copies of the receipt fold into the settled transfer: " + again.size());
+        rows.clear(); rows.add(settled);
+        rows.add(row(4004, "2026-10-22T10:25:40", 1000, "income", "دخل", "إشعار: Telda", "income", 4L, null)); // another account
+        rows.add(row(4005, "2026-10-22T10:25:40", 1500, "income", "دخل", "إشعار: Telda", "income", 9L, null)); // other amount
+        rows.add(row(4006, "2026-10-22T11:40:00", 1000, "income", "دخل", "إشعار: Telda", "income", 9L, null)); // after the transfer window
+        rows.add(row(4007, "2026-10-22T10:25:40", 1000, "income", "دخل", "SMS", "income", 9L, null)); // a bank SMS is a real credit
+        check(RepairRules.lateReceiptDuplicates(rows).isEmpty(), "other account, other amount, late, or a bank SMS stay as they are");
 
         // 3) A fixed monthly transfer is offered as an installment.
         rows.clear();

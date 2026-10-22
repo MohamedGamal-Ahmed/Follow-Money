@@ -9,6 +9,14 @@ final class SmsPreview {
     boolean selected;
     boolean receiptKeySafe;
     int captureStatus;
+    /**
+     * The new pipeline's reading, computed once when the import lists the message and written exactly as listed:
+     * decision with its observation, or failure (the pipeline could not decide; the legacy parser writes it). Plain
+     * types so this class stays free of Android storage.
+     */
+    PipelineDecision decision;
+    ParserShadow.Observation observation;
+    String failure;
 
     private SmsPreview(String sender, String body, long receivedAt, long captureAt, String title, String category,
                        String currency, long amountMinor, String kind, boolean balance, boolean commitment) {
@@ -60,43 +68,66 @@ final class SmsPreview {
         return null;
     }
 
+    /**
+     * A movement the new pipeline records, listed with its own name, category and amount. legacy, when the legacy
+     * reading also saw a balance or a commitment in the text, keeps those flags for the list.
+     */
+    static SmsPreview fromDecision(String sender, String body, long receivedAt, long sentAt, PipelineDecision decision,
+                                   ParserShadow.Observation observation, SmsPreview legacy) {
+        SmsPreview row=new SmsPreview(sender,body,receivedAt,CaptureIdentity.smsTimestamp(receivedAt,sentAt),decision.merchant,
+                decision.category,decision.currency,decision.amountMinor,decision.kind(),
+                legacy!=null&&legacy.balanceIncluded,legacy!=null&&legacy.commitmentIncluded);
+        row.decision=decision; row.observation=observation;
+        return row;
+    }
+
     boolean isTransaction() { return "expense".equals(kind)||"income".equals(kind)||"transfer".equals(kind); }
 
     /** A currency next to a number («EGP 1,250.00», «1250 ج.م», «USD 20»): the one thing every transaction alert carries. */
     private static final java.util.regex.Pattern AMOUNT=java.util.regex.Pattern.compile(
             "(?iu)(?:(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)\\.?\\s*[0-9][0-9,.]*|[0-9][0-9,.]*\\s*(?:egp|usd|eur|gbp|sar|aed|kwd|le|ج\\.?\\s?م|جنيه|دولار|يورو|ريال|درهم)(?![\\p{L}]))");
 
-    /**
-     * Conservative support-only selection; never changes parser acceptance or books an operation. A known bank sender,
-     * financial wording, an amount in the text (card-delivery notices, system-maintenance notes and «تم إضافة الراتب»
-     * teasers carry none and are not formats to fix), not an OTP, not a promotion, and refused by the parser.
-     */
-    static boolean canReport(String sender,String body) {
-        return BrandCatalog.bank(sender)!=null && ExpenseParser.isFinancialCandidate(body) && hasAmount(body)
-                && !ExpenseParser.isVerificationMessage(body) && !ExpenseParser.isPromotion(body)
-                && parse(sender,body,0)==null;
-    }
     static boolean hasAmount(String body) { return body!=null && AMOUNT.matcher(ExpenseParser.normalizeDigits(body)).find(); }
+    /** An amount with a non-zero digit («0.00 جنيه» is not one; an unclear «EUR 1.250» is). */
+    static boolean hasPositiveAmount(String body) {
+        if(body==null)return false;
+        java.util.regex.Matcher amount=AMOUNT.matcher(ExpenseParser.normalizeDigits(body));
+        while(amount.find())if(amount.group().matches("(?s).*[1-9].*"))return true;
+        return false;
+    }
 
     /**
-     * The masked shape of a message for the samples tool: digits become #, a run of digits with its separators
-     * (1,234.56 or 12:30) one #, a token mixing digits and letters (a reference such as 3a7f9c) ###, InstaPay handles
-     * xxx@instapay and English month names MMM — so one bank template is one shape. Without the run collapse, 279 HSBC
-     * messages gave 249 shapes (20 October).
+     * Lossy diagnostic grouping only: every variable value becomes the same slot regardless of its length.
+     * Never use a shape as transaction identity, a dedupe key or proof that a message is a payment.
+     * This is deliberately separate from parsing, evidence storage and financial acceptance.
      */
     static String shape(String text) {
         if(text==null)return "";
-        String clean=ExpenseParser.normalizeDigits(text);
-        clean=clean.replaceAll("(?i)[a-z0-9._-]+@instapay","xxx@instapay");
-        // A reference has letters after digits (1a2b3c4d, 1234fc56); a masked account (xxx1234), a date token (05JUL26)
-        // and an amount glued to its currency (56000EGP, EGP1250) are not references and keep their letters.
-        clean=clean.replaceAll("(?i)(?<![\\p{L}0-9])(?![0-9]{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[0-9]{2,4}(?![a-z0-9]))"
-                +"(?![0-9][0-9,.]*(?:egp|usd|eur|gbp|sar|aed|kwd|le)(?![a-z0-9]))(?!(?:egp|usd|eur|gbp|sar|aed|kwd|le)[0-9])"
-                +"(?=[a-z0-9]*[0-9][a-z0-9]*[a-z])[a-z0-9]{4,}(?![\\p{L}0-9])","###");
-        clean=clean.replaceAll("(?i)(?<![a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(?![a-z])","MMM");
-        clean=clean.replaceAll("[0-9]+(?:[.,:/٬٫][0-9]+)*","#");
-        clean=clean.replaceAll("[*]{2,}","**");
-        return clean.replaceAll("\\s+"," ").trim();
+        String slot="<slot>";
+        String clean=ExpenseParser.normalizeDigits(text).replaceAll("[\\u200e\\u200f\\u202a-\\u202e]","")
+                .replaceAll("[\\u064b-\\u065f\\u0670\\u0640]","")
+                .replace('أ','ا').replace('إ','ا').replace('آ','ا').replace('ى','ي');
+        // Consume complete compound values before replacing bare digit runs or existing redaction hashes.
+        clean=clean.replaceAll("(?i)(?:https?://|www\\.)[^\\s\\p{Z}]+",slot);
+        clean=clean.replaceAll("(?i)[a-z0-9._-]+@instapay",slot);
+        clean=clean.replaceAll("(?iu)((?:\\bref(?:erence)?\\.?|رقم\\s*(?:مرجعي|المرجع|العملية))\\s*#?\\s*[:=]?\\s*)[a-f0-9#-]+","$1"+slot);
+        clean=clean.replaceAll("(?i)(?<![\\p{L}\\p{N}])(?=[0-9x*#-]*[x*])(?=[0-9x*#-]*[0-9*#])[0-9x*#]+(?:-[0-9x*#]+)*(?![\\p{L}\\p{N}])",slot);
+        String day="[0-9#]{1,}";
+        String months="(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|يناير|فبراير|مارس|ابريل|مايو|يونيو|يوليو|اغسطس|سبتمبر|اكتوبر|نوفمبر|ديسمبر)";
+        // Existing ###-Oct-#### support drafts and original 21OCT26 dates must have identical length-free structure.
+        String numericDay="(?:0?[1-9]|[12][0-9]|3[01]|#+)", numericMonth="(?:0?[1-9]|1[0-2]|#+)", year="(?:[0-9]{4}|[0-9]{2}|#+)";
+        String numericDate="(?:"+year+"[-/]"+numericMonth+"[-/]"+numericDay+"|"+numericDay+"[-/]"+numericMonth+"(?:[-/]"+year+")?|"+numericDay+"\\."+numericMonth+"\\."+year+")";
+        clean=clean.replaceAll("(?iu)(?<![\\p{L}\\p{N}.,])(?:"+day+"[- /]?"+months+"[- /]?"+day+"|"+numericDate+")(?![\\p{L}\\p{N}]|[.,][0-9])",slot);
+        clean=clean.replaceAll("(?iu)(?<![\\p{L}\\p{N}])[0-9#]+:[0-9#]+(?::[0-9#]+)?(?:\\s*(?:[ap]m|ص|م|صباحا|مساء|ظهرا))?(?![\\p{L}\\p{N}])",slot);
+        String number="[+-]?[0-9#]+(?:[.,٬٫][0-9#]+|[ \\u00a0\\u202f][0-9#]{3})*[+-]?";
+        String currency="(?:egp|usd|eur|gbp|sar|aed|kwd|le|l\\.e\\.|ج\\.?\\s*م\\.?|جنيه|دولار|يورو|ريال|درهم)";
+        clean=clean.replaceAll("(?iu)(?<![\\p{L}\\p{N}])(?:"+currency+"\\s*"+number+"|"+number+"\\s*"+currency+")(?![\\p{L}\\p{N}])",slot);
+        clean=clean.replaceAll("(?i)(?<![\\p{L}\\p{N}])(?=[0-9x*#-]*[x*#])(?=[0-9x*#-]*[0-9*#])[0-9x*#]+(?:-[0-9x*#]+)*(?![\\p{L}\\p{N}])",slot);
+        // Unlabelled mixed hex references are values; ordinary words such as CAFE must survive.
+        clean=clean.replaceAll("(?i)(?<![\\p{L}\\p{N}])(?=[a-f0-9]*[a-f])(?=[a-f0-9]*[0-9])[a-f0-9]{4,}(?![\\p{L}\\p{N}])",slot);
+        clean=clean.replaceAll("[0-9]+(?:[.,:/٬٫-][0-9]+)*|(?<![\\p{L}])#+",slot);
+        clean=clean.replaceAll("<slot>[+-]",slot);
+        return clean.toLowerCase(java.util.Locale.ROOT).replaceAll("[\\s\\p{Z}]+"," ").trim();
     }
     boolean canUseReceiptKey(java.util.Set<String> sentKeys) {
         return CaptureIdentity.receiptKeySafe(sender,body,receivedAt,captureAt,sentKeys);

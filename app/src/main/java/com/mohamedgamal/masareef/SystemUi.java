@@ -11,8 +11,12 @@ final class SystemUi {
     private SystemUi() {}
 
     static void apply(Activity activity,View root) {
+        apply(activity.getWindow(), root);
+    }
+
+    static void apply(android.view.Window window,View root) {
         if(Build.VERSION.SDK_INT<35) return;
-        activity.getWindow().setDecorFitsSystemWindows(false);
+        window.setDecorFitsSystemWindows(false);
         int left=root.getPaddingLeft(),top=root.getPaddingTop(),right=root.getPaddingRight(),bottom=root.getPaddingBottom();
         root.setOnApplyWindowInsetsListener((view,insets)->{
             Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout()|WindowInsets.Type.ime());
