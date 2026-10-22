@@ -664,7 +664,8 @@ public final class ExpenseParser {
     /** The display name current rules give a stored merchant (e.g. "OPENAI *CHATGPT SUBSCR" → "ChatGPT"). */
     static String normalizeMerchant(String raw) { return raw == null ? "" : merchantName(raw); }
 
-    private static String merchantName(String raw) {
+    /** The name the ledger shows for a merchant as written (catalog spelling, known services); shared with DecisionNames. */
+    static String merchantName(String raw) {
         if (MerchantClassifier.category(raw) != null) return MerchantClassifier.displayName(raw);
         String name = raw.trim().replaceAll("\\s+", " ");
         String upper = name.toUpperCase(Locale.ROOT);

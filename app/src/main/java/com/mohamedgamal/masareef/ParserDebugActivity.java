@@ -122,8 +122,7 @@ public final class ParserDebugActivity extends Activity {
         page.addView(tabs2);
         if (view.equals("rescan")) { rescanView(s); return; }
         if (view.equals("ununderstood")) { for (ShadowStore.Ununderstood u : s.ununderstood) ununderstoodCard(u); if (s.ununderstood.isEmpty()) line("لا توجد رسائل.", UiTheme.BODY, theme.muted); return; }
-        line(DecisionSwitch.on(this) ? "المحلل الجديد هو اللي بيسجّل الرسائل اللي توصل بعد التفعيل؛ القديم رأيه بس." :
-                "المحلل القديم هو اللي بيسجّل؛ الجديد في الظل.", UiTheme.CAPTION, theme.muted);
+        line("المحلل الجديد هو اللي بيسجّل؛ القديم احتياطي لو فشل.", UiTheme.CAPTION, theme.muted);
         int shown = 0;
         for (ShadowStore.Stored row : s.live) {
             if (view.equals("diff") && row.diff().agrees()) continue;

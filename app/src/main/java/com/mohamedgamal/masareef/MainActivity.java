@@ -188,8 +188,6 @@ public final class MainActivity extends Activity {
             setTheme(R.style.AppTheme_Dark);
         }
         super.onCreate(state);
-        // Step 7: the activation time starts when the app is first opened with the switch on (test build), not at the next capture.
-        DecisionSwitch.on(this);
         uiTheme = new UiTheme(this, dark);
         INK=uiTheme.ink; MUTED=uiTheme.muted; BACKGROUND=uiTheme.background; ACCENT=uiTheme.accent;
         BRAND=uiTheme.brand; BRAND_SOFT=uiTheme.brandSoft; EMERALD=uiTheme.emerald; LIME=uiTheme.lime;
@@ -804,11 +802,6 @@ public final class MainActivity extends Activity {
                 if(!db.debts().isEmpty())setting("الديون المسجلة",()->{selectedTab=9;render();});
                 if(BuildConfig.DEBUG||getPreferences(MODE_PRIVATE).getBoolean(ParserDebugActivity.ENABLED_KEY,false)){
                     section("إعدادات متقدمة",null,null);
-                    // Step 7: which parser records new messages; switching back to the old one takes effect at once, no update.
-                    setting(DecisionSwitch.on(this)?"المحلل الجديد هو اللي بيسجّل: مفعّل · اضغط للرجوع للقديم":"المحلل القديم هو اللي بيسجّل · اضغط لتفعيل الجديد",()->{
-                        boolean on=!DecisionSwitch.on(this);DecisionSwitch.set(this,on);
-                        toast(on?"المحلل الجديد هيسجّل الرسائل الجديدة من دلوقتي":"رجعنا للمحلل القديم فورًا؛ اللي اتسجل قبل كده زي ما هو");render();
-                    });
                     setting("رسائل لم أفهمها",()->startActivity(new Intent(this,ParserDebugActivity.class).putExtra(ParserDebugActivity.VIEW_EXTRA,"ununderstood")));
                     setting("رسائل لم تُسجَّل (للمعلومة)",()->startActivity(new Intent(this,ParserDebugActivity.class).putExtra(ParserDebugActivity.VIEW_EXTRA,"unrecorded")));
                     setting("تشخيص المحلل (الفروق أولًا بأول)",()->startActivity(new Intent(this,ParserDebugActivity.class)));

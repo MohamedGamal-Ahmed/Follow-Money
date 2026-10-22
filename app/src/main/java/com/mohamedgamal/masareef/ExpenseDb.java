@@ -32,15 +32,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
     static final int SCHEMA_VERSION = 26;
 
-    /** For DecisionSwitch only (which parser decides a live message); null in no other path. */
-    private final Context appContext;
-
     public ExpenseDb(Context context) {
         super(context, DATABASE_NAME, null, SCHEMA_VERSION);
-        appContext = context.getApplicationContext() != null ? context.getApplicationContext() : context;
     }
-
-    Context appContext() { return appContext; }
 
     /**
      * Backup: writes a consistent copy of the whole database to a temporary file (VACUUM INTO where SQLite supports it,
@@ -461,8 +455,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /**
-     * decided: the new pipeline's decision (step 7), or null when the legacy parser decides. With a decision, the ledger
-     * row and its fields come from it; an earlier matching row only gains evidence and is never changed; the legacy
+     * decided: the new pipeline's decision, or null when the pipeline failed and the legacy parser decides. With a
+     * decision, the ledger row and its fields come from it; the legacy
      * non-ledger paths (excluded messages, notices, hints, balances, commitments) still run when it records nothing.
      */
     CaptureResult.Write addAutomaticCapture(CaptureRequest request, PipelineDecision decided) {
@@ -499,13 +493,15 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             String hash = sha256(sourceKey + "\n" + body.trim());
             ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(body,receivedAt);
             long eventAt = event.when;
-            if (!newRecords && ExpenseParser.isFutureOnly(body)) {
+            // Legacy guards stand even when the new pipeline records: a future-only alert, an unsuccessful attempt or a
+            // notice (cancellation, reversal) never becomes a ledger row; CaptureTransaction notes LEGACY_GUARD on it.
+            if (ExpenseParser.isFutureOnly(body)) {
                 result.reason=CaptureResult.Reason.FUTURE_ONLY;
                 result.rowId=markRejectedCaptureForReview(hash, eventAt);
                 writable.setTransactionSuccessful();
                 return result;
             }
-            if (!newRecords && (ExpenseParser.isUnsuccessful(body) || CaptureNotice.parse(label,body)!=null)) {
+            if (ExpenseParser.isUnsuccessful(body) || CaptureNotice.parse(label,body)!=null) {
                 result.rowId=markRejectedCaptureForReview(hash, eventAt);
                 CaptureNotice notice=CaptureNotice.parse(label,body);
                 if(notice!=null)result.event=new CaptureEvents(this).record(label,channel,body,receivedAt,key,notice,automaticCancellation);
@@ -518,15 +514,18 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             recordHint(label,body,receivedAt);
             recordBalanceFromMessage(label, body, receivedAt);
-            ExpenseParser.Transfer transfer = ExpenseParser.parseTransfer(body);
-            ExpenseParser.Parsed parsed = ExpenseParser.parse(label, body);
+            ExpenseParser.Transfer transfer = null;
+            ExpenseParser.Parsed parsed;
             String direction = "expense";
-            if (parsed == null) { parsed = ExpenseParser.parseIncome(label, body); direction = "income"; }
             if (decided != null) {
-                // Step 7: the new pipeline decides whether there is a ledger row and what it says.
-                transfer = null;
+                // The new pipeline decides whether there is a ledger row and what it says.
                 parsed = decided.records ? new ExpenseParser.Parsed(decided.amountMinor, decided.currency, decided.merchant, decided.category, decided.cardLast4) : null;
-                direction = decided.records ? decided.kind() : direction;
+                if (decided.records) direction = decided.kind();
+            } else {
+                // The pipeline failed on this message: the legacy parser decides it.
+                transfer = ExpenseParser.parseTransfer(body);
+                parsed = ExpenseParser.parse(label, body);
+                if (parsed == null) { parsed = ExpenseParser.parseIncome(label, body); direction = "income"; }
             }
             if (transfer != null) {
                 direction = transfer.incoming ? "income" : "expense";
@@ -541,10 +540,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     result.added=result.reason==CaptureResult.Reason.SERVICE_MATCH_ACCEPTED||result.reason==CaptureResult.Reason.COMMITMENT_REVIEW_REQUIRED;
                     if(result.added)result.evidence=CaptureResult.Evidence.PROVIDER_BODY;
                 }
-                if (decided != null && result.reason == CaptureResult.Reason.NO_LEDGER_CANDIDATE) result.reason=CaptureResult.Reason.NEW_PIPELINE_SKIPPED;
+                // The user's ignore rule refused the row (as insertEntry refuses it for legacy); otherwise the pipeline skipped it.
+                if (decided != null && result.reason == CaptureResult.Reason.NO_LEDGER_CANDIDATE)
+                    result.reason=decided.ignoredByUser?CaptureResult.Reason.INSERT_NOT_APPLIED:CaptureResult.Reason.NEW_PIPELINE_SKIPPED;
                 writable.setTransactionSuccessful(); return result;
             }
-            if(decided==null&&CaptureNotice.cardRepayment(body))parsed=new ExpenseParser.Parsed(parsed.amountMinor,parsed.currency,parsed.merchant,parsed.category,ExpenseParser.debitAccountLast4(body));
+            // A repayment of the user's own credit card: the debit account is the source, the card the destination, whoever decided.
+            if(CaptureNotice.cardRepayment(body))parsed=new ExpenseParser.Parsed(parsed.amountMinor,parsed.currency,parsed.merchant,parsed.category,ExpenseParser.debitAccountLast4(body));
             Long account = autoSource(label, parsed.cardLast4, body);
             String normalized = CaptureIdentity.normalized(label, body);
             String reference = CaptureIdentity.reference(label, body);
@@ -558,7 +560,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             }
             boolean added = false;
             // Nothing recorded earlier is changed when the new pipeline decides: a match only gains this evidence.
-            if (existing >= 0 && decided == null) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision);
+            if (existing >= 0) { if (decided == null) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision); }
             else {
                 // Step 7: a debit whose other party is only an account/card tail that belongs to exactly one of the user's
                 // own sources went between the user's accounts (owner test, 22 Oct 2026: HSBC «to 7392» = Banque Misr 7392).
@@ -570,7 +572,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 // A debit to one of the user's own credit cards keeps that card as destination (the statement treats it as
                 // internal); the settlement dialog stays optional for allocating it to purchases.
                 Long destination = ownDestination != null ? ownDestination : "transfer".equals(kind) && "income".equals(direction) ? account :
-                        decided == null && "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
+                        "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
                 added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
                         "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
                         "transfer".equals(kind) && "income".equals(direction) ? null : account, kind,

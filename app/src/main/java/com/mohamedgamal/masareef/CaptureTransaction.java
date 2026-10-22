@@ -14,71 +14,47 @@ final class CaptureTransaction {
         boolean pending = db.getWritableDatabase().inTransaction();
         long before = db.changes();
         db.rememberCapture(-1, null);
-        // Step 7: the new pipeline decides messages that arrive after it was switched on; a pipeline failure falls back to legacy.
-        PipelineDecider.Decided decided = DecisionSwitch.decides(db.appContext(), request.captureAt) ? PipelineDecider.decide(db, request) : null;
-        CaptureResult.Write write = db.addAutomaticCapture(request, decided == null ? null : decided.decision);
+        // The new pipeline decides; only when it cannot decide does the legacy parser decide this message.
+        PipelineDecider.Result decided = PipelineDecider.decide(PipelineDecider.context(db, "live"), request);
+        PipelineDecider.Decided pipeline = decided instanceof PipelineDecider.Decided ? (PipelineDecider.Decided) decided : null;
+        CaptureResult.Write write = db.addAutomaticCapture(request, pipeline == null ? null : pipeline.decision);
         long capturedId = write.rowId;
         finish(request, write);
         CaptureResult result = new CaptureResult(write, capturedId,
                 write.rowId < 0 ? null : db.transactionById(write.rowId), pending, before, db.changes());
-        if (decided != null) recordDecided(db, request, result, decided);
-        else shadow(db, request.raw, request.label, request.body, request.captureAt, result, String.valueOf(result.reason));
+        store(db, "live", request, decided, write.reason, result.transaction == null ? null : result.transactionId);
         return result;
     }
 
     /**
-     * The new pipeline decided: its observation is stored beside the ledger row, with the legacy parser's opinion
-     * (computed, never written) for LEGACY_OPINION_DAYS after the first activation, so the debug screen keeps showing
-     * the differences as they happen.
+     * Stores the observation beside the ledger row, or, when the pipeline failed, a PIPELINE_FAILED note with its reason
+     * (the pipeline is not run again). Diagnostics only: a failure here never changes or fails the capture.
      */
-    private static void recordDecided(ExpenseDb db, CaptureRequest request, CaptureResult result, PipelineDecider.Decided decided) {
+    static void store(ExpenseDb db, String origin, CaptureRequest request, PipelineDecider.Result decided, CaptureResult.Reason written, Long transactionId) {
         try {
-            String legacyDecision = "LEGACY_OFF", legacyReason = "LEGACY_OPINION_ENDED", legacyCurrency = null, legacyDirection = null, legacyMerchant = null;
-            Long legacyAmount = null;
-            if (request.body != null && DecisionSwitch.legacyOpinion(db.appContext(), request.captureAt)) {
-                SmsPreview preview = SmsPreview.parse(request.label, request.body, request.captureAt, request.captureAt);
-                boolean would = preview != null && preview.isTransaction();
-                legacyDecision = would ? "WOULD_RECORD" : "WOULD_SKIP";
-                legacyReason = "LEGACY_OPINION/" + (preview == null ? "NOT_CANDIDATE" : "PREVIEW_" + preview.kind.toUpperCase(java.util.Locale.ROOT));
-                if (would) {
-                    legacyAmount = preview.amountMinor; legacyCurrency = preview.currency; legacyMerchant = preview.title;
-                    if ("transfer".equals(preview.kind)) {
-                        ExpenseParser.Transfer t = ExpenseParser.parseTransfer(request.body);
-                        legacyDirection = t == null ? "transfer" : t.incoming ? "in" : "out";
-                    } else legacyDirection = ShadowStore.legacyDirection(preview.kind);
-                }
+            android.database.sqlite.SQLiteDatabase sql = db.getWritableDatabase();
+            if (decided instanceof PipelineDecider.Decided) {
+                PipelineDecider.Decided d = (PipelineDecider.Decided) decided;
+                String guard = d.decision.records ? guard(written) : null;
+                ShadowStore.record(sql, origin, request.raw, request.body, request.label, request.captureAt, transactionId,
+                        null, "LEGACY_OFF", null, null, null, null, d.observation, guard == null ? null : "LEGACY_GUARD:" + guard);
             }
-            ShadowStore.record(db.getWritableDatabase(), "live", request.raw, request.body, request.label, request.captureAt,
-                    result.transactionId, legacyReason, legacyDecision, legacyAmount, legacyCurrency, legacyDirection, legacyMerchant, decided.observation);
+            else
+                ShadowStore.recordFailure(sql, origin, request.body, request.label, request.captureAt, transactionId,
+                        ((PipelineDecider.Failed) decided).reason);
         } catch (RuntimeException | LinkageError ignored) {
-            // Diagnostics only; the decision is already recorded.
+            // Diagnostics only.
         }
     }
 
-    /**
-     * A notification the legacy path never captures (a group summary, or text only in extras it does not read) is
-     * still observed in shadow. Nothing is recorded; legacyReason says why legacy skipped it.
-     */
-    static void observeWithoutCapture(ExpenseDb db, MessageNormalizer.Raw raw, String label, long receivedAt, String legacyReason) {
-        shadow(db, raw, label, null, receivedAt, null, legacyReason);
-    }
-
-    /** Runs after the legacy decision is final; a shadow failure must never change or fail the capture. */
-    private static void shadow(ExpenseDb db, MessageNormalizer.Raw raw, String label, String legacyBody, long receivedAt,
-                               CaptureResult result, String legacyReason) {
-        try {
-            // The user's merchant rules, read only, after the legacy decision is final.
-            java.util.List<LocalLearning.MerchantRule> rules = new java.util.ArrayList<>();
-            for (ExpenseDb.MerchantRule rule : db.merchantRules()) rules.add(new LocalLearning.MerchantRule(rule.matchText, rule.category, rule.ignored));
-            ParserShadow.learning().setMerchantRules(rules);
-            android.database.sqlite.SQLiteDatabase sql = db.getWritableDatabase();
-            ShadowStore.loadLearningOnce(sql, ParserShadow.learning());
-            ParserShadow.Observation observation = ParserShadow.observe(raw, legacyReason,
-                    result == null || result.transaction == null ? null : result.transaction.merchant, receivedAt, System.currentTimeMillis());
-            // Stored beside the legacy record; these tables are outside LedgerRevision, so the ledger sees no change.
-            ShadowStore.record(sql, raw, legacyBody, label, receivedAt, result, legacyReason, observation);
-        } catch (RuntimeException | LinkageError ignored) {
-            // Diagnostics only.
+    /** A legacy guard that kept a recording decision out of the ledger, or null. */
+    static String guard(CaptureResult.Reason written) {
+        if (written == null) return null;
+        switch (written) {
+            case FUTURE_ONLY: return "FUTURE_ONLY";
+            case UNSUCCESSFUL: return "UNSUCCESSFUL";
+            case NOTICE_RECORDED: case NOTICE_DUPLICATE: return "NOTICE";
+            default: return null;
         }
     }
 

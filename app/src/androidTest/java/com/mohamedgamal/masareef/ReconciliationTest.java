@@ -546,14 +546,16 @@ public final class ReconciliationTest extends Instrumentation {
 
     public void testSubscriptionDiscoveryAndSeparatePlans() {
         String one="Dear customer, you have successfully purchased Microsoft Apps - Basic Subscription - 1 month (Microsoft OneDrive) from Google Play Store and 39 Egyptian pound has been deducted from your credit";
-        assertTrue(db.addSms("7030",one,AT));
+        // Owner decision (21 Oct 2026): a subscription paid from prepaid line credit is information only, never the
+        // ledger (the money left at the top-up); its commitment suggestion is still proposed.
+        db.addSms("7030",one,AT);
         assertTrue(db.addSms("AnyBank","تم خصم مبلغ EGP 89.99 فيGoogle One بتاريخ 10/10/2026",AT));
         assertTrue(db.addSms("AnyBank","تم خصم مبلغ EGP 179.99 فيGoogle One بتاريخ 10/10/2026",AT+1000));
         assertEquals(3,db.commitmentSuggestions().size());
         ExpenseDb.Suggestion hint=null;
         for(ExpenseDb.Suggestion s:db.commitmentSuggestions()) if(s.merchant.equals("OneDrive")) hint=s;
         assertNotNull(hint);assertEquals("subscription",hint.kind);assertEquals(3900,hint.amount);
-        assertEquals(3,db.transactions().size());
+        assertEquals(2,db.transactions().size()); // the two bank debits; the prepaid-credit purchase is information only
         long id=db.putCommitment(null,hint.merchant,hint.amount,hint.currency,hint.date,hint.cycle,hint.kind,null,0,1,"onedrive",null);
         db.acceptSuggestion(hint.key,id);
         assertEquals(2,db.commitmentSuggestions().size());
@@ -580,8 +582,9 @@ public final class ReconciliationTest extends Instrumentation {
 
     public void testSubscriptionPriceHistoryAndCompletionReference() {
         long september=LocalDate.of(2026,9,10).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        assertTrue(db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 30 Egyptian pound has been deducted from your credit",september));
-        assertTrue(db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 39 Egyptian pound has been deducted from your credit",AT));
+        // Prepaid-credit subscriptions are information only (owner decision, 21 Oct 2026); their price history still builds.
+        db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 30 Egyptian pound has been deducted from your credit",september);
+        db.addSms("7030","You have successfully purchased Cloud Basic Subscription - 1 month from Google Play Store and 39 Egyptian pound has been deducted from your credit",AT);
         assertEquals(1,db.commitmentSuggestions().size());
         assertEquals(3900,db.commitmentSuggestions().get(0).amount);
         assertEquals(2,db.commitmentHistory(db.commitmentSuggestions().get(0).key).size());
@@ -601,7 +604,7 @@ public final class ReconciliationTest extends Instrumentation {
         assertTrue(db.reopenRecurring(id));
         db.addSms("OtherProvider",completion,AT+86400000);
         assertFalse(db.recurringById(id).isDone());assertEquals(14,db.recurringById(id).paidCount);
-        assertEquals(2,db.transactions().size()); // The plan and its completion are not expenses.
+        assertEquals(0,db.transactions().size()); // The plan, its completion and the prepaid-credit purchases are not expenses.
     }
 
     public void testDismissedOldSuggestionStaysDismissed() {

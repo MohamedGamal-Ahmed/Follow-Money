@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * Shadow storage on a real Android runtime (isolated emulator app only): upgrade v25 → v26, live capture stores its
  * shadow row beside the ledger row without bumping the ledger revision, Keystore sealing, ununderstood text, dedupe
- * replay, a group summary observed and never captured, learning persistence, backup open/re-seal, the re-scan over
+ * replay, the new pipeline deciding every message with legacy only on its failure and legacy guards noted, learning persistence, backup open/re-seal, the re-scan over
  * real inbox SMS without touching the ledger, and "delete all data".
  */
 final class ShadowStoreTest {
@@ -46,8 +46,6 @@ final class ShadowStoreTest {
         try {
             if (!target.getPackageName().endsWith(".shadowqa") || !"ranchu".equals(android.os.Build.HARDWARE)) throw new SecurityException("Isolated emulator required");
             db = new ExpenseDb(target); check(db.transactionCount() == 0, "Existing ledger retained; empty fixture required"); owned = true;
-            // Sections 1-8 check shadow mode: the legacy parser decides. Step 7 is checked in section 10.
-            DecisionSwitch.set(target, false);
             SQLiteDatabase sql = db.getWritableDatabase();
 
             // 1. Upgrade from schema 25 creates the shadow tables.
@@ -58,18 +56,17 @@ final class ShadowStoreTest {
             check(count(sql, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('shadow_observations','ununderstood_messages','learning_rules')") == 3,
                     "Upgrade from 25 creates the three shadow tables");
 
-            // 2. Live capture: the shadow row sits beside the ledger row; the ledger revision ignores it.
+            // 2. Live capture: the new pipeline decides; its observation sits beside the ledger row; the ledger revision ignores it.
             long now = System.currentTimeMillis();
             CaptureResult paid = db.captureSms("QABANK", "Paid EGP 45 at \"QA Market\". Card ****1234.", now);
-            check(paid.transaction != null && paid.transaction.amountMinor == 4500, "Legacy recorded the payment: " + paid.reason);
+            check(paid.transaction != null && paid.transaction.amountMinor == 4500, "The new pipeline recorded the payment: " + paid.reason);
             check(db.changes() == paid.revisionAfter, "Shadow write does not change the ledger revision");
             List<ShadowStore.Stored> live = ShadowStore.recent(sql, "live", 10);
             check(live.size() == 1, "One live shadow row");
             ShadowStore.Stored row = live.get(0);
-            check(row.legacyDecision.startsWith("RECORDED") && "4500".equals(row.legacy.get("amount_minor")) && "out".equals(row.legacy.get("direction")), "Legacy values stored");
-            check("AUTO".equals(row.decision) && "4500".equals(row.values.get("amount_minor")) && row.score >= 80, "New decision, amount and score stored: " + row.decision);
-            check(row.diff().agrees() && !row.unreadable, "Agreement computed from opened values");
-            check(count(sql, "SELECT transaction_id FROM shadow_observations WHERE id=" + row.id) == paid.transactionId, "Linked to the legacy record");
+            check("LEGACY_OFF".equals(row.legacyDecision) && row.legacy.isEmpty(), "No legacy opinion computed: " + row.legacyDecision);
+            check("AUTO".equals(row.decision) && "4500".equals(row.values.get("amount_minor")) && row.score >= 80 && !row.unreadable, "New decision, amount and score stored: " + row.decision);
+            check(count(sql, "SELECT transaction_id FROM shadow_observations WHERE id=" + row.id) == paid.transactionId, "Linked to the ledger row");
             String sealed = first(sql, "SELECT encrypted_body FROM shadow_observations WHERE id=" + row.id);
             check(sealed != null && !sealed.contains("4500") && !sealed.contains("QA Market"), "Values sealed by the Keystore");
 
@@ -80,17 +77,18 @@ final class ShadowStoreTest {
             check(unknown.size() == 1 && unknown.get(0).count == 2 && unknown.get(0).text.contains("Cafe Nine"), "Ununderstood message kept once, opened on device");
             check(!first(sql, "SELECT encrypted_body FROM ununderstood_messages").contains("Cafe"), "Ununderstood text sealed");
 
-            // 4. A group summary is observed, never captured; the same delivery again is a replay.
-            long ledgerRows = db.transactionCount(); long revision = db.changes();
-            MessageNormalizer.Raw summary = MessageNormalizer.Raw.notification("com.qa.pay", ParsingPolicy.FLAG_GROUP_SUMMARY, "QA Pay",
+            // 4. The same notification delivered again (same Android key and post time) is one operation and a replay.
+            // (A group summary never reaches capture: the listener finds no body in it.)
+            long ledgerRows = db.transactionCount();
+            MessageNormalizer.Raw delivery = MessageNormalizer.Raw.notification("com.qa.pay", 0, "QA Pay",
                     "Paid EGP 85 at \"Nova Market\".", null, null, null, null).withIdentity(MessageNormalizer.Raw.notificationIdentity("0|com.qa.pay|1|t|1", 5000L));
-            CaptureTransaction.observeWithoutCapture(db, summary, "QA Pay", 5000L, "LEGACY_GROUP_SUMMARY");
-            CaptureTransaction.observeWithoutCapture(db, summary, "QA Pay", 5000L, "LEGACY_GROUP_SUMMARY");
-            check(db.transactionCount() == ledgerRows && db.changes() == revision, "Group summary records nothing");
+            db.captureNotification("com.qa.pay", "QA Pay", "QA Pay\nPaid EGP 85 at \"Nova Market\".", 5000L, delivery);
+            db.captureNotification("com.qa.pay", "QA Pay", "QA Pay\nPaid EGP 85 at \"Nova Market\".", 5000L, delivery);
+            check(db.transactionCount() == ledgerRows + 1, "One operation for two deliveries: " + (db.transactionCount() - ledgerRows));
             live = ShadowStore.recent(sql, "live", 10);
-            ShadowStore.Stored replay = null, firstSummary = null;
-            for (ShadowStore.Stored s : live) if ("LEGACY_GROUP_SUMMARY".equals(s.legacyReason)) { if (replay == null) replay = s; else firstSummary = s; }
-            check(firstSummary != null && "NEW".equals(firstSummary.dedupe) && replay.reasons.contains("GROUP_SUMMARY"), "Summary observed with its reason");
+            ShadowStore.Stored replay = null, firstDelivery = null;
+            for (ShadowStore.Stored s : live) if ("QA Pay".equals(s.source)) { if (replay == null) replay = s; else firstDelivery = s; }
+            check(firstDelivery != null && "NEW".equals(firstDelivery.dedupe), "First delivery observed");
             check("REPLAY".equals(replay.dedupe) && "DELIVERY_REPLAY".equals(replay.dedupeReason), "Same delivery replayed: " + replay.dedupe);
 
             // 5. Learning rules persist (hashes and counts only).
@@ -114,7 +112,7 @@ final class ShadowStoreTest {
 
             // 7. Re-scan over the real inbox (the QA script sends the SMS): shadow rows only, the ledger is untouched.
             shell("pm grant " + target.getPackageName() + " android.permission.READ_SMS");
-            ledgerRows = db.transactionCount(); revision = db.changes();
+            ledgerRows = db.transactionCount(); long revision = db.changes();
             ShadowRescan.Result scan = ShadowRescan.run(target, 0, new java.util.concurrent.atomic.AtomicBoolean(), (done, total) -> { });
             check(scan.scanned >= 3, "Inbox SMS scanned: " + scan.scanned);
             check(db.transactionCount() == ledgerRows && db.changes() == revision, "Re-scan recorded no operation");
@@ -156,19 +154,17 @@ final class ShadowStoreTest {
             }
             screen.finish(); runner.waitForIdleSync();
 
-            // 10. Step 7: the new pipeline decides messages that arrive after it is switched on; the switch rolls back at once.
-            long beforeSwitch = System.currentTimeMillis();
-            DecisionSwitch.set(target, true);
-            check(DecisionSwitch.on(target) && DecisionSwitch.since(target) >= beforeSwitch, "Switch on, activation time stored");
-            long t = DecisionSwitch.since(target) + 1000;
-            CaptureResult early = db.captureSms("QABANK", "Paid EGP 33.00 at \"OLD SHOP\". Card ****1234.", DecisionSwitch.since(target) - 60_000L);
-            check(early.transaction != null && early.transaction.amountMinor == 3300, "A message from before activation is decided by legacy");
+            // 10. The new pipeline decides every message, whenever it arrived.
+            long t = now + 2 * 3_600_000L;
+            CaptureResult early = db.captureSms("QABANK", "Paid EGP 33.00 at \"OLD SHOP\". Card ****1234.", now - 30L * 86_400_000L);
+            check(early.transaction != null && early.transaction.amountMinor == 3300 &&
+                    "AUTO".equals(first(sql, "SELECT decision FROM shadow_observations WHERE transaction_id=" + early.transaction.id)), "An older message is decided by the new pipeline too");
             CaptureResult glued = db.captureSms("BankMisr", "شكرًا لاستخدامك بطاقة بنك مصر ***4636، تم الآن خصم EGP 149.98عند KASHIER*BUTLERS & CO C يوم 20/10/2026 ، الرصيد المتاح EGP 2139.44", t);
             check(glued.transaction != null && glued.transaction.amountMinor == 14998 && "expense".equals(glued.transaction.kind) && !glued.transaction.needsReview,
                     "New pipeline records the purchase with its piasters: " + (glued.transaction == null ? glued.reason : glued.transaction.amountMinor));
             check(glued.transaction.merchant.toUpperCase(java.util.Locale.ROOT).contains("BUTLERS"), "Merchant from the new pipeline: " + glued.transaction.merchant);
-            String opinion = first(sql, "SELECT legacy_decision || '/' || legacy_reason FROM shadow_observations WHERE transaction_id=" + glued.transaction.id);
-            check(opinion != null && opinion.startsWith("WOULD_RECORD/LEGACY_OPINION"), "Legacy opinion kept with the message: " + opinion);
+            String opinion = first(sql, "SELECT legacy_decision FROM shadow_observations WHERE transaction_id=" + glued.transaction.id);
+            check("LEGACY_OFF".equals(opinion), "No legacy opinion kept with the message: " + opinion);
             CaptureResult inferred = db.captureSms("BankMisr", "تم تنفيذ تحويل لحظي من بطاقة رقم 1234 بمبلغ 2000 رقم مرجعي 123456789يوم 24/07/2026 الساعه 20:53", t + 1000);
             check(inferred.transaction != null && inferred.transaction.needsReview && inferred.transaction.amountMinor == 200000, "REVIEW is recorded and waits for the user");
             String why = ShadowStore.reasonsOf(sql, inferred.transaction.id);
@@ -188,14 +184,16 @@ final class ShadowStoreTest {
             // 10b. Owner test, 22 Oct 2026: HSBC 0001 → Banque Misr 7392 by IPN (4.00 + 0.50 fee). The bank messages name only
             // accounts, so the rows must still attach to their sources; the debit names the user's own 7392, so it is a transfer
             // to that account, and the receipt is merged into it by the repair that follows the capture.
+            // The debit carries its own clock (06:46); the receipt takes its delivery time, so deliver both that morning.
+            long ipn = java.time.LocalDateTime.of(2026, 10, 22, 6, 47).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
             long hsbc = db.addPaymentSource("HSBC", "حساب", "0001"), misr = db.addPaymentSource("Banque Misr", "حساب", "7392");
             long transfers = db.transactionCount();
-            CaptureResult leg1 = db.captureSms("HSBC", "Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre", t + 10_000L);
+            CaptureResult leg1 = db.captureSms("HSBC", "Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre", ipn);
             check(leg1.transaction != null && leg1.transaction.paymentSourceId != null && leg1.transaction.paymentSourceId == hsbc,
                     "An account-only bank SMS attaches to its source: " + (leg1.transaction == null ? leg1.reason : leg1.transaction.paymentSourceId));
             check("transfer".equals(leg1.transaction.kind) && leg1.transaction.destinationSourceId != null && leg1.transaction.destinationSourceId == misr,
                     "A debit to the user's own account tail is a transfer to that account: " + leg1.transaction.kind + "/" + leg1.transaction.destinationSourceId);
-            CaptureResult leg2 = db.captureSms("BankMisr", "تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ", t + 10_000L);
+            CaptureResult leg2 = db.captureSms("BankMisr", "تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ", ipn);
             ExpenseDb.Transaction merged = db.transactionById(leg1.transaction.id);
             check(leg2.transaction != null && leg2.transaction.id == leg1.transaction.id, "The receipt is merged into the transfer: " + (leg2.transaction == null ? leg2.reason : leg2.transaction.id));
             check(merged != null && "transfer".equals(merged.kind) && merged.amountMinor == 400 && merged.paymentSourceId == hsbc && merged.destinationSourceId == misr,
@@ -205,8 +203,8 @@ final class ShadowStoreTest {
             // the one Telda source (created on first use), reads as an instant transfer in, and is paired with the bank debit
             // even 24 minutes later.
             long before10c = db.transactionCount();
-            CaptureResult toTelda = db.captureSms("BankMisr", "تم تحويل 30.00 جنيه بنجاح إلى talda من حساب رقم xxx7392 عن طريق التحويل اللحظي", t + 20_000L);
-            CaptureResult onTelda = db.captureNotification("io.telda.app", "Telda", "تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", t + 20_000L + 24 * 60_000L);
+            CaptureResult toTelda = db.captureSms("BankMisr", "تم تحويل 30.00 جنيه بنجاح إلى talda من حساب رقم xxx7392 عن طريق التحويل اللحظي", (ipn + 10 * 60_000L));
+            CaptureResult onTelda = db.captureNotification("io.telda.app", "Telda", "تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", (ipn + 10 * 60_000L) + 24 * 60_000L);
             check(toTelda.transaction != null && onTelda.transaction != null && onTelda.transaction.id == toTelda.transaction.id,
                     "Telda receipt merged into the Banque Misr debit: " + (onTelda.transaction == null ? onTelda.reason : onTelda.transaction.id + "/" + toTelda.transaction.id));
             ExpenseDb.Transaction topUp = db.transactionById(toTelda.transaction.id);
@@ -217,20 +215,37 @@ final class ShadowStoreTest {
             check(db.transactionCount() == before10c + 1, "No fee, no income row: " + (db.transactionCount() - before10c));
             // 10d. The same receipt delivered again by the app, worded slightly differently, after the transfer was settled:
             // it folds into the transfer instead of becoming a second income (owner test, second round).
-            CaptureResult again = db.captureNotification("io.telda.app", "Telda", "تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية 🎉", t + 20_000L + 25 * 60_000L);
+            CaptureResult again = db.captureNotification("io.telda.app", "Telda", "تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية 🎉", (ipn + 10 * 60_000L) + 25 * 60_000L);
             check(again.transaction != null && again.transaction.id == toTelda.transaction.id && db.transactionCount() == before10c + 1,
                     "A late copy of the receipt is the settled transfer: " + (again.transaction == null ? again.reason : again.transaction.id + " count+" + (db.transactionCount() - before10c)));
-            DecisionSwitch.set(target, false);
-            CaptureResult after = db.captureSms("QABANK", "Paid EGP 44.00 at \"QA Kiosk\". Card ****1234.", t + 3_600_000L);
-            check(after.transaction != null && first(sql, "SELECT legacy_decision FROM shadow_observations WHERE transaction_id=" + after.transaction.id).startsWith("RECORDED"), "Rollback: legacy decides the next message at once");
-            check(db.transactionById(kept) != null, "Rollback leaves what the new pipeline recorded");
+            // 10e. The pipeline fails on a message: the legacy parser records it, and a PIPELINE_FAILED note keeps the reason.
+            long failures = count(sql, "SELECT COUNT(*) FROM shadow_observations WHERE decision='PIPELINE_FAILED'");
+            PipelineDecider.failNextFor("QA Kiosk");
+            CaptureResult fallback = db.captureSms("QABANK", "Paid EGP 44.00 at \"QA Kiosk\". Card ****1234.", t + 3_600_000L);
+            check(fallback.transaction != null && fallback.transaction.amountMinor == 4400 && "expense".equals(fallback.transaction.kind),
+                    "Legacy records the message the pipeline failed on: " + (fallback.transaction == null ? fallback.reason : fallback.transaction.amountMinor));
+            check(count(sql, "SELECT COUNT(*) FROM shadow_observations WHERE decision='PIPELINE_FAILED'") == failures + 1, "One failure note");
+            String note = first(sql, "SELECT reasons || '/' || legacy_decision || '/' || origin || '/' || IFNULL(encrypted_body,'-') FROM shadow_observations WHERE decision='PIPELINE_FAILED' AND transaction_id=" + fallback.transaction.id);
+            check("EXCEPTION:IllegalStateException/RECORDED/live/-".equals(note), "Failure note names its reason and what legacy did: " + note);
+            CaptureResult next = db.captureSms("QABANK", "Paid EGP 46.00 at \"QA Kiosk\". Card ****1234.", t + 3_700_000L);
+            check(next.transaction != null && "AUTO".equals(first(sql, "SELECT decision FROM shadow_observations WHERE transaction_id=" + next.transaction.id)), "The next message is decided by the pipeline again");
+            check(db.transactionById(kept) != null, "Earlier rows stay");
+            // 10f. Legacy guards stand when the pipeline records: an unsuccessful or notice message is never a ledger row,
+            // and the observation says which guard held it (owner review, 22 Oct 2026).
+            long guarded = db.transactionCount();
+            CaptureResult willReverse = db.captureSms("QABANK", "Transfer EGP 227 from account ending 1111 will be reversed", t + 3_800_000L);
+            CaptureResult reversed = db.captureSms("QABANK", "Payment EGP 227 from account ending 1111 reversed", t + 3_900_000L);
+            check(willReverse.transaction == null && reversed.transaction == null && db.transactionCount() == guarded, "Guarded messages record no operation");
+            String guards = first(sql, "SELECT GROUP_CONCAT(decision || '/' || reasons, ' | ') FROM (SELECT decision, reasons FROM shadow_observations WHERE reasons LIKE '%LEGACY_GUARD:%' ORDER BY id)");
+            check(guards != null && guards.contains("LEGACY_GUARD:UNSUCCESSFUL") && guards.contains("LEGACY_GUARD:NOTICE") && !guards.contains("IGNORE/"),
+                    "Each guard noted on a recording decision: " + guards);
 
             // 9. Delete all local data removes shadow data.
             db.clearAllData();
             check(count(sql, "SELECT (SELECT COUNT(*) FROM shadow_observations)+(SELECT COUNT(*) FROM ununderstood_messages)+(SELECT COUNT(*) FROM learning_rules)") == 0,
                     "Shadow data deleted with all data");
             check(ParserShadow.learning().shapeCount() == 0 && ParserShadow.recent().isEmpty(), "In-memory shadow data forgotten");
-            result.putString("stream", "Shadow store checks passed: " + checks + "; upgrade, live row beside ledger, sealing, ununderstood, dedupe, group summary, learning, backup, re-scan, delete\n");
+            result.putString("stream", "Shadow store checks passed: " + checks + "; upgrade, live row beside ledger, sealing, ununderstood, dedupe, pipeline decides, failure note, guards, learning, backup, re-scan, delete\n");
         } catch (Throwable failure) {
             status = 0; java.io.StringWriter trace = new java.io.StringWriter(); failure.printStackTrace(new java.io.PrintWriter(trace));
             result.putString("stream", "Shadow store FAILED: " + trace);

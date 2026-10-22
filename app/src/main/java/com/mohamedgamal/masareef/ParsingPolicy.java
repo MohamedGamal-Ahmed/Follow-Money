@@ -1,9 +1,10 @@
 package com.mohamedgamal.masareef;
 
 /**
- * Every threshold, limit and word list of the replacement parsing pipeline, in one place.
+ * Every threshold, limit and word list of the parsing pipeline, in one place.
  * Stages read these values; they never declare their own. Changing a value changes POLICY_VERSION.
- * The pipeline runs in shadow mode only: the legacy ExpenseParser path remains the sole ledger authority.
+ * The pipeline decides what is recorded; ExpenseParser is the fallback when the pipeline fails and the source of
+ * shared text helpers.
  */
 final class ParsingPolicy {
     static final String POLICY_VERSION = "2026-10-29.1";
@@ -12,20 +13,13 @@ final class ParsingPolicy {
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
     static final String CORPUS_CONTRACT = "v2:3e51e960";
 
-    // Shadow mode.
-    static final boolean SHADOW_ENABLED = true;
-    /**
-     * Step 7 (owner approval, 21 Oct 2026): the new pipeline decides what is recorded in the test build and not in the
-     * release build. Advanced settings switch it back at once (DecisionSwitch); only messages after activation follow it.
-     */
-    static final boolean NEW_PIPELINE_DECIDES_TEST_BUILD = true;
-    static final boolean NEW_PIPELINE_DECIDES_RELEASE_BUILD = false;
-    /** After the switch, the legacy parser's opinion is still computed (never written) for this many days. */
-    static final int LEGACY_OPINION_DAYS = 30;
+    // Stored observations.
     /** In-memory observations kept for the current process; nothing is uploaded. */
     static final int SHADOW_BUFFER_SIZE = 50;
     /** Stored observations (ShadowStore, values sealed by EvidenceVault); the oldest are removed first. */
     static final int SHADOW_STORE_MAX_ROWS = 5000;
+    /** Stored import observations (origin import), bounded apart so a large import never evicts live review reasons. */
+    static final int IMPORT_STORE_MAX_ROWS = 20_000;
     /** Stored "messages I did not understand" (distinct message hashes); the least recently seen are removed first. */
     static final int UNUNDERSTOOD_MAX_ROWS = 500;
     /** Shadow re-scan: stored rows at most (later messages are only counted), and inbox rows per write transaction. */
@@ -174,13 +168,22 @@ final class ParsingPolicy {
     static final String REQUESTED_TRANSFER = "\\b(?:you(?: have)?|your)\\s+(?:requested|submitted|initiated|placed)\\b.{0,25}?\\b(?:transfer|payment)\\b|" +
             "\\b(?:transfer|payment) request\\s+(?:has been |was )?(?:received|submitted|placed)\\b|" +
             "(?<!\\p{L})(?:تم\\s+)?(?:استلام|تقديم|تسجيل)\\s+طلب(?:ك|كم)?\\s+(?:ب|ل)?(?:ال)?(?:تحويل|دفع)|(?<!\\p{L})طلب(?:ك|كم)\\s+(?:ب|ل)?(?:ال)?تحويل";
+    /** ISO codes a bank writes right before an amount ("EGP 250.00", "EGP100"). */
+    static final String CURRENCY_CODE = "(?:egp|usd|eur|gbp|sar|aed)";
+    /**
+     * A terse purchase alert with no verb: a message that opens with "Card purchase" ("Card purchase EGP 100 at X",
+     * "Card purchase at X EGP 250.00"), or "Purchase EGP100 at X" / "14OCT26 X Purchase EGP 100" (HSBC). It opens the
+     * message (after an HSBC date token at most), so an offer ("New offer: purchase GBP 50 at …") is not one.
+     */
+    static final String PURCHASE_ALERT = "^\\s*(?:card purchase\\b|(?:\\d{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\d{2}\\s+[^\\n]{1,40}?\\s+)?purchase " +
+            CURRENCY_CODE + " ?\\d)";
     /** First-person completed verbs, as payment apps write them ("لقد استلمت", "لقد أرسلت", "استلمت", "دفعت"). Owner test, 22 Oct 2026. */
     static final String FIRST_PERSON_IN = "(?<!\\p{L})(?:لقد\\s+)?استلمت(?!\\p{L})";
     static final String FIRST_PERSON_OUT = "(?<!\\p{L})(?:لقد\\s+)?(?:ارسلت|دفعت|حولت|سددت)(?!\\p{L})";
     static final String COMPLETED_EVENT = completion(FINANCIAL_NOUN) + "(?!\\s+(?:الاسعار|السعر))|(?<!\\p{L})بنجاح(?!\\p{L})|" + DEBT_SETTLEMENT + "|" +
             FIRST_PERSON_IN + "|" + FIRST_PERSON_OUT + "|" +
             "\\b(?:paid|purchased|debited|deducted|credited|charged|received|transferred|deposited|withdrawn|sent|refunded|reversed|approved|posted)\\b|" +
-            REQUESTED_TRANSFER + "|" + "\\bcash withdrawal\\b|\\bsuccessful(?:ly)?\\b|\\bcompleted\\b|\\bwas used (?:for|at|in)\\b|\\bthank(?:s| you) for (?:your )?(?:payment|paying)\\b|\\bdeposit(?:ed)? of\\b.{0,40}?\\b(?:was|has been|is)\\b|" + COMMITMENT + "|" +
+            REQUESTED_TRANSFER + "|" + "\\bcash withdrawal\\b|" + PURCHASE_ALERT + "|\\btransfer of (?=" + CURRENCY_CODE + " ?\\d)|\\bsuccessful(?:ly)?\\b|\\bcompleted\\b|\\bwas used (?:for|at|in)\\b|\\bthank(?:s| you) for (?:your )?(?:payment|paying)\\b|\\bdeposit(?:ed)? of\\b.{0,40}?\\b(?:was|has been|is)\\b|" + COMMITMENT + "|" +
             // Statement-style movement nouns name a completed transfer ("تحويل صادر 5,000 EGP").
             "تحويل (?:صادر|وارد)|حواله (?:صادره|وارده)|\\b(?:outgoing|incoming) (?:transfer|remittance)\\b";
     /** A completed verb inside a condition ("if you pay", "إذا دفعت") is not an event. */
@@ -249,7 +252,7 @@ final class ParsingPolicy {
     /** Strong outgoing words: they beat the role of the user's account in the sentence. */
     static final String DIRECTION_OUT = completion("خصم|سحب|دفع|سداد|تسديد|شراء|ارسال") + "|" + FIRST_PERSON_OUT + "|" + DEBT_SETTLEMENT + "|(?<!\\p{L})(?:تم|تمت)\\s+شحن\\s+(?!(?:ال)?(?:محفظ|حساب|بطاق|كارت))|" +
             "\\b(?:paid|paying|purchased|debited|deducted|charged|withdrawn|sent)\\b|\\bcash withdrawal\\b|\\bpayment of\\b|" +
-            "\\bpayment (?:completed|successful)\\b|تحويل صادر|حواله صادره|\\boutgoing (?:transfer|remittance)\\b|\\bwas used (?:for|at|in)\\b|" +
+            PURCHASE_ALERT + "|\\bpayment (?:completed|successful)\\b|تحويل صادر|حواله صادره|\\boutgoing (?:transfer|remittance)\\b|\\bwas used (?:for|at|in)\\b|" +
             "\\bpurchase (?:approved|completed|of)\\b|\\bcard\\b.{0,40}?\\b(?:had|made|completed) a successful\\b|\\bsuccessful (?:card )?(?:purchase|transaction|payment|withdrawal)\\b|" + REQUESTED_TRANSFER + "|" + COMMITMENT + "|" + ADJUSTED;
     /** Neutral transfer words: they decide only when no strong word and no account role does. */
     static final String DIRECTION_NEUTRAL_OUT = completion("تحويل") + "|\\btransferred\\b|\\btransfer of\\b|\\boutward\\b";
@@ -291,7 +294,7 @@ final class ParsingPolicy {
     static final String MOVEMENT_SALARY = "\\bsalary\\b|\\bpayroll\\b|(?<!\\p{L})(?:راتب|مرتب)";
     static final String MOVEMENT_REMITTANCE = "\\btt payment\\b|\\bremittance\\b|\\bswift\\b|حواله (?:خارجيه|دوليه|وارده من الخارج)";
     static final String MOVEMENT_INSTANT = "\\bipn\\b|instapay|انستا ?باي|(?:ال)?تحويل (?:ال)?لحظي|شبكه (?:ال)?مدفوعات (?:ال)?لحظي[هة]?|instant payment network";
-    static final String MOVEMENT_TRANSFER = "تحويل|حواله|\\btransfer(?:red)?\\b";
+    static final String MOVEMENT_TRANSFER = "تحويل|حواله|\\btransfer(?:red)?\\b|\\byou sent\\b";
     /** Expiring credit wording, with or without a date ("صالحة لمدة أسبوعين"). */
     static final String EXPIRY_PHRASE = "صالح(?:ه)? (?:لمده|حتي|لل?استخدام)|\\bvalid (?:for|until|till)\\b|\\bexpires?\\b|(?<!\\p{L})تنتهي";
     /** Purchase wording where a merchant is expected; transfers, cash, installments, bills and refunds are excluded. */
@@ -314,7 +317,7 @@ final class ParsingPolicy {
      */
     static final String MERCHANT_STOP = "\\s+(?:on|and|with|for|using|via|ref|card|has|have|was|were|is|been|completed|تم|تمت|يوم|بتاريخ|في|فى|من|عبر|عن|رقم|بطاقه|باستخدام|المتاح|الرصيد|الساعه|" +
             "ببطاق\\p{L}*|بطاقتك|بطاقتكم|بمبلغ|بقيمه|مقابل|ثم|المنتهي\\p{L}*|الي|رسوم)(?!\\p{L})|" +
-            "\\s+و(?=(?:تم|تمت|اعاده|استرداد|رد)(?!\\p{L}))|[.,;،؛:!?()\\n]|\\s+\\d(?!\\d{0,2}\\s+(?:يوم|بتاريخ|on)(?!\\p{L}))|يوم(?=\\d)";
+            "\\s+و(?=(?:تم|تمت|اعاده|استرداد|رد)(?!\\p{L}))|\\s+" + CURRENCY_CODE + " ?(?=\\d)|[.,;،؛:!?()\\n]|\\s+\\d(?!\\d{0,2}\\s+(?:يوم|بتاريخ|on)(?!\\p{L}))|يوم(?=\\d)";
     static final String MERCHANT_GENERIC = "^(?:خلال|عبر|(?:know|learn|find out|read|see) more|unsubscribe|opt.?out|(?:more|further) (?:details|info(?:rmation)?)|(?:ال)?حساب|حسابك|حسابكم|(?:ال)?بطاقه|بطاقتك|بطاقتكم|(?:ال)?كارت|(?:ال)?محفظه|محفظتك|رقم|ماكينه|الفرع|فرع|(?:ال)?معلومات|account|card|wallet|your|the|you|branch)(?!\\p{L})";
     static final int MERCHANT_MAX_CHARS = 40;
     /** A bare ATM/cash-machine phrase is a place, not a merchant ("another bank's ATM"); a named terminal ("NBE ATM546") stays. */
@@ -334,7 +337,17 @@ final class ParsingPolicy {
     /** A phone-number counterparty after a direction word ("sent to 01012345678", "من رقم 010XXXXX123"). */
     static final String COUNTERPARTY_PHONE = "(?:(?:من|الي|\\bto|\\bfrom)\\s+(?:حساب\\s+)?(?:رقم\\s+|number\\s+|mobile\\s+)?|(?<!\\p{L})لل?رقم\\s+)(\\+?[0-9][0-9x*]{9,14})(?![0-9])";
     /** A beneficiary name set off by dashes after an account mask ("حساب 1234XXXX5678 - محمد سعيد -"). */
-    static final String COUNTERPARTY_NAME = "(?:حساب|account)\\s+[0-9x*#]{4,}\\s*[-–]\\s*(\\p{L}[\\p{L} .]{0,40}?)\\s*(?:[-–]|$)";
+    /** A recipient the bank masked letter by letter ("إلى شخص ا******* م***"): still the other party's name. */
+    static final String COUNTERPARTY_MASKED_NAME = "(?:(?<!\\p{L})الي|\\bto)\\s+(\\p{L}+(?:\\s+\\p{L}+\\*{2,})+)";
+    /**
+     * An HSBC statement line: the description between the date token and to/from is the name, and the masked account
+     * after to/from is the user's own ("From HSBC: 25SEP26 Phone Banking Transfer to 012-345***-678 EGP 87,650.00+").
+     */
+    static final String STATEMENT_LINE = "^(?:from\\s+[^:\\n]{1,30}:\\s*)?\\d{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\d{2}\\s+" +
+            "(\\p{L}[\\p{L} ]{1,40}?)\\s+(?:to|from)\\s+[\\d-]*[*x]+-?(\\d{3,4})(?!\\d)";
+    /** The product bought, named in parentheses after the purchase verb ("تم شراء … (Google One) بنجاح من خلال Google Play"). */
+    static final String PURCHASED_PRODUCT = "(?:(?<!\\p{L})تم\\s+شراء|\\bpurchased\\b)[^()\\n]{0,60}\\(([^()\\n]{2,40})\\)";
+    static final String COUNTERPARTY_NAME ="(?:حساب|account)\\s+[0-9x*#]{4,}\\s*[-–]\\s*(\\p{L}[\\p{L} .]{0,40}?)\\s*(?:[-–]|$)";
     /** Money returned to the user is an expense offset, never income (owner rule for الاسترداد and reversals). */
     static final String EXPENSE_OFFSET = "refund|reversal|reversed|credited back|عكس|اعاده المبلغ|(?:اعاده|اعيد)\s+(?:ال)?قيد|استرداد|(?<!\\p{L})تم رد";
     static final String EXPIRY = "صالح(?:ه)?(?: لل?استخدام)? حتي|valid (?:for use )?(?:until|till)|expires?(?: on)?|تنتهي في";

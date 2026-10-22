@@ -32,8 +32,8 @@ android {
         applicationId 'com.mohamedgamal.masareef'
         minSdk 26
         targetSdk 36
-        versionCode 9
-        versionName '0.3.4'
+        versionCode 10
+        versionName '0.4.0'
         manifestPlaceholders = [appLabel: 'Follow Money']
         testInstrumentationRunner 'com.mohamedgamal.masareef.ReconciliationTest'
     }
@@ -88,10 +88,6 @@ android {
         }
     }
     buildTypes {
-        debug {
-            // The owner's on-phone shadow test build (Development, same app ID and signer, in-place update).
-            versionNameSuffix '- Test'
-        }
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')

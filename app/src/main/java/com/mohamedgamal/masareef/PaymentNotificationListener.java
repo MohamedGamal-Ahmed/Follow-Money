@@ -122,15 +122,8 @@ public final class PaymentNotificationListener extends NotificationListenerServi
             try { label = context.getPackageManager().getApplicationLabel(
                     context.getPackageManager().getApplicationInfo(packageName, 0)).toString(); }
             catch (Exception ignored) { label = packageName; }
-            if (body == null) {
-                // Legacy skips it (group summary or no title/text); shadow still observes it and records nothing.
-                MessageNormalizer.Raw shadow = shadowDelivery(item, packageName);
-                if (shadow == null) return;
-                Notification n = item.getNotification();
-                String reason = n != null && (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0 ? "LEGACY_GROUP_SUMMARY" : "LEGACY_NO_BODY";
-                try (ExpenseDb db = new ExpenseDb(context)) { CaptureTransaction.observeWithoutCapture(db, shadow, label, item.getPostTime(), reason); }
-                return;
-            }
+            // No title or text (a group summary): nothing to record.
+            if (body == null) return;
             try (ExpenseDb db = new ExpenseDb(context)) {
                 ExpenseDb.Transaction before = db.latestInserted();
                 MessageNormalizer.Raw shadow = shadowDelivery(item, packageName);

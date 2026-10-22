@@ -72,7 +72,7 @@ final class ParserShadow {
 
     /** receivedAt is the capture time the legacy path used; it resolves yearless bank dates. */
     static Observation observe(MessageNormalizer.Raw raw, String legacyReason, String legacyMerchant, long receivedAt, long now) {
-        if (!ParsingPolicy.SHADOW_ENABLED || raw == null) return null;
+        if (raw == null) return null;
         Observation observation;
         try {
             MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(raw);
@@ -102,10 +102,10 @@ final class ParserShadow {
             if (!confidence.components.isEmpty()) observation.score = confidence.score;
             observation.movementKind = extraction.movementKind;
             String[] keys = {"amount_minor", "currency", "direction", "merchant", "merchant_key", "counterparty", "balance_minor", "fee_minor",
-                    "card_last4", "account_last4", "datetime", "accounting_effect", "learned_category"};
+                    "card_last4", "account_last4", "datetime", "accounting_effect", "learned_category", "description", "account_partial"};
             Object[] found = {extraction.amountMinor, extraction.currency, extraction.direction, extraction.merchantSurface, extraction.merchantKey,
                     extraction.counterparty, extraction.balanceMinor, extraction.feeMinor, extraction.cardLast4, extraction.accountLast4,
-                    extraction.datetime, extraction.accountingEffect, learned.category};
+                    extraction.datetime, extraction.accountingEffect, learned.category, extraction.description, extraction.accountPartial};
             for (int i = 0; i < keys.length; i++) if (found[i] != null) observation.values.put(keys[i], String.valueOf(found[i]));
         } catch (RuntimeException | StackOverflowError failure) {
             // A shadow failure is itself a diagnostic; it never propagates to legacy capture.

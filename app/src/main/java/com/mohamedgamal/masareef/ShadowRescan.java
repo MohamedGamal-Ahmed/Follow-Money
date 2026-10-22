@@ -120,7 +120,7 @@ final class ShadowRescan {
         submit(app, sql -> {
             for (Pending p : batch)
                 ShadowStore.record(sql, "rescan", p.raw, p.body, p.sender, p.captureAt, null, p.legacyReason, p.legacyRecords ? "RECORDED" : "NOT_RECORDED",
-                        p.legacyAmount, p.legacyCurrency, p.legacyDirection, p.legacyMerchant, p.observation);
+                        p.legacyAmount, p.legacyCurrency, p.legacyDirection, p.legacyMerchant, p.observation, null);
         });
     }
 

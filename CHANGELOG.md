@@ -1,5 +1,12 @@
 # Change log
 
+## 0.4.0 — 22 October 2026
+
+- The new pipeline decides every message in every build. The legacy parser runs only when the pipeline cannot decide a message (a failed stage, an exception, or a recording decision with no amount, currency or direction); each such message leaves a `PIPELINE_FAILED` note with its reason. The decision switch, its activation time and the 30-day legacy opinion are gone. When the pipeline decides, a message matching a row already recorded only adds its evidence (a delivery of the same message at another time no longer becomes a second row). The version name has no «- Test» suffix.
+- Legacy guards stand when the new pipeline records: a future-only, unsuccessful or notice (cancellation, reversal) message is never a ledger row, and its observation is noted `LEGACY_GUARD:FUTURE_ONLY|UNSUCCESSFUL|NOTICE`. A repayment of the user's own credit card takes the debit account as source and the card as destination whoever decided it.
+- New-pipeline names and categories match the screens: the catalog's spelling (Espresso Lab, Vodafone, Butlers), the product bought (Google One, not «رصيدكم»), a masked recipient as the name, an HSBC statement line's own description («Phone Banking Transfer», «ATM Cash Withdrawal») with its 3-digit account tail for the source (not a last-4, corpus u06), no currency code glued to a merchant, and the legacy category source and order (TRU → أقساط); a transfer keeps «تحويلات» whatever the user taught for a merchant of the same name. «Card purchase …», «Purchase EGP100 at …» and «Transfer of EGP … from your account» are completed events; «You sent … to» is a transfer. A message the user's own ignore rule refuses reports «not applied», as before.
+- Tests: subscriptions paid from prepaid line credit (Google Play via 7030) are information only, per the owner's 21 Oct decision; their commitment suggestions remain.
+
 ## 0.3.4 — local phone testing candidate, 21 October 2026
 
 - Transaction rows with no merchant logo fall back to their account's bank/card icon, then the selected notification provider's icon and finally the source's identity badge. Descriptions identify the source without relabelling the merchant. Google Play uses the installed store's icon, separately from Google One.

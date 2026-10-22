@@ -50,21 +50,18 @@ final class ShadowStore {
         return kind;
     }
 
-    /** Stores one live observation beside the legacy capture result; result is null when legacy never captured it. */
-    static void record(SQLiteDatabase sql, MessageNormalizer.Raw raw, String legacyBody, String source, long receivedAt,
-                       CaptureResult result, String legacyReason, ParserShadow.Observation o) {
-        ExpenseDb.Transaction t = result == null ? null : result.transaction;
-        record(sql, "live", raw, legacyBody, source, receivedAt, result == null ? null : result.transactionId,
-                legacyReason, result == null ? "NOT_RECORDED" : legacyDecision(result), t == null ? null : t.amountMinor, t == null ? null : t.currency,
-                t == null ? null : legacyDirection(t.kind), t == null ? null : t.merchant, o);
-    }
-
+    /**
+     * Stores one observation beside the ledger row it decided (transactionId, or null when it recorded nothing). The
+     * legacy columns stay for older rows; the new pipeline decides, so they are written as LEGACY_OFF.
+     */
     static void record(SQLiteDatabase sql, String origin, MessageNormalizer.Raw raw, String legacyBody, String source, long receivedAt,
                        Long transactionId, String legacyReason, String legacyDecision, Long legacyAmount, String legacyCurrency,
-                       String legacyDirection, String legacyMerchant, ParserShadow.Observation o) {
+                       String legacyDirection, String legacyMerchant, ParserShadow.Observation o, String extraReason) {
         if (o == null) return;
         // Owner decision: a return of the same charge minutes later is an expense offset linked to it, never income.
         String reasons = String.join(",", o.reasons);
+        // A legacy guard kept a recording decision out of the ledger (LEGACY_GUARD:UNSUCCESSFUL|FUTURE_ONLY|NOTICE).
+        if (extraReason != null) reasons += (reasons.isEmpty() ? "" : ",") + extraReason;
         String effect = o.values.get("accounting_effect");
         long offsetOf = ShadowDiff.newRecords(o.decision) && (effect == null || effect.equals("expense_offset")) ? offsetOf(sql, origin, source, receivedAt, o) : -1;
         if (offsetOf >= 0) {
@@ -113,10 +110,40 @@ final class ShadowStore {
         row.put("policy", o.policy);
         row.put("encrypted_body", EvidenceVault.encrypt(sealed.toString()));
         sql.insert("shadow_observations", null, row);
-        // Live rows are bounded here; a re-scan bounds itself (RESCAN_MAX_ROWS) and replaces the previous one.
-        if ("live".equals(origin)) sql.execSQL("DELETE FROM shadow_observations WHERE origin='live' AND id < " +
-                "(SELECT id FROM shadow_observations WHERE origin='live' ORDER BY id DESC LIMIT 1 OFFSET ?)", new Object[]{ParsingPolicy.SHADOW_STORE_MAX_ROWS - 1});
+        bound(sql, origin);
         if ("UNUNDERSTOOD".equals(o.decision) && raw != null) rememberUnunderstood(sql, raw, content, source, o);
+    }
+
+    /**
+     * The pipeline could not decide this message (PipelineDecider.Failed), so the legacy parser did. A note with the
+     * reason and what legacy did, no observation and no values; the pipeline is not run again. Count them with
+     * SELECT COUNT(*) FROM shadow_observations WHERE decision='PIPELINE_FAILED'.
+     */
+    static void recordFailure(SQLiteDatabase sql, String origin, String body, String source, long receivedAt, Long transactionId, String reason) {
+        ContentValues row = new ContentValues();
+        row.put("observed_at", System.currentTimeMillis());
+        row.put("received_at", receivedAt);
+        row.put("channel", "UNKNOWN");
+        row.put("source", source);
+        row.put("origin", origin);
+        row.put("message_hash", body == null ? null : CaptureIdentity.hash(body));
+        row.put("content_hash", ShadowDedupe.contentHash(source, String.valueOf(body)));
+        row.put("dedupe", "NEW");
+        if (transactionId != null) row.put("transaction_id", transactionId);
+        row.put("legacy_decision", transactionId != null ? "RECORDED" : "SKIPPED");
+        row.put("status", reason);
+        row.put("decision", "PIPELINE_FAILED");
+        row.put("reasons", reason);
+        row.put("policy", ParsingPolicy.POLICY_VERSION);
+        sql.insert("shadow_observations", null, row);
+        bound(sql, origin);
+    }
+
+    /** Each origin keeps its newest rows only: live SHADOW_STORE_MAX_ROWS, import IMPORT_STORE_MAX_ROWS. */
+    private static void bound(SQLiteDatabase sql, String origin) {
+        int max = "import".equals(origin) ? ParsingPolicy.IMPORT_STORE_MAX_ROWS : ParsingPolicy.SHADOW_STORE_MAX_ROWS;
+        sql.execSQL("DELETE FROM shadow_observations WHERE origin=? AND id < " +
+                "(SELECT id FROM shadow_observations WHERE origin=? ORDER BY id DESC LIMIT 1 OFFSET ?)", new Object[]{origin, origin, max - 1});
     }
 
     /** The earlier recorded charge from the same source this return offsets (ShadowOffset), or -1. Opens only rows in the window. */

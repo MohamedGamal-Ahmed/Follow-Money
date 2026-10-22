@@ -29,6 +29,12 @@ final class TransactionExtractor {
         int principalAt = -1;
         String balanceCurrency, feeCurrency, creditLimitCurrency, originalCurrency;
         String cardLast4, accountLast4, counterparty;
+        /**
+         * An HSBC statement line's own description ("Phone Banking Transfer", "Salary") and the 3-4 digits the bank left of
+         * the user's account. Neither is a merchant or a last-4 (corpus u06: partial_account_not_last4); the ledger shows
+         * the description when nothing else names the movement and attaches the row to the source those digits name.
+         */
+        String description, accountPartial;
         String datetime, timePrecision = "unknown", timeAmbiguity, yearOrigin, expiryDate, accountingEffect;
         final Set<String> reasons = new LinkedHashSet<>();
     }
@@ -137,6 +143,9 @@ final class TransactionExtractor {
     private static final Pattern EXPIRY = Pattern.compile(ParsingPolicy.EXPIRY, FLAGS);
     private static final Pattern HEADER = Pattern.compile("^\\s*from\\s+[^:\\n]{1,30}:", FLAGS);
     private static final Pattern INSTAPAY = Pattern.compile("[a-z0-9._-]+@instapay", FLAGS);
+    private static final Pattern STATEMENT_LINE = Pattern.compile(ParsingPolicy.STATEMENT_LINE, FLAGS);
+    private static final Pattern PURCHASED_PRODUCT = Pattern.compile(ParsingPolicy.PURCHASED_PRODUCT, FLAGS);
+    private static final Pattern COUNTERPARTY_MASKED = Pattern.compile(ParsingPolicy.COUNTERPARTY_MASKED_NAME, FLAGS);
     /** A whole mask token ("****4321", "1234XXXX5678"); last four digits only when the token ends in four digits. */
     private static final String MASK_TOKEN = "((?:\\d*[x*#]+)*\\d{4})(?![\\dx*#])";
     private static final Pattern CARD = Pattern.compile("(?:card|بطاقه|بطاقتك|بطاقتكم|كارت)[^.;\\n]{0,40}?(?:ending(?: with)?\\s*#?|المنتهيه(?: ب)?|رقم|#|(?=[*x]))\\s*" + MASK_TOKEN, FLAGS);
@@ -353,6 +362,11 @@ final class TransactionExtractor {
     private static void merchant(Folded f, Extraction x) {
         String t = f.text;
         int searchFrom = 0;
+        // An HSBC statement line describes itself between the date token and to/from; it names no merchant.
+        Matcher line = STATEMENT_LINE.matcher(t);
+        if (line.find()) { x.description = f.display(line.start(1), line.end(1)).trim(); x.accountPartial = line.group(2); return; }
+        Matcher product = PURCHASED_PRODUCT.matcher(t);
+        if (product.find()) { setMerchant(f, x, product.start(1), product.end(1)); return; }
         Matcher header = HEADER.matcher(t);
         if (header.find()) searchFrom = header.end();
         Matcher quoted = QUOTED.matcher(t);
@@ -428,12 +442,14 @@ final class TransactionExtractor {
         Matcher phone = COUNTERPARTY_PHONE.matcher(t);
         Matcher digits = COUNTERPARTY_DIGITS.matcher(t);
         // Most specific first: an InstaPay address, a paid request, a dash-set beneficiary name, a phone, an account holder.
-        Matcher request = COUNTERPARTY_REQUEST.matcher(t), holder = COUNTERPARTY_HOLDER.matcher(t), name = COUNTERPARTY_NAME.matcher(t);
+        Matcher request = COUNTERPARTY_REQUEST.matcher(t), holder = COUNTERPARTY_HOLDER.matcher(t), name = COUNTERPARTY_NAME.matcher(t),
+                masked = COUNTERPARTY_MASKED.matcher(t);
         if (instapay.find()) x.counterparty = f.display(instapay.start(), instapay.end());
         else if (request.find()) x.counterparty = f.display(request.start(1), request.end(1)).trim();
         else if (name.find()) x.counterparty = f.display(name.start(1), name.end(1)).trim();
         else if (phone.find()) x.counterparty = f.display(phone.start(1), phone.end(1));
         else if (holder.find()) x.counterparty = f.display(holder.start(1), holder.end(1)).trim();
+        else if (!"in".equals(x.direction) && masked.find()) x.counterparty = f.display(masked.start(1), masked.end(1)).trim();
         // The same "to account 1234" is the user's own account on an incoming movement, never the other party.
         else if (!"in".equals(x.direction) && digits.find()) x.counterparty = digits.group(1);
     }

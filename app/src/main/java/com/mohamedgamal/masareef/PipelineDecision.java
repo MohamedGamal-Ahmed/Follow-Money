@@ -24,8 +24,17 @@ final class PipelineDecision {
         this.offsetOfTransactionId = offsetOfTransactionId; this.unlinkedOffset = unlinkedOffset;
     }
 
+    /** The user's own merchant rule ignored this message (LEARNED_IGNORED_MERCHANT): a refusal, as legacy reported it. */
+    boolean ignoredByUser;
+
     static PipelineDecision skip(String decision) {
         return new PipelineDecision(false, false, 0, null, null, null, null, null, null, decision, null, false);
+    }
+
+    static PipelineDecision skip(String decision, boolean ignoredByUser) {
+        PipelineDecision skipped = skip(decision);
+        skipped.ignoredByUser = ignoredByUser;
+        return skipped;
     }
 
     static PipelineDecision record(boolean review, long amountMinor, String currency, String direction, String merchant, String category,
@@ -53,6 +62,8 @@ final class PipelineDecision {
 
     static String sourceLast4(java.util.Map<String, String> values) {
         String card = values.get("card_last4");
-        return card != null ? card : values.get("account_last4");
+        if (card != null) return card;
+        // An HSBC statement line keeps only a 3-4 digit tail of the user's account; legacy attached the row by it too.
+        return values.get("account_last4") != null ? values.get("account_last4") : values.get("account_partial");
     }
 }
