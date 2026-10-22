@@ -1230,16 +1230,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return items;
     }
 
-    /** The user's live credit card with these last four digits, or null when none (or more than one) matches. */
     /**
      * The one active source (account or card) whose last digits are this tail and that is not the paying source itself;
-     * two sources with the same digits, or none, give null (no guess).
+     * two sources with the same digits, or none, give null (no guess). Digits compare without leading zeros, as
+     * SourceIdentity does («001» and «0001» are the same tail).
      */
     Long ownSourceByTail(String tail, Long payingSource) {
         if (tail == null) return null;
+        String wanted = tail.replaceFirst("^0+(?=\\d)", "");
         Long found = null;
         for (PaymentSource source : paymentSources()) {
-            if (source.archived || source.last4 == null || !source.last4.equals(tail)) continue;
+            if (source.archived || source.last4 == null || !source.last4.replaceFirst("^0+(?=\\d)", "").equals(wanted)) continue;
             if (payingSource != null && accountId(source.id) == accountId(payingSource)) continue;
             if (found != null) return null;
             found = source.id;
@@ -1247,6 +1248,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         return found;
     }
 
+    /** The user's live credit card with these last four digits, or null when none (or more than one) matches. */
     Long ownCreditCard(String last4) {
         if (last4 == null) return null;
         Long found = null;
@@ -1260,7 +1262,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     private Long autoSource(String sender, String last4, String body) {
         String identity = SourceIdentity.key(sender, last4);
-        if (identity == null) return null;
+        if (identity == null) return appSource(sender, body);
         try (Cursor alias = getReadableDatabase().rawQuery(
                 "SELECT payment_source_id FROM source_aliases WHERE identity=?", new String[]{identity})) {
             if (alias.moveToFirst()) {
@@ -1290,6 +1292,36 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         long created = addPaymentSource(bank, kind == null ? "مكتشف من الرسائل" : kind, last4);
         if (created > 0) addSourceAlias(identity, created);
         return created > 0 ? created : null;
+    }
+
+    /**
+     * A wallet/prepaid app (Telda) writes no digits, so its movements had no source and the bank leg of a top-up could
+     * never be paired with them (owner test, 22 Oct 2026). One source per app: an alias once learned, else the single
+     * live source the user already named after the app (any digits), else a new «Telda» card. Two such sources: no guess.
+     */
+    private Long appSource(String sender, String body) {
+        String identity = SourceIdentity.appKey(sender);
+        if (identity == null) return null;
+        try (Cursor alias = getReadableDatabase().rawQuery(
+                "SELECT payment_source_id FROM source_aliases WHERE identity=?", new String[]{identity})) {
+            if (alias.moveToFirst()) return alias.getLong(0);
+        }
+        String app = SourceIdentity.bank(sender);
+        Long matched = null;
+        for (PaymentSource source : paymentSources()) {
+            if (source.archived || !app.equals(SourceIdentity.bank(source.name))) continue;
+            if (matched != null) return null;
+            matched = source.id;
+        }
+        if (matched == null) {
+            String name = sender == null ? "" : sender.replaceAll("[^\\p{L} ]", " ").trim();
+            if (name.isEmpty() || name.length() > 24) name = app;
+            long created = addPaymentSource(name, "بطاقة", null);
+            if (created <= 0) return null;
+            matched = created;
+        }
+        addSourceAlias(identity, matched);
+        return matched;
     }
 
     private static String sourceKind(String body) {

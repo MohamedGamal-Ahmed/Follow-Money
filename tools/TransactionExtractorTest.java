@@ -73,6 +73,13 @@ public final class TransactionExtractorTest {
             {"Charged GBP 12.00 at TESCO STORES on 03/11/26 at 14:05. Available balance GBP 88.00", "AUTO", "1200", "GBP", "out", "tesco stores", null, null, "8800", "2026-11-03T14:05"},
             {"Transfer of EGP 750 to Mona completed.", "AUTO", "75000", "EGP", "out", "mona", null, null, null, null},
             {"EGP 45.50 credited to your account ****9911 from SALARY CO", "AUTO", "4550", "EGP", "in", "salary co", null, "9911", null, null},
+            // Owner test (22 Oct 2026): the InstaPay app writes the completed event as a first-person verb ("لقد استلمت",
+            // "لقد أرسلت"); the new pipeline ignored it (NO_COMPLETED_EVENT) and lost the own-address evidence.
+            {"إستلام نقود لقد استلمت 4.00 جنيه من mo.gamalhsbc@instapay", "AUTO", "400", "EGP", "in", null, null, null, null, null},
+            {"إرسال نقود لقد أرسلت 730.00 جنيه إلى friend@instapay", "AUTO", "73000", "EGP", "out", null, null, null, null, null},
+            // Telda's receipt names the channel after «من خلال»: no merchant, an instant transfer in.
+            {"تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", "AUTO", "3000", "EGP", "in", null, null, null, null, null},
+            {"استلمت 30 ج.م. من خلال شبكة المدفوعات اللحظية", "AUTO", "3000", "EGP", "in", null, null, null, null, null},
         };
         for (String[] probe : heldOut) {
             TransactionExtractor.Extraction x = run(probe[0], received);
@@ -80,6 +87,8 @@ public final class TransactionExtractorTest {
                     x.cardLast4, x.accountLast4, x.balanceMinor == null ? null : String.valueOf(x.balanceMinor), x.datetime};
             for (int k = 0; k < got.length; k++) same(got[k], probe[k + 1], "Held-out field " + k + ": " + probe[0] + " " + x.reasons);
         }
+        same(run("إستلام نقود لقد استلمت 4.00 جنيه من mo.gamalhsbc@instapay", received).counterparty, "mo.gamalhsbc@instapay", "InstaPay address is the counterparty");
+        same(run("تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", received).movementKind, "instant_transfer_in", "IPN network phrase is an instant transfer");
         // Folding keeps a map to the original spelling, so the merchant surface keeps its letters.
         same(run("تم دفع 50 جنيه لدى \"مَكْتَبَة النور\"", received).merchantSurface, "مَكْتَبَة النور", "Surface keeps harakat");
 

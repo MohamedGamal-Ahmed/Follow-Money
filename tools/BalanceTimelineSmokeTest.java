@@ -15,6 +15,11 @@ public final class BalanceTimelineSmokeTest {
                 "Different banks must stay separate");
         check(SourceIdentity.key("Bank Misr", "1001")
                 .equals(SourceIdentity.key("BM", "1001")), "Bank alias should match");
+        // A wallet/prepaid app whose notifications never carry digits is one source per app (owner test, 22 Oct 2026:
+        // Telda receipts had no account, so the bank leg could not be paired with them).
+        check("TELDA:APP".equals(SourceIdentity.appKey("Telda")) && "TELDA:APP".equals(SourceIdentity.appKey("تيلدا")), "Telda app is one source");
+        check(SourceIdentity.appKey("InstaPay") == null && SourceIdentity.appKey("Banque Misr") == null && SourceIdentity.appKey(null) == null,
+                "A channel or a bank is not an app source");
         check(!BalanceTimeline.after(1000, 5000, 1000, 5000),
                 "Transaction and balance in one SMS must not be counted twice");
         check(BalanceTimeline.after(1000, 5001, 1000, 5000),

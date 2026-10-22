@@ -201,6 +201,20 @@ final class ShadowStoreTest {
             check(merged != null && "transfer".equals(merged.kind) && merged.amountMinor == 400 && merged.paymentSourceId == hsbc && merged.destinationSourceId == misr,
                     "One internal transfer of 4.00 from HSBC to Banque Misr: " + (merged == null ? null : merged.kind + "/" + merged.amountMinor));
             check(db.transactionCount() == transfers + 2, "Transfer and its 0.50 fee row, nothing else: " + (db.transactionCount() - transfers));
+            // 10c. Banque Misr → Telda 30 (owner test, 22 Oct 2026): Telda's receipt names only the IPN channel and no digits. It gets
+            // the one Telda source (created on first use), reads as an instant transfer in, and is paired with the bank debit
+            // even 24 minutes later.
+            long before10c = db.transactionCount();
+            CaptureResult toTelda = db.captureSms("BankMisr", "تم تحويل 30.00 جنيه بنجاح إلى talda من حساب رقم xxx7392 عن طريق التحويل اللحظي", t + 20_000L);
+            CaptureResult onTelda = db.captureNotification("io.telda.app", "Telda", "تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", t + 20_000L + 24 * 60_000L);
+            check(toTelda.transaction != null && onTelda.transaction != null && onTelda.transaction.id == toTelda.transaction.id,
+                    "Telda receipt merged into the Banque Misr debit: " + (onTelda.transaction == null ? onTelda.reason : onTelda.transaction.id + "/" + toTelda.transaction.id));
+            ExpenseDb.Transaction topUp = db.transactionById(toTelda.transaction.id);
+            Long telda = null;
+            for (ExpenseDb.PaymentSource s : db.paymentSources()) if ("TELDA".equals(SourceIdentity.bank(s.name))) telda = s.id;
+            check(telda != null && topUp != null && "transfer".equals(topUp.kind) && topUp.amountMinor == 3000 && topUp.paymentSourceId == misr && topUp.destinationSourceId.equals(telda),
+                    "One internal top-up of 30.00 from Banque Misr to the Telda source: " + (topUp == null ? null : topUp.kind + "/" + topUp.destinationSourceId + " telda=" + telda));
+            check(db.transactionCount() == before10c + 1, "No fee, no income row: " + (db.transactionCount() - before10c));
             DecisionSwitch.set(target, false);
             CaptureResult after = db.captureSms("QABANK", "Paid EGP 44.00 at \"QA Kiosk\". Card ****1234.", t + 3_600_000L);
             check(after.transaction != null && first(sql, "SELECT legacy_decision FROM shadow_observations WHERE transaction_id=" + after.transaction.id).startsWith("RECORDED"), "Rollback: legacy decides the next message at once");

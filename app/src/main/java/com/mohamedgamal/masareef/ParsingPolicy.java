@@ -174,7 +174,11 @@ final class ParsingPolicy {
     static final String REQUESTED_TRANSFER = "\\b(?:you(?: have)?|your)\\s+(?:requested|submitted|initiated|placed)\\b.{0,25}?\\b(?:transfer|payment)\\b|" +
             "\\b(?:transfer|payment) request\\s+(?:has been |was )?(?:received|submitted|placed)\\b|" +
             "(?<!\\p{L})(?:تم\\s+)?(?:استلام|تقديم|تسجيل)\\s+طلب(?:ك|كم)?\\s+(?:ب|ل)?(?:ال)?(?:تحويل|دفع)|(?<!\\p{L})طلب(?:ك|كم)\\s+(?:ب|ل)?(?:ال)?تحويل";
+    /** First-person completed verbs, as payment apps write them ("لقد استلمت", "لقد أرسلت", "استلمت", "دفعت"). Owner test, 22 Oct 2026. */
+    static final String FIRST_PERSON_IN = "(?<!\\p{L})(?:لقد\\s+)?استلمت(?!\\p{L})";
+    static final String FIRST_PERSON_OUT = "(?<!\\p{L})(?:لقد\\s+)?(?:ارسلت|دفعت|حولت|سددت)(?!\\p{L})";
     static final String COMPLETED_EVENT = completion(FINANCIAL_NOUN) + "(?!\\s+(?:الاسعار|السعر))|(?<!\\p{L})بنجاح(?!\\p{L})|" + DEBT_SETTLEMENT + "|" +
+            FIRST_PERSON_IN + "|" + FIRST_PERSON_OUT + "|" +
             "\\b(?:paid|purchased|debited|deducted|credited|charged|received|transferred|deposited|withdrawn|sent|refunded|reversed|approved|posted)\\b|" +
             REQUESTED_TRANSFER + "|" + "\\bcash withdrawal\\b|\\bsuccessful(?:ly)?\\b|\\bcompleted\\b|\\bwas used (?:for|at|in)\\b|\\bthank(?:s| you) for (?:your )?(?:payment|paying)\\b|\\bdeposit(?:ed)? of\\b.{0,40}?\\b(?:was|has been|is)\\b|" + COMMITMENT + "|" +
             // Statement-style movement nouns name a completed transfer ("تحويل صادر 5,000 EGP").
@@ -239,11 +243,11 @@ final class ParsingPolicy {
     /** Credit-card wording, including the adjective after the bank name ("بطاقة بنك مصر الائتمانية"). */
     static final String CREDIT_CARD = "credit card|بطاقه الايتمان|بطاقه ايتمان|كارت ايتمان|بطاق\\p{L}*(?:\\s+\\p{L}+){0,3}\\s+الايتمانيه";
     /** Direction words. Arabic verbs need a standalone تم/تمت; English needs past or completion forms. */
-    static final String DIRECTION_IN = completion(NOUNS_IN) + "|اعاده المبلغ|تم\\s+شحن\\s+(?:(?:ال)?محفظ\\p{L}*|حسابك)|" +
+    static final String DIRECTION_IN = completion(NOUNS_IN) + "|" + FIRST_PERSON_IN + "|اعاده المبلغ|تم\\s+شحن\\s+(?:(?:ال)?محفظ\\p{L}*|حسابك)|" +
             "\\b(?:credited|received|deposited|refunded|refund|reversal|inward)\\b|\\bdeposit of\\b|credited back|" +
             "تحويل وارد|حواله وارده|\\bincoming (?:transfer|remittance)\\b";
     /** Strong outgoing words: they beat the role of the user's account in the sentence. */
-    static final String DIRECTION_OUT = completion("خصم|سحب|دفع|سداد|تسديد|شراء|ارسال") + "|" + DEBT_SETTLEMENT + "|(?<!\\p{L})(?:تم|تمت)\\s+شحن\\s+(?!(?:ال)?(?:محفظ|حساب|بطاق|كارت))|" +
+    static final String DIRECTION_OUT = completion("خصم|سحب|دفع|سداد|تسديد|شراء|ارسال") + "|" + FIRST_PERSON_OUT + "|" + DEBT_SETTLEMENT + "|(?<!\\p{L})(?:تم|تمت)\\s+شحن\\s+(?!(?:ال)?(?:محفظ|حساب|بطاق|كارت))|" +
             "\\b(?:paid|paying|purchased|debited|deducted|charged|withdrawn|sent)\\b|\\bcash withdrawal\\b|\\bpayment of\\b|" +
             "\\bpayment (?:completed|successful)\\b|تحويل صادر|حواله صادره|\\boutgoing (?:transfer|remittance)\\b|\\bwas used (?:for|at|in)\\b|" +
             "\\bpurchase (?:approved|completed|of)\\b|\\bcard\\b.{0,40}?\\b(?:had|made|completed) a successful\\b|\\bsuccessful (?:card )?(?:purchase|transaction|payment|withdrawal)\\b|" + REQUESTED_TRANSFER + "|" + COMMITMENT + "|" + ADJUSTED;
@@ -286,7 +290,7 @@ final class ParsingPolicy {
     static final String MOVEMENT_CASH = "\\batm\\d*\\b|صراف|سحب نقدي|\\bcash withdrawal\\b|(?<!\\p{L})ماكينه|(?<!\\p{L})اله (?:رقم|صراف)";
     static final String MOVEMENT_SALARY = "\\bsalary\\b|\\bpayroll\\b|(?<!\\p{L})(?:راتب|مرتب)";
     static final String MOVEMENT_REMITTANCE = "\\btt payment\\b|\\bremittance\\b|\\bswift\\b|حواله (?:خارجيه|دوليه|وارده من الخارج)";
-    static final String MOVEMENT_INSTANT = "\\bipn\\b|instapay|انستا ?باي|(?:ال)?تحويل (?:ال)?لحظي";
+    static final String MOVEMENT_INSTANT = "\\bipn\\b|instapay|انستا ?باي|(?:ال)?تحويل (?:ال)?لحظي|شبكه (?:ال)?مدفوعات (?:ال)?لحظي[هة]?|instant payment network";
     static final String MOVEMENT_TRANSFER = "تحويل|حواله|\\btransfer(?:red)?\\b";
     /** Expiring credit wording, with or without a date ("صالحة لمدة أسبوعين"). */
     static final String EXPIRY_PHRASE = "صالح(?:ه)? (?:لمده|حتي|لل?استخدام)|\\bvalid (?:for|until|till)\\b|\\bexpires?\\b|(?<!\\p{L})تنتهي";
@@ -311,7 +315,7 @@ final class ParsingPolicy {
     static final String MERCHANT_STOP = "\\s+(?:on|and|with|for|using|via|ref|card|has|have|was|were|is|been|completed|تم|تمت|يوم|بتاريخ|في|فى|من|عبر|عن|رقم|بطاقه|باستخدام|المتاح|الرصيد|الساعه|" +
             "ببطاق\\p{L}*|بطاقتك|بطاقتكم|بمبلغ|بقيمه|مقابل|ثم|المنتهي\\p{L}*|الي|رسوم)(?!\\p{L})|" +
             "\\s+و(?=(?:تم|تمت|اعاده|استرداد|رد)(?!\\p{L}))|[.,;،؛:!?()\\n]|\\s+\\d(?!\\d{0,2}\\s+(?:يوم|بتاريخ|on)(?!\\p{L}))|يوم(?=\\d)";
-    static final String MERCHANT_GENERIC = "^(?:(?:know|learn|find out|read|see) more|unsubscribe|opt.?out|(?:more|further) (?:details|info(?:rmation)?)|(?:ال)?حساب|حسابك|حسابكم|(?:ال)?بطاقه|بطاقتك|بطاقتكم|(?:ال)?كارت|(?:ال)?محفظه|محفظتك|رقم|ماكينه|الفرع|فرع|(?:ال)?معلومات|account|card|wallet|your|the|you|branch)(?!\\p{L})";
+    static final String MERCHANT_GENERIC = "^(?:خلال|عبر|(?:know|learn|find out|read|see) more|unsubscribe|opt.?out|(?:more|further) (?:details|info(?:rmation)?)|(?:ال)?حساب|حسابك|حسابكم|(?:ال)?بطاقه|بطاقتك|بطاقتكم|(?:ال)?كارت|(?:ال)?محفظه|محفظتك|رقم|ماكينه|الفرع|فرع|(?:ال)?معلومات|account|card|wallet|your|the|you|branch)(?!\\p{L})";
     static final int MERCHANT_MAX_CHARS = 40;
     /** A bare ATM/cash-machine phrase is a place, not a merchant ("another bank's ATM"); a named terminal ("NBE ATM546") stays. */
     static final String MERCHANT_ATM_PHRASE = "(?<![\\p{L}\\d])(?:atm|ماكينه|الصراف)(?![\\p{L}\\d])";
