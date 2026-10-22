@@ -100,23 +100,21 @@ final class ShadowStore {
         row.put("encrypted_body", EvidenceVault.encrypt(sealed.toString()));
         sql.insert("shadow_observations", null, row);
         bound(sql, origin);
-        if (raw != null && ("UNUNDERSTOOD".equals(o.decision) || missedFromBank(source, raw, o))) rememberUnunderstood(sql, raw, content, source, o);
+        // m6: what waits on «رسائل من بنوكك ما اتسجلتش» (MissedMessages decides; a dismissed shape never comes back).
+        if (raw != null && MissedMessages.listed(source, o, MessageNormalizer.normalize(raw).text, ParserShadow.learning()))
+            rememberUnunderstood(sql, raw, content, source, o);
     }
 
     /**
-     * Owner decision m6 (0.4.0): a message the pipeline ignored from a known bank or a payment app, naming an amount,
-     * may be a movement it missed; it waits on «رسائل من بنوكك ما اتسجلتش». The user's own ignore rule or dismissal is
-     * not a miss.
+     * «تجاهل» on the missed-messages page: the message leaves the list, and its shape is remembered as dismissed (saved
+     * with the learning rules), so the same message delivered again, or another of its shape, is not listed again.
      */
-    static boolean missedFromBank(String source, MessageNormalizer.Raw raw, ParserShadow.Observation o) {
-        if (!"IGNORE".equals(o.decision) || o.reasons.contains("LEARNED_IGNORED_MERCHANT") || o.reasons.contains("LEARNED_DISMISSED_SHAPE")) return false;
-        if (BrandCatalog.bank(source) == null && SourceIdentity.appKey(source) == null) return false;
-        return SmsPreview.hasAmount(MessageNormalizer.normalize(raw).text);
-    }
-
-    /** «تجاهل» on the missed-messages page: the message leaves the list (it returns only if delivered again). */
-    static void dismissUnunderstood(SQLiteDatabase sql, String messageHash) {
-        sql.delete("ununderstood_messages", "message_hash=?", new String[]{messageHash});
+    static void dismissUnunderstood(SQLiteDatabase sql, Ununderstood message, long now) {
+        sql.delete("ununderstood_messages", "message_hash=?", new String[]{message.hash});
+        if (message.text == null) return;
+        loadLearningOnce(sql, ParserShadow.learning());
+        ParserShadow.learning().recordDismissal(message.source, message.text);
+        saveLearning(sql, ParserShadow.learning(), now);
     }
 
     /**

@@ -24,6 +24,15 @@ final class PipelineDecision {
         this.offsetOfTransactionId = offsetOfTransactionId; this.unlinkedOffset = unlinkedOffset;
     }
 
+    /** The balance the message states after the movement (Telda «رصيدك: 31.5 ج.م.»), or null. */
+    Long balanceMinor;
+    String balanceCurrency;
+
+    PipelineDecision withBalance(Long minor, String currency) {
+        balanceMinor = minor; balanceCurrency = currency;
+        return this;
+    }
+
     /** The user's own merchant rule ignored this message (LEARNED_IGNORED_MERCHANT): a refusal, as legacy reported it. */
     boolean ignoredByUser;
 
@@ -45,7 +54,7 @@ final class PipelineDecision {
 
     /** The same recording decision, now linked to the charge it returns (an expense offset, no longer waiting for the user). */
     PipelineDecision withOffset(long chargeId, boolean pipelineReview) {
-        return record(pipelineReview, amountMinor, currency, direction, merchant, category, cardLast4, counterparty, chargeId, false);
+        return record(pipelineReview, amountMinor, currency, direction, merchant, category, cardLast4, counterparty, chargeId, false).withBalance(balanceMinor, balanceCurrency);
     }
 
     /** The legacy ledger kind for this direction. */

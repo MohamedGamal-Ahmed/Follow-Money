@@ -593,6 +593,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     if (decided != null && decided.offsetOfTransactionId != null && "income".equals(kind)) linkReimbursement(existing, decided.offsetOfTransactionId);
                 }
             }
+            // Task D1: the pipeline read a balance and the row has its source (a Telda notification names no digits, so
+            // the legacy balance reading never finds its source): the source's last balance at the message's time.
+            if (existing >= 0 && account != null && decided != null && decided.balanceMinor != null)
+                putBalance(account, decided.balanceCurrency != null ? decided.balanceCurrency : decided.currency, decided.balanceMinor,
+                        eventAt, receivedAt, channel, sha256("balance:" + label + "\n" + receivedAt + "\n" + body));
             if (existing >= 0) {
                 result.evidence=captureEvidence.record(key,existing,hash,normalized,reference,channel,label,receivedAt,direction,body);
                 if (automaticCancellation && added && !CaptureNotice.cardRepayment(body) && "expense".equals(direction))
@@ -994,6 +999,35 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         return result;
     }
+    /** Task D2: the key a «لقينا خصم متكرر» card is dismissed under: recurring:<merchant>|<amount_minor>|<currency>. */
+    static String recurringKey(String merchant, long amountMinor, String currency) {
+        return "recurring:" + (merchant == null ? "" : merchant.trim().toLowerCase(Locale.ROOT)) + "|" + amountMinor + "|" + currency;
+    }
+
+    /**
+     * «مش التزام · تجاهل» on a recurring card: kept as a dismissed suggestion under its recurring key (the card comes from
+     * ledger rows, not from a stored suggestion, so the row is written here), never offered again.
+     */
+    public void dismissRecurringSuggestion(Transaction item) {
+        String key = recurringKey(item.merchant, item.amountMinor, item.currency);
+        ContentValues row = new ContentValues();
+        row.put("hint_key", key); row.put("merchant", item.merchant); row.put("kind", "subscription");
+        row.put("amount_minor", item.amountMinor); row.put("currency", item.currency); row.put("cycle", "monthly");
+        row.put("estimated_date", LocalDate.now().toString()); row.put("explanation", "مش التزام");
+        row.put("received_at", System.currentTimeMillis());
+        getWritableDatabase().insertWithOnConflict("commitment_suggestions", null, row, SQLiteDatabase.CONFLICT_IGNORE);
+        dismissSuggestion(key);
+    }
+
+    /** Recurring keys the user dismissed («مش التزام · تجاهل»). */
+    public java.util.Set<String> dismissedRecurringKeys() {
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT hint_key FROM commitment_suggestions WHERE status='dismissed' AND hint_key LIKE 'recurring:%'", null)) {
+            while (c.moveToNext()) keys.add(c.getString(0));
+        }
+        return keys;
+    }
+
     public void dismissSuggestion(String key) {
         ContentValues values=new ContentValues();values.put("status","dismissed");
         getWritableDatabase().update("commitment_suggestions",values,"hint_key=?",new String[]{key});
@@ -1305,7 +1339,8 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     /**
      * A wallet/prepaid app (Telda) writes no digits, so its movements had no source and the bank leg of a top-up could
      * never be paired with them (owner test, 22 Oct 2026). One source per app: an alias once learned, else the single
-     * live source the user already named after the app (any digits), else a new «Telda» card. Two such sources: no guess.
+     * live source the user already named after the app (any digits), else a new «Telda» payment-app source (task D1: an
+     * app is not a card waiting for its bank account). Two such sources: no guess.
      */
     private Long appSource(String sender, String body) {
         String identity = SourceIdentity.appKey(sender);
@@ -1324,12 +1359,29 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (matched == null) {
             String name = sender == null ? "" : sender.replaceAll("[^\\p{L} ]", " ").trim();
             if (name.isEmpty() || name.length() > 24) name = app;
-            long created = addPaymentSource(name, "بطاقة", null);
+            long created = addPaymentSource(name, APP_SOURCE_KIND, null);
             if (created <= 0) return null;
             matched = created;
         }
         addSourceAlias(identity, matched);
         return matched;
+    }
+
+    /** The kind of a wallet/prepaid app source (Telda): no bank to set, no account to link. */
+    static final String APP_SOURCE_KIND = "تطبيق دفع";
+
+    /**
+     * Task D1, once: a Telda source created as an unlinked «بطاقة» before 0.4.0 becomes a payment app. Kind only; its rows,
+     * aliases and balances stay. Returns the number of sources moved.
+     */
+    int migrateAppSources() {
+        int moved = 0;
+        for (PaymentSource source : paymentSources()) {
+            if (!"بطاقة".equals(source.kind) || source.parentSourceId != null || SourceIdentity.appKey(source.name) == null) continue;
+            ContentValues kind = new ContentValues(); kind.put("kind", APP_SOURCE_KIND);
+            moved += getWritableDatabase().update("payment_sources", kind, "id=?", new String[]{Long.toString(source.id)});
+        }
+        return moved;
     }
 
     private static String sourceKind(String body) {
@@ -2208,6 +2260,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
             report.promotions=archivePromotions(report);
+            migrateAppSources();
             report.trailingSigns=repairTrailingSigns();
             report.recategorized=recategorizeWithCurrentRules();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);

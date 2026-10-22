@@ -66,6 +66,12 @@ final class LocalLearning {
         if (memory.confirmed > 0) memory.conflicting = true;
     }
 
+    /** The user dismissed this shape at least once and never confirmed it (the missed-messages page reads this). */
+    synchronized boolean dismissedShape(String source, String normalizedText) {
+        ShapeMemory memory = shapes.get(key(source, normalizedText));
+        return memory != null && memory.dismissed > 0 && memory.confirmed == 0;
+    }
+
     /** The user confirmed a reviewed message as a real transaction in this direction. */
     synchronized void recordConfirmation(String source, String normalizedText, String direction) {
         ShapeMemory memory = memory(source, normalizedText);

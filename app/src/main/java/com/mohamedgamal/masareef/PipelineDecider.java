@@ -85,8 +85,11 @@ final class PipelineDecider {
                 if (offsetOf != null) offset = true;
             }
             boolean review = "REVIEW".equals(o.decision);
+            Long balance;
+            try { balance = v.get("balance_minor") == null ? null : Long.valueOf(v.get("balance_minor")); } catch (NumberFormatException unreadable) { balance = null; }
             return new Decided(PipelineDecision.record(review, amount, v.get("currency"), direction, DecisionNames.merchant(v, o.movementKind, request.label),
-                    DecisionNames.category(v, o.movementKind, direction, request.label), PipelineDecision.sourceLast4(v), v.get("counterparty"), offsetOf, offset && offsetOf == null), o);
+                    DecisionNames.category(v, o.movementKind, direction, request.label), PipelineDecision.sourceLast4(v), v.get("counterparty"), offsetOf, offset && offsetOf == null)
+                    .withBalance(balance, v.get("balance_currency")), o);
         } catch (RuntimeException | LinkageError failed) {
             return new Failed("EXCEPTION:" + failed.getClass().getSimpleName()); // the legacy parser decides this message
         }

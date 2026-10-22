@@ -220,6 +220,17 @@ final class ShadowStoreTest {
             String guards = first(sql, "SELECT GROUP_CONCAT(decision || '/' || reasons, ' | ') FROM (SELECT decision, reasons FROM shadow_observations WHERE reasons LIKE '%LEGACY_GUARD:%' ORDER BY id)");
             check(guards != null && guards.contains("LEGACY_GUARD:UNSUCCESSFUL") && guards.contains("LEGACY_GUARD:NOTICE") && !guards.contains("IGNORE/"),
                     "Each guard noted on a recording decision: " + guards);
+            // 10g. Telda is a payment app, not a card waiting for its bank account (task D1): created as «تطبيق دفع»,
+            // its notification balance updates its card, and an older «بطاقة» Telda source moves over once in repairAll.
+            ExpenseDb.PaymentSource teldaSource = db.paymentSource(telda);
+            check("تطبيق دفع".equals(teldaSource.kind), "Telda created as a payment app: " + teldaSource.kind);
+            CaptureResult teldaPaid = db.captureNotification("io.telda.app", "Telda", "Telda تم دفع 15 ج.م. في \"Kashier Butlers\"\nرصيدك: 31.5 ج.م.", t + 4_000_000L);
+            check(teldaPaid.transaction != null && telda.equals(teldaPaid.transaction.paymentSourceId), "Telda purchase on the Telda source: " + teldaPaid.reason);
+            ExpenseDb.BalanceSnapshot teldaBalance = db.latestBalance(telda, "EGP");
+            check(teldaBalance != null && teldaBalance.amountMinor == 3150, "Last balance on the Telda card from its notification: " + (teldaBalance == null ? null : teldaBalance.amountMinor));
+            sql.execSQL("UPDATE payment_sources SET kind='بطاقة' WHERE id=" + telda);
+            db.repairAll();
+            check("تطبيق دفع".equals(db.paymentSource(telda).kind), "An older Telda card source becomes a payment app once: " + db.paymentSource(telda).kind);
 
             // 9. Delete all local data removes shadow data.
             db.clearAllData();

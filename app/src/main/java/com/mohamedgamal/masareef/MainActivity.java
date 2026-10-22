@@ -377,7 +377,7 @@ public final class MainActivity extends Activity {
         for(ExpenseDb.PaymentSource source:sources) {
             if(source.archived)continue;
             if(bankSource(source.kind)&&usableBank(source.name))banks.add(SourceIdentity.bank(source.name));
-            if("حساب".equals(source.kind) || "محفظة".equals(source.kind)) {
+            if("حساب".equals(source.kind) || "محفظة".equals(source.kind) || ExpenseDb.APP_SOURCE_KIND.equals(source.kind)) {
                 if(source.reviewed)confirmed++;else review++;
             }
         }
@@ -389,7 +389,7 @@ public final class MainActivity extends Activity {
             boolean heading=false;
             for (ExpenseDb.PaymentSource source : sources) {
             int sourceGroup=source.archived?3:"بطاقة ائتمان".equals(source.kind)?1:
-                    ("حساب".equals(source.kind)||"محفظة".equals(source.kind))?0:2;
+                    ("حساب".equals(source.kind)||"محفظة".equals(source.kind)||appSource(source))?0:2;
             if(sourceGroup!=group)continue;
             if(!heading){section(groups[group],null,null);heading=true;}
             LinearLayout card = card();
@@ -401,7 +401,7 @@ public final class MainActivity extends Activity {
             manage.setTag("source_manage_"+source.id);title.addView(manage,new LinearLayout.LayoutParams(dp(UiTheme.TOUCH),dp(UiTheme.TOUCH)));
             card.addView(title);
             card.addView(label(source.archived?"مؤرشف · يمكنك إعادة تفعيله":source.reviewed?"استخدام مؤكد منك":"مكتشف من الرسائل · يحتاج مراجعة",12,MUTED,false));
-            if(bankSource(source.kind)&&!usableBank(source.name)){
+            if(bankSource(source.kind)&&!usableBank(source.name)&&!appSource(source)){
                 card.addView(label("البنك لسه مش محدد؛ ده ممكن يمنع ظهور الكارت والحساب لبعض",12,CORAL,false));
                 Button bank=ui.button("تحديد البنك",false,false,()->sourceBankPage(source));
                 LinearLayout.LayoutParams bankParams=new LinearLayout.LayoutParams(-2,-2);bankParams.topMargin=dp(6);card.addView(bank,bankParams);
@@ -448,8 +448,8 @@ public final class MainActivity extends Activity {
         labels.add("سجل الأرصدة");actions.add(()->balanceHistoryDialog(source));
         labels.add("تحديث الرصيد الحالي");actions.add(()->manualBalanceDialog(source));
         labels.add("تسمية وتأكيد الاستخدام");actions.add(()->sourceProfileDialog(source));
-        if(bankSource(source.kind)){labels.add("تحديد البنك وتصحيح بياناته");actions.add(()->sourceBankPage(source));}
-        if("بطاقة".equals(source.kind)) {
+        if(bankSource(source.kind)&&!appSource(source)){labels.add("تحديد البنك وتصحيح بياناته");actions.add(()->sourceBankPage(source));}
+        if("بطاقة".equals(source.kind)&&!appSource(source)) {
             labels.add("ربط الكارت بحسابه");actions.add(()->linkSourceDialog(source));
         } else if("حساب".equals(source.kind)) {
             labels.add("ربط كارت بالحساب");actions.add(()->linkSourceDialog(source));
@@ -1255,6 +1255,10 @@ public final class MainActivity extends Activity {
 
     private void paymentSourceDialog() { sourceBankPage(null); }
 
+    /** A wallet/prepaid app (Telda): its own source, no bank to set and no account to link (task D1). */
+    private static boolean appSource(ExpenseDb.PaymentSource source){
+        return ExpenseDb.APP_SOURCE_KIND.equals(source.kind)||SourceIdentity.appKey(source.name)!=null;
+    }
     private static boolean bankSource(String kind){return "حساب".equals(kind)||"بطاقة".equals(kind)||"بطاقة ائتمان".equals(kind);}
     private static boolean usableBank(String name){return name!=null&&name.matches(".*[\\p{L}].*");}
     private void sourceBankPage(ExpenseDb.PaymentSource source) {
@@ -2164,6 +2168,11 @@ public final class MainActivity extends Activity {
      * same currency about a month earlier. Grouped by merchant so each list is scanned once, not per row.
      */
     static Set<Long> recurringCandidateIds(List<ExpenseDb.Transaction> items, List<ExpenseDb.Recurring> confirmed) {
+        return recurringCandidateIds(items, confirmed, java.util.Collections.emptySet());
+    }
+
+    /** dismissed: recurring keys the user said are not commitments («مش التزام · تجاهل»); never suggested again. */
+    static Set<Long> recurringCandidateIds(List<ExpenseDb.Transaction> items, List<ExpenseDb.Recurring> confirmed, Set<String> dismissed) {
         Set<Long> ids = new HashSet<>();
         Set<String> confirmedKeys = new HashSet<>();
         for (ExpenseDb.Recurring r : confirmed)
@@ -2177,6 +2186,7 @@ public final class MainActivity extends Activity {
             group.sort((first, second) -> Long.compare(second.when, first.when));
             for (int i = 0; i < group.size(); i++) {
                 ExpenseDb.Transaction recent = group.get(i);
+                if (dismissed.contains(ExpenseDb.recurringKey(recent.merchant, recent.amountMinor, recent.currency))) continue;
                 if (ExpenseParser.genericMerchant(recent.merchant) || confirmedKeys.contains(recent.merchant.toLowerCase(Locale.ROOT) + "\n" + recent.currency) ||
                         "تحويلات".equals(recent.category) || "رسوم تحويل".equals(recent.category) || "رسوم بنكية".equals(recent.category) || "سحب نقدي".equals(recent.category)) continue;
                 LocalDate current = Instant.ofEpochMilli(recent.when).atZone(ZoneId.systemDefault()).toLocalDate();
@@ -2930,7 +2940,7 @@ public final class MainActivity extends Activity {
         int normalized = normalizeEarlyPaymentsOnWorker(db);
         long changes = db.changes();
         List<ExpenseDb.Transaction> rows = db.recurringCandidateTransactions();
-        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring()), rows, version, changes, normalized);
+        return new LedgerSnapshot(recurringCandidateIds(rows, db.recurring(), db.dismissedRecurringKeys()), rows, version, changes, normalized);
     }
 
     /** A local ledger edit: bump the generation so an in-flight snapshot is rejected, then reload the cache. */
@@ -3845,7 +3855,7 @@ public final class MainActivity extends Activity {
         if (suggested && "expense".equals(item.kind)) {
             TextView confirm = label("↻  بيتكرر كل شهر؟ سجّله التزام", 12, ACCENT, true);
             confirm.setPadding(dp(54), dp(4), 0, 0);
-            confirm.setOnClickListener(v -> confirmRecurring(item));
+            confirm.setOnClickListener(v -> commitmentFromTransaction(item));
             row.addView(confirm);
         }
         container.addView(row);
@@ -4598,7 +4608,7 @@ public final class MainActivity extends Activity {
             LinearLayout actions = new LinearLayout(this); actions.setPadding(0, dp(8), 0, 0);
             actions.addView(ui.button("بلّغ عنها", false, false, () -> reportMessageReading("ما اتسجلتش", "المرسل: " + message.source + "\n" + redacted)),
                     new LinearLayout.LayoutParams(0, -2, 1));
-            actions.addView(ui.button("تجاهل", false, false, () -> { ShadowStore.dismissUnunderstood(db.getWritableDatabase(), message.hash); render(); }),
+            actions.addView(ui.button("تجاهل", false, false, () -> { ShadowStore.dismissUnunderstood(db.getWritableDatabase(), message, System.currentTimeMillis()); render(); }),
                     new LinearLayout.LayoutParams(0, -2, 1));
             box.addView(actions);
         }
@@ -4815,12 +4825,17 @@ public final class MainActivity extends Activity {
             LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
             copy.addView(label("لقينا خصم متكرر من " + item.merchant, 13, INK, true));
             copy.addView(label("سداد شهري متكرر · " + money(item.amountMinor, item.currency), 11, MUTED, false));
+            // Task D2: dismissed for good under its recurring key; the card and the row hint never offer it again.
+            TextView dismiss = label("مش التزام · تجاهل", 12, ACCENT, true);
+            dismiss.setMinHeight(dp(UiTheme.TOUCH)); dismiss.setGravity(Gravity.CENTER_VERTICAL);
+            dismiss.setOnClickListener(v -> { db.dismissRecurringSuggestion(item); refreshLedger(true); render(); });
+            copy.addView(dismiss);
             LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(10));
             suggestion.addView(copy, copyParams);
             TextView add = label("أضفه", 12, onPrimary(), true);
             add.setGravity(Gravity.CENTER); add.setPadding(dp(14), 0, dp(14), 0);
             add.setBackground(rounded(primaryFill(), 12));
-            add.setOnClickListener(v -> confirmRecurring(item));
+            add.setOnClickListener(v -> commitmentFromTransaction(item));
             suggestion.addView(add, new LinearLayout.LayoutParams(-2, dp(36)));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(12);
             page.addView(suggestion, params);
@@ -6121,27 +6136,6 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("إدخال يدوي",null).show();
     }
 
-    private void confirmRecurring(ExpenseDb.Transaction item) {
-        LocalDate last = Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate();
-        LocalDate due = last.plusMonths(1);
-        while (due.isBefore(LocalDate.now())) due = due.plusMonths(1);
-        LocalDate nextDue = due;
-        String kind = "أقساط".equals(item.category) ? "installment" : "فواتير".equals(item.category) ? "bill" : "subscription";
-        new ChoiceDialogBuilder().setTitle("نسجّله التزام شهري؟")
-                .setMessage(item.merchant + " · " + money(item.amountMinor, item.currency) +
-                        "\nموعد تقديري من آخر سداد: " + nextDue.format(DateTimeFormatter.ofPattern("EEEE d MMMM", new Locale("ar"))) +
-                        "\n\nهنفكّرك قبلها بيوم، وتقدر تعدل أو تلغي في أي وقت.")
-                .setPositiveButton("سجّله", (dialog, which) -> {
-                    UiKit.Provider provider = UiKit.provider(item.merchant);
-                    long id = db.putCommitment(null, item.merchant, item.amountMinor, item.currency, nextDue, "monthly",
-                            provider != null ? provider.kind : kind, null, 0, 1,
-                            provider != null ? provider.keywords : item.merchant.toLowerCase(Locale.ROOT), item.paymentSourceId);
-                    if (id == -1) toast("الالتزام ده متسجل بالفعل");
-                    askNotificationPermission();
-                    render();
-                    refreshLedger(true); // the new commitment removes its merchant from the suggestions
-                }).setNegativeButton("إلغاء", null).show();
-    }
 
     private LinearLayout card() { return card(page); }
 
@@ -7369,7 +7363,7 @@ public final class MainActivity extends Activity {
             copy.addView(label(db.sourceLabel(source.id),14,INK,true));
             List<ExpenseDb.PaymentSource> cards=db.linkedCards(source.id);
             if(!cards.isEmpty()) copy.addView(label("يشمل "+cards.size()+" كروت مرتبطة بالحساب",11,MUTED,false));
-            else if("بطاقة".equals(source.kind)) copy.addView(label("كارت غير مرتبط · حركته وحده",11,ORANGE,false));
+            else if("بطاقة".equals(source.kind)&&!appSource(source)) copy.addView(label("كارت غير مرتبط · حركته وحده",11,ORANGE,false));
             copy.addView(flowLine(movement.incoming,max,EMERALD,"+",INCOME));
             copy.addView(flowLine(movement.outgoing(),max,0xffe46a6a,"−",CORAL));
             if(movement.ownIncoming+movement.ownOutgoing>0) copy.addView(label("بين حساباتك: وارد "+money(movement.ownIncoming,"EGP")+" · خارج "+money(movement.ownOutgoing,"EGP"),11,MUTED,false));
@@ -7515,7 +7509,7 @@ public final class MainActivity extends Activity {
         if(!linked.isEmpty()) {
             StringBuilder names=new StringBuilder();for(ExpenseDb.PaymentSource card:linked) names.append(names.length()==0?"":"، ").append("•").append(card.last4);
             note("حركة الحساب تشمل الكروت المرتبطة: "+names);
-        } else if("بطاقة".equals(account.kind)) {
+        } else if("بطاقة".equals(account.kind)&&!appSource(account)) {
             note("الكارت ده مش مرتبط بحساب. الوارد والتحويلات الظاهرة تخص رقم الكارت فقط؛ صفر مسجل مش معناه إن الحساب البنكي مفيهوش حركة.");
             Button link=ui.button("اربط الكارت بحسابه",true,false,()->linkSourceDialog(selectedAccount));
             LinearLayout.LayoutParams linkParams=new LinearLayout.LayoutParams(-1,-2);linkParams.topMargin=dp(8);page.addView(link,linkParams);
@@ -7637,6 +7631,9 @@ public final class MainActivity extends Activity {
      */
     private void runRepair(boolean manual) {
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        // Task D1: a phone that already ran this repair version still moves an older Telda card source to a payment app
+        // (cheap and idempotent; REPAIR_VERSION stays 3, m7).
+        if (!manual) CaptureQueue.submit(() -> { try { db.migrateAppSources(); } catch (RuntimeException ignored) { } });
         if (!manual && prefs.getInt("repair_version", 0) >= ExpenseDb.REPAIR_VERSION) return;
         if (manual) toast("بفحص البيانات...");
         CaptureQueue.submit(() -> {
