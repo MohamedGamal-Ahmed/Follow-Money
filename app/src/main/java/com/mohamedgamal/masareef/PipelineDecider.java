@@ -37,6 +37,8 @@ final class PipelineDecider {
         final ExpenseDb db;
         final String origin;
         private boolean loaded;
+        /** Import scan: messages the pipeline decided record nothing for (IGNORE, UNUNDERSTOOD, INFO_ONLY; user ignore rules among them). */
+        int notTransactions;
         Context(ExpenseDb db, String origin) { this.db = db; this.origin = origin; }
 
         private void load() {
@@ -112,6 +114,7 @@ final class PipelineDecider {
         }
         Decided d = (Decided) decided;
         if (d.decision.records) return SmsPreview.fromDecision(sender, body, receivedAt, sentAt, d.decision, d.observation, legacy);
+        ctx.notTransactions++;
         if (legacy == null || legacy.isTransaction()) return null;
         legacy.decision = d.decision; legacy.observation = d.observation;
         return legacy;
