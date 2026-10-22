@@ -114,6 +114,8 @@ final class TransactionExtractor {
     private static final Pattern PREPAID_SERVICE = Pattern.compile(ParsingPolicy.PREPAID_SERVICE, FLAGS);
     private static final Pattern REQUESTED = Pattern.compile(ParsingPolicy.REQUESTED_TRANSFER, FLAGS);
     private static final Pattern MOVEMENT_CASH = Pattern.compile(ParsingPolicy.MOVEMENT_CASH, FLAGS);
+    private static final Pattern WITHDRAWAL_DONE = Pattern.compile(ParsingPolicy.completion("سحب"), FLAGS);
+    private static final Pattern WITHDRAWAL_FEE = Pattern.compile(ParsingPolicy.WITHDRAWAL_FEE, FLAGS);
     private static final Pattern MOVEMENT_SALARY = Pattern.compile(ParsingPolicy.MOVEMENT_SALARY, FLAGS);
     private static final Pattern MOVEMENT_REMITTANCE = Pattern.compile(ParsingPolicy.MOVEMENT_REMITTANCE, FLAGS);
     private static final Pattern MOVEMENT_INSTANT = Pattern.compile(ParsingPolicy.MOVEMENT_INSTANT, FLAGS);
@@ -567,7 +569,9 @@ final class TransactionExtractor {
             return "service_charge";
         if (out && MOVEMENT_BILL.matcher(t).find()) return "bill_payment";
         if (out && "installment".equals(x.selfKind)) return "installment_payment";
-        if (out && MOVEMENT_CASH.matcher(t).find()) return "cash_withdrawal";
+        // A fee charged for a withdrawal is a bank fee, not cash; a completed «سحب» to no merchant or party is cash.
+        if (out && !("bank_fee".equals(x.selfKind) && WITHDRAWAL_FEE.matcher(t).find()) &&
+                (MOVEMENT_CASH.matcher(t).find() || x.merchantKey == null && x.counterparty == null && WITHDRAWAL_DONE.matcher(t).find())) return "cash_withdrawal";
         if (in && MOVEMENT_SALARY.matcher(t).find()) return "salary";
         if (in && MOVEMENT_REMITTANCE.matcher(t).find()) return "inward_remittance";
         if (MOVEMENT_INSTANT.matcher(t).find()) return in ? "instant_transfer_in" : "instant_transfer_out";
@@ -580,7 +584,7 @@ final class TransactionExtractor {
         if (classified.reasons.contains("COMMITMENT_EVENT")) return "commitment";
         if (KIND_INVESTMENT.matcher(t).find()) return "investment";
         if ("in".equals(x.direction) && KIND_INTEREST.matcher(t).find()) return "interest";
-        if (KIND_INSTALLMENT.matcher(t).find()) return "installment";
+        if (installmentNamed(t)) return "installment";
         if (KIND_CHEQUE.matcher(t).find()) return "cheque";
         // The principal itself is a fee (charge, penalty, tax) when the fee word sits in its clause, no separate fee
         // amount is stated and no merchant was charged.
@@ -588,6 +592,13 @@ final class TransactionExtractor {
                 KIND_FEE.matcher(t.substring(clauseStart(t, x.principalAt), clauseEnd(t, x.principalAt))).find()) return "bank_fee";
         if (x.merchantKey != null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find()) return "card_purchase";
         return null;
+    }
+
+    /** An installment word in a clause that is not future wording ("Installment will be debited monthly" is a note, not the event). */
+    private static boolean installmentNamed(String t) {
+        for (String clause : MessageClassifier.clauses(t))
+            if (KIND_INSTALLMENT.matcher(clause).find() && !FUTURE.matcher(clause).find()) return true;
+        return false;
     }
 
     private TransactionExtractor() {}

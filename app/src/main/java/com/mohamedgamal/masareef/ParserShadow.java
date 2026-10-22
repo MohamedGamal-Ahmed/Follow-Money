@@ -100,10 +100,11 @@ final class ParserShadow {
             if (!confidence.components.isEmpty()) observation.score = confidence.score;
             observation.movementKind = extraction.movementKind;
             String[] keys = {"amount_minor", "currency", "direction", "merchant", "merchant_key", "counterparty", "balance_minor", "fee_minor",
-                    "card_last4", "account_last4", "datetime", "accounting_effect", "learned_category", "description", "account_partial", "balance_currency"};
+                    "card_last4", "account_last4", "datetime", "accounting_effect", "learned_category", "description", "account_partial", "balance_currency", "self_kind"};
             Object[] found = {extraction.amountMinor, extraction.currency, extraction.direction, extraction.merchantSurface, extraction.merchantKey,
                     extraction.counterparty, extraction.balanceMinor, extraction.feeMinor, extraction.cardLast4, extraction.accountLast4,
-                    extraction.datetime, extraction.accountingEffect, learned.category, extraction.description, extraction.accountPartial, extraction.balanceCurrency};
+                    extraction.datetime, extraction.accountingEffect, learned.category, extraction.description, extraction.accountPartial, extraction.balanceCurrency,
+                    extraction.selfKind};
             for (int i = 0; i < keys.length; i++) if (found[i] != null) observation.values.put(keys[i], String.valueOf(found[i]));
         } catch (RuntimeException | StackOverflowError failure) {
             // A shadow failure is itself a diagnostic; it never propagates to legacy capture.

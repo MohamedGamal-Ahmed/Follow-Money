@@ -291,7 +291,9 @@ final class ParsingPolicy {
     static final String PAYER_NAMED = "(?<!\\p{L})(?:من|عن طريق|بواسطه|باستخدام|عبر)\\s+(?:ال)?(?:حساب|بطاق|محفظ|كارت|بنك)|" +
             "\\b(?:from|via|using|with) (?:your )?(?:account|card|wallet|bank)\\b|(?<!\\p{L})فوري(?!\\p{L})|\\bfawry\\b|محفظ|\\bwallet\\b|انستا ?باي|instapay";
     static final String MOVEMENT_BILL = "فاتوره|\\bbill\\b|شحن رصيد|\\brecharge\\b";
-    static final String MOVEMENT_CASH = "\\batm\\d*\\b|صراف|سحب نقدي|\\bcash withdrawal\\b|(?<!\\p{L})ماكينه|(?<!\\p{L})اله (?:رقم|صراف)";
+    /** A fee charged for a withdrawal: with a fee principal, a bank fee rather than cash. */
+    static final String WITHDRAWAL_FEE = "\\bwithdrawal fees?\\b|(?<!\\p{L})(?:رسوم|عموله) (?:ال)?سحب";
+    static final String MOVEMENT_CASH ="\\batm\\d*\\b|صراف|سحب نقدي|\\bcash withdrawal\\b|(?<!\\p{L})ماكينه|(?<!\\p{L})اله (?:رقم|صراف)";
     static final String MOVEMENT_SALARY = "\\bsalary\\b|\\bpayroll\\b|(?<!\\p{L})(?:راتب|مرتب)";
     static final String MOVEMENT_REMITTANCE = "\\btt payment\\b|\\bremittance\\b|\\bswift\\b|حواله (?:خارجيه|دوليه|وارده من الخارج)";
     static final String MOVEMENT_INSTANT = "\\bipn\\b|instapay|انستا ?باي|(?:ال)?تحويل (?:ال)?لحظي|شبكه (?:ال)?مدفوعات (?:ال)?لحظي[هة]?|instant payment network";

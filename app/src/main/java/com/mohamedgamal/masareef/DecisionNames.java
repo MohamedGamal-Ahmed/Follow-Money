@@ -36,6 +36,8 @@ final class DecisionNames {
             case "installment_payment": return "أقساط";
             default: break;
         }
+        // The principal is itself a fee (a charge, a withdrawal fee): spending on bank fees.
+        if (kind == null && "bank_fee".equals(v.get("self_kind"))) return MoneyFlow.BANK_FEE_CATEGORY;
         return ExpenseParser.category(merchant(v, kind, label));
     }
 

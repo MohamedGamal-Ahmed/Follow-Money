@@ -133,7 +133,7 @@ final class AuditRegressionTest {
         }
         for(String trigger:triggers)sql.execSQL("DROP TRIGGER \""+trigger.replace("\"","\"\"")+"\"");
         sql.execSQL("DROP TABLE ledger_revision");sql.setVersion(23);db.close();db=new ExpenseDb(context);
-        eq(25,db.getWritableDatabase().getVersion());ok(before.equals(revisionData(db.getReadableDatabase())),"v23 upgrade changed financial tables/schema/evidence");
+        eq(ExpenseDb.SCHEMA_VERSION,db.getWritableDatabase().getVersion());ok(before.equals(revisionData(db.getReadableDatabase())),"v23 upgrade changed financial tables/schema/evidence");
         eq(0,db.changes());eq(500,db.reimbursedOf(purchase));ok(!db.sourceEvidence(purchase).isEmpty());
         try(ExpenseDb external=new ExpenseDb(context)){ok(external.addManual(t+2000,700,"EGP","QA after upgrade","تسوق"));}
         long committed=db.changes();ok(committed>0);db.close();db=new ExpenseDb(context);eq(committed,db.changes());
@@ -142,7 +142,8 @@ final class AuditRegressionTest {
 
     public void testRevisionCoversUserTablesAndIgnoresReadsAndUnmatchedWrites(){
         SQLiteDatabase sql=db.getWritableDatabase();
-        try(Cursor tables=sql.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('android_metadata','ledger_revision')",null)){
+        // ShadowStore's three diagnostic tables (schema v26) are untracked by design: their writes are never ledger changes.
+        try(Cursor tables=sql.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('android_metadata','ledger_revision','shadow_observations','ununderstood_messages','learning_rules')",null)){
             while(tables.moveToNext())for(String operation:new String[]{"INSERT","UPDATE","DELETE"}){
                 try(Cursor trigger=sql.rawQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND tbl_name=? AND name=?",
                         new String[]{tables.getString(0),"ledger_revision_"+tables.getString(0)+"_"+operation})){
@@ -851,9 +852,12 @@ final class AuditRegressionTest {
         try{db.previewReimbursement(early,laterDay);throw new AssertionError("Future date allowed");}catch(IllegalArgumentException expected){}
         CsvImport.Row row=CsvImport.parse("Date,Merchant,Amount\n2026-10-15,QA CSV,-4.00").get(0);
         ok(db.addCsvEntry("qa-file",row));ok("date_only".equals(db.latestInserted().timePrecision));
-        // When only the incoming payment has date precision, its noon must not exclude same-day purchases.
-        ok(db.addSms("BANK","You received EGP 50 from QA FRIEND on "+day,received));ExpenseDb.Transaction income=db.lastCaptured();
-        long evening=manual(at(day,20),9000,"expense");
+        // When only the incoming payment has date precision, its noon must not exclude same-day purchases. The income is
+        // dated the day before its delivery: a same-day date with no clock takes the delivery time (owner, 22 Oct 2026, 1cd57fa).
+        LocalDate dated=day.minusDays(1);
+        ok(db.addSms("BANK","You received EGP 50 from QA FRIEND on "+dated,received));ExpenseDb.Transaction income=db.lastCaptured();
+        ok("date_only".equals(income.timePrecision),"Income dated before delivery keeps date precision: "+income.timePrecision);
+        long evening=manual(at(dated,20),9000,"expense");
         eq(5000,db.previewReimbursement(income.id,evening).applied);
     }
     public void testV20UpgradePreservesLedgerLinksEvidenceAndUnknownPrecision() throws Exception {
@@ -870,7 +874,7 @@ final class AuditRegressionTest {
             old.execSQL("INSERT INTO reimbursements VALUES(2,1,4000)");
             old.execSQL("INSERT INTO capture_evidence(unique_key,transaction_id,source,received_at,encrypted_body) VALUES('qa-evidence',1,'SMS',2000,'opaque-legacy-evidence')");
         }
-        db=new ExpenseDb(context);eq(25,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
+        db=new ExpenseDb(context);eq(ExpenseDb.SCHEMA_VERSION,db.getWritableDatabase().getVersion());eq(2,db.transactionCount());
         eq(4000,db.reimbursedOf(1));eq(6000,ExpenseDb.effectiveAmount(db.transactionById(1),db.reimbursementOffsets()));
         ok(db.transactionById(1).timePrecision==null&&db.transactionById(2).timePrecision==null);
         eq(1,scalar("SELECT user_edited FROM transactions WHERE id=2"));

@@ -41,7 +41,7 @@ public final class UpgradeInstallTest extends Instrumentation {
                 JSONObject before=new JSONObject(new String(Files.readAllBytes(expected.toPath()),StandardCharsets.UTF_8));
                 baselineTables=new ArrayList<>();JSONArray originalTables=before.getJSONArray("baseline_tables");
                 for(int i=0;i<originalTables.length();i++)baselineTables.add(originalTables.getString(i));
-                ok(db.getWritableDatabase().getVersion()==25,"Updated APK must migrate to v25");
+                ok(db.getWritableDatabase().getVersion()==ExpenseDb.SCHEMA_VERSION,"Updated APK must migrate to v"+ExpenseDb.SCHEMA_VERSION);
                 JSONObject after=snapshot();
                 ok(before.toString().equals(after.toString()),"Ledger/evidence/preferences/points changed: "+before+" -> "+after);
                 try(Cursor c=db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM transactions WHERE time_precision IS NOT NULL",null)){

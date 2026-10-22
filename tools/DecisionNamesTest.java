@@ -74,6 +74,20 @@ public final class DecisionNamesTest {
                 check(ShadowDiff.newRecords(o.decision), "Owner message " + f[0] + " is a movement: " + o.decision + " " + o.reasons);
             }
         } catch (java.io.IOException missing) { check(false, "Owner day fixture: " + missing); }
+
+        // 0.4.1 item 5 (FeatureAuditTest cash/fee/installment wording): a withdrawal is cash, never spending; a fee charged
+        // for a withdrawal is a bank fee, never cash; an installment named only in a future clause does not make the
+        // completed purchase an installment.
+        for (String cash : new String[]{"تم سحب 2000 جنيه من حسابك", "تم سحب 2000 جنيه من حسابك برسوم 5 جنيه", "تم سحب 500 جنيه من حسابك بدون رسوم",
+                "تم سحب من حسابك مبلغ 2000 جنيه مع رسوم"})
+            same(row("BANK", cash).split("\\|")[2], MoneyFlow.CASH_WITHDRAWAL_CATEGORY, "Arabic withdrawal is cash: " + cash);
+        for (String fee : new String[]{"Your account has been charged EGP 5.00 as a cash withdrawal fee at ATM",
+                "ATM cash withdrawal fee of EGP 5 from account ****1234", "Your account was charged EGP 5 from account ****1234 as a cash withdrawal fee"})
+            same(row("BANK", fee).split("\\|")[2], MoneyFlow.BANK_FEE_CATEGORY, "Withdrawal fee is a bank fee: " + fee);
+        same(row("BANK", "Cash withdrawal at ATM for EGP 5 from account ****1234 with a fee of EGP 5").split("\\|")[2], MoneyFlow.CASH_WITHDRAWAL_CATEGORY,
+                "A withdrawal that states its fee stays cash");
+        check(!row("BANK", "Your card was debited EGP 500 at AMAZON. Installment will be debited monthly").endsWith("|أقساط"),
+                "A future installment note does not make the purchase an installment");
         if (!failures.isEmpty()) throw new AssertionError(failures.size() + " of " + checks + " failed:\n" + String.join("\n", failures));
         System.out.println("Decision names checks passed: " + checks);
     }
