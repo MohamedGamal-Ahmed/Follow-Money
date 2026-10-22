@@ -474,6 +474,10 @@ public final class ExpenseParser {
     }
 
     /** Precision of the chosen timestamp, not a claim that receipt time was stated by the bank. */
+    private static boolean sameDay(LocalDate date, long receivedAt) {
+        return Instant.ofEpochMilli(receivedAt).atZone(ZoneId.systemDefault()).toLocalDate().equals(date);
+    }
+
     public static EventTime eventTimeWithPrecision(String body,long receivedAt) {
         if (body == null) return new EventTime(receivedAt,"exact");
         Matcher match = EVENT_DATE.matcher(normalizeDigits(body));
@@ -483,10 +487,9 @@ public final class ExpenseParser {
                 int month = Integer.parseInt(match.group(1) != null ? match.group(2) : match.group(5));
                 int day = Integer.parseInt(match.group(1) != null ? match.group(3) : match.group(4));
                 LocalDate date = LocalDate.of(year, month, day);
-                LocalTime time = match.group(7) == null
-                        ? Instant.ofEpochMilli(receivedAt).atZone(ZoneId.systemDefault()).toLocalDate().equals(date)
-                            ? Instant.ofEpochMilli(receivedAt).atZone(ZoneId.systemDefault()).toLocalTime()
-                            : LocalTime.NOON
+                // Dated the day it arrived, with no clock: the delivery time is the transaction time (owner rule, 22 Oct 2026).
+                if (match.group(7) == null && sameDay(date, receivedAt)) return new EventTime(receivedAt, "exact");
+                LocalTime time = match.group(7) == null ? LocalTime.NOON
                         : LocalTime.of(Integer.parseInt(match.group(7)), Integer.parseInt(match.group(8)));
                 long event = LocalDateTime.of(date, time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
@@ -501,8 +504,9 @@ public final class ExpenseParser {
                 int month = ("JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".indexOf(textDate.group(2).toUpperCase(Locale.ROOT)) / 4) + 1;
                 int year = Integer.parseInt(textDate.group(3));
                 if (year < 100) year += 2000;
-                long event = LocalDate.of(year, month, day).atTime(12, 0)
-                        .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                LocalDate date = LocalDate.of(year, month, day);
+                if (sameDay(date, receivedAt)) return new EventTime(receivedAt, "exact");
+                long event = date.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                 if (event <= receivedAt + 24L * 60 * 60 * 1000 &&
                         event >= receivedAt - 5L * 365 * 24 * 60 * 60 * 1000) return new EventTime(event,"date_only");
             } catch (NumberFormatException | java.time.DateTimeException ignored) { }

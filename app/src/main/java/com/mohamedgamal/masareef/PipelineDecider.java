@@ -41,7 +41,7 @@ final class PipelineDecider {
             }
             boolean review = "REVIEW".equals(o.decision);
             return new Decided(PipelineDecision.record(review, amount, v.get("currency"), direction, merchant(v, o.movementKind, request.label),
-                    category(v, o.movementKind, direction), v.get("card_last4"), offsetOf, offset && offsetOf == null), o);
+                    category(v, o.movementKind, direction), PipelineDecision.sourceLast4(v), v.get("counterparty"), offsetOf, offset && offsetOf == null), o);
         } catch (RuntimeException | LinkageError failed) {
             return null; // the legacy parser decides this message
         }

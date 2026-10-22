@@ -84,9 +84,17 @@ public final class ParserSmokeTest {
         if (ExpenseParser.eventTime("Balance EGP 300", received) != received)
             throw new AssertionError("Missing date should use message time");
         checked++;
-        for(String body:new String[]{"on 08/10/2026","on 09/10/2026","08OCT26"}) {
+        for(String body:new String[]{"on 08/10/2026","08OCT26"}) {
             if(!"date_only".equals(ExpenseParser.eventTimeWithPrecision(body,received).precision))
-                throw new AssertionError("Missing clock must retain date-only precision");
+                throw new AssertionError("Missing clock on an earlier day must retain date-only precision");
+            checked++;
+        }
+        // Owner rule (22 Oct 2026): a message dated the day it arrived took place when it arrived — the delivery time
+        // is the transaction time, not «تاريخ فقط».
+        for(String body:new String[]{"on 09/10/2026","09OCT26","فى 09-10-2026"}) {
+            ExpenseParser.EventTime sameDay=ExpenseParser.eventTimeWithPrecision(body,received);
+            if(!"exact".equals(sameDay.precision) || sameDay.when!=received)
+                throw new AssertionError("Same-day date without a clock must use the delivery time: "+body+" → "+sameDay.precision);
             checked++;
         }
         for(String body:new String[]{"on 08/10/2026 12:00","on 09/10/2026 14:42","no stated date","on 31/02/2026"}) {

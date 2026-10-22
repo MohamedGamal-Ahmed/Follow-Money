@@ -5,6 +5,9 @@
 - Transaction rows with no merchant logo fall back to their account's bank/card icon, then the selected notification provider's icon and finally the source's identity badge. Descriptions identify the source without relabelling the merchant. Google Play uses the installed store's icon, separately from Google One.
 - Recognize known merchants after a bare Kashier/Paymob prefix (including `Kashier Butlers`); unknown bare descriptors stay intact. Refresh untouched automatic purchase categories using the existing guarded catalog refresh.
 - Explain in capture settings that recorded transactions survive notification dismissal, while missed notifications can be recovered only while still active.
+- Step 7 rows attach to their source again: a bank SMS that names only an account (HSBC «Account ********0001», Banque Misr «حساب رقم xxx7392») was written with no source, so own-transfer matching never saw it and both legs counted as income and spending. A debit whose other party is only the tail of exactly one of the user's own sources («to 7392») is recorded as a transfer to that account at once, and the receipt is merged into it by the repair after capture; an own InstaPay address decides the same way as in the legacy path.
+- A message dated the day it arrived, with no clock in it, takes the delivery time as the transaction time instead of «تاريخ فقط» at noon; earlier dates without a clock keep date-only precision.
+- Own-transfer matching waits up to an hour for the receipt instead of ten minutes (owner decision): a wallet or prepaid card such as Telda posts its credit well after the bank debit (24 minutes on 22 Oct). The one-candidate-each-way rule, same currency and the fee ceiling are unchanged.
 
 ## 0.3.3 — local phone testing candidate, 21 October 2026
 

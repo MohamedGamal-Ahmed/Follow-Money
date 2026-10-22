@@ -19,7 +19,8 @@ import java.util.Set;
 final class RepairRules {
     private RepairRules() {}
 
-    static final long OWN_TRANSFER_WINDOW_MS = 10 * 60 * 1000L;
+    /** A wallet or prepaid card may post its receipt long after the bank debit (owner decision, 22 Oct 2026: Telda, 24 minutes). */
+    static final long OWN_TRANSFER_WINDOW_MS = 60 * 60 * 1000L;
     static final long OWN_TRANSFER_EARLY_MS = 2 * 60 * 1000L;
     static final long DUPLICATE_WINDOW_MS = 3 * 60 * 1000L;
 
@@ -101,7 +102,9 @@ final class RepairRules {
 
     /** The account money left; null when the row is not an outgoing transfer leg. */
     static Long outAccount(Row r) {
-        if (r.from == null || r.to != null) return null;
+        // A transfer written with its own destination (the message named one of the user's accounts) still waits for
+        // its receipt; a plain expense with a destination is a card repayment, not an open transfer.
+        if (r.from == null || r.to != null && !"transfer".equals(r.kind)) return null;
         if ("transfer".equals(r.kind)) return r.from;
         if ("expense".equals(r.kind) && MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(r.category)) return r.from;
         return null;
@@ -147,6 +150,8 @@ final class RepairRules {
     private static boolean matches(Row out, long a, Row in, long b, Map<Long, Long> accountOf) {
         long fromAccount = accountOf.getOrDefault(a, a), toAccount = accountOf.getOrDefault(b, b);
         if (fromAccount == toAccount || !out.currency.equals(in.currency)) return false;
+        // The debit already names where it went: only a receipt on that account is its other half.
+        if (out.to != null && accountOf.getOrDefault(out.to, out.to) != toAccount) return false;
         long fee = out.amountMinor - in.amountMinor;
         if (fee < 0 || fee > maxFee(out.amountMinor)) return false;
         long gap = in.when - out.when;

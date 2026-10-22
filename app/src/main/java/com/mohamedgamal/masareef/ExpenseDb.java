@@ -560,10 +560,16 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             // Nothing recorded earlier is changed when the new pipeline decides: a match only gains this evidence.
             if (existing >= 0 && decided == null) syncAutomatic(existing, parsed, direction, account, body, eventAt,event.precision);
             else {
-                String kind = transfer != null && isOwnHandle(transfer.counterpart) ? "transfer" : direction;
+                // Step 7: a debit whose other party is only an account/card tail that belongs to exactly one of the user's
+                // own sources went between the user's accounts (owner test, 22 Oct 2026: HSBC «to 7392» = Banque Misr 7392).
+                Long ownDestination = decided != null && "expense".equals(direction) ? ownSourceByTail(PipelineDecision.counterpartyTail(decided.counterparty), account) : null;
+                boolean ownHandle = transfer != null ? isOwnHandle(transfer.counterpart) :
+                        decided != null && decided.counterparty != null && decided.counterparty.contains("@") && isOwnHandle(decided.counterparty);
+                String kind = ownHandle || ownDestination != null ? "transfer" : direction;
+                if (ownDestination != null) parsed = new ExpenseParser.Parsed(parsed.amountMinor, parsed.currency, "تحويل بين حساباتي", parsed.category, parsed.cardLast4);
                 // A debit to one of the user's own credit cards keeps that card as destination (the statement treats it as
                 // internal); the settlement dialog stays optional for allocating it to purchases.
-                Long destination = "transfer".equals(kind) && "income".equals(direction) ? account :
+                Long destination = ownDestination != null ? ownDestination : "transfer".equals(kind) && "income".equals(direction) ? account :
                         decided == null && "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
                 added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
                         "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
@@ -1225,6 +1231,22 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** The user's live credit card with these last four digits, or null when none (or more than one) matches. */
+    /**
+     * The one active source (account or card) whose last digits are this tail and that is not the paying source itself;
+     * two sources with the same digits, or none, give null (no guess).
+     */
+    Long ownSourceByTail(String tail, Long payingSource) {
+        if (tail == null) return null;
+        Long found = null;
+        for (PaymentSource source : paymentSources()) {
+            if (source.archived || source.last4 == null || !source.last4.equals(tail)) continue;
+            if (payingSource != null && accountId(source.id) == accountId(payingSource)) continue;
+            if (found != null) return null;
+            found = source.id;
+        }
+        return found;
+    }
+
     Long ownCreditCard(String last4) {
         if (last4 == null) return null;
         Long found = null;

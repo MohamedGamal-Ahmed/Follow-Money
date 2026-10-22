@@ -185,6 +185,22 @@ final class ShadowStoreTest {
             long kept = glued.transaction.id; long keptAmount = glued.transaction.amountMinor;
             db.captureSms("BankMisr", "شكرًا لاستخدامك بطاقة بنك مصر ***4636، تم الآن خصم EGP 149.98عند KASHIER*BUTLERS & CO C يوم 20/10/2026 ، الرصيد المتاح EGP 2139.44", t);
             check(db.transactionById(kept).amountMinor == keptAmount && db.transactionCount() == rows + 2, "A repeated message changes nothing recorded");
+            // 10b. Owner test, 22 Oct 2026: HSBC 0001 → Banque Misr 7392 by IPN (4.00 + 0.50 fee). The bank messages name only
+            // accounts, so the rows must still attach to their sources; the debit names the user's own 7392, so it is a transfer
+            // to that account, and the receipt is merged into it by the repair that follows the capture.
+            long hsbc = db.addPaymentSource("HSBC", "حساب", "0001"), misr = db.addPaymentSource("Banque Misr", "حساب", "7392");
+            long transfers = db.transactionCount();
+            CaptureResult leg1 = db.captureSms("HSBC", "Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre", t + 10_000L);
+            check(leg1.transaction != null && leg1.transaction.paymentSourceId != null && leg1.transaction.paymentSourceId == hsbc,
+                    "An account-only bank SMS attaches to its source: " + (leg1.transaction == null ? leg1.reason : leg1.transaction.paymentSourceId));
+            check("transfer".equals(leg1.transaction.kind) && leg1.transaction.destinationSourceId != null && leg1.transaction.destinationSourceId == misr,
+                    "A debit to the user's own account tail is a transfer to that account: " + leg1.transaction.kind + "/" + leg1.transaction.destinationSourceId);
+            CaptureResult leg2 = db.captureSms("BankMisr", "تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ", t + 10_000L);
+            ExpenseDb.Transaction merged = db.transactionById(leg1.transaction.id);
+            check(leg2.transaction != null && leg2.transaction.id == leg1.transaction.id, "The receipt is merged into the transfer: " + (leg2.transaction == null ? leg2.reason : leg2.transaction.id));
+            check(merged != null && "transfer".equals(merged.kind) && merged.amountMinor == 400 && merged.paymentSourceId == hsbc && merged.destinationSourceId == misr,
+                    "One internal transfer of 4.00 from HSBC to Banque Misr: " + (merged == null ? null : merged.kind + "/" + merged.amountMinor));
+            check(db.transactionCount() == transfers + 2, "Transfer and its 0.50 fee row, nothing else: " + (db.transactionCount() - transfers));
             DecisionSwitch.set(target, false);
             CaptureResult after = db.captureSms("QABANK", "Paid EGP 44.00 at \"QA Kiosk\". Card ****1234.", t + 3_600_000L);
             check(after.transaction != null && first(sql, "SELECT legacy_decision FROM shadow_observations WHERE transaction_id=" + after.transaction.id).startsWith("RECORDED"), "Rollback: legacy decides the next message at once");
