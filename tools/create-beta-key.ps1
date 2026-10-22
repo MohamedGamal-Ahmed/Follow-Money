@@ -10,14 +10,21 @@ $keystore = Join-Path $SigningDirectory 'follow-money-beta.p12'
 $passwordFile = Join-Path $SigningDirectory 'password.dpapi.xml'
 if ((Test-Path -LiteralPath $keystore) -or (Test-Path -LiteralPath $passwordFile)) { throw 'Beta signing material already exists. Never replace it to build an update.' }
 New-Item -ItemType Directory -Force -Path $SigningDirectory | Out-Null
-$acl = Get-Acl -LiteralPath $SigningDirectory
+# Restrict the folder to this Windows user with .NET directly: Set-Acl on Windows PowerShell 5.1 also tries to
+# write the audit section and fails without SeSecurityPrivilege.
+$directory = Get-Item -LiteralPath $SigningDirectory
+$acl = $directory.GetAccessControl('Access')
 $acl.SetAccessRuleProtection($true,$false)
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$acl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
-Set-Acl -LiteralPath $SigningDirectory -AclObject $acl
+$rule = New-Object Security.AccessControl.FileSystemAccessRule($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+$acl.SetAccessRule($rule)
+$directory.SetAccessControl($acl)
 $previousPassword = $env:FOLLOW_MONEY_BETA_CREATION_PASSWORD
 try {
-    $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+    # Windows PowerShell 5.1 has no static RandomNumberGenerator.GetBytes(int); the instance form works in 5.1 and 7.
+    $randomBytes = New-Object byte[] 32
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($randomBytes)
+    $password = [Convert]::ToBase64String($randomBytes)
     ConvertTo-SecureString -String $password -AsPlainText -Force | Export-Clixml -LiteralPath $passwordFile
     $env:FOLLOW_MONEY_BETA_CREATION_PASSWORD = $password
     & $keytool -genkeypair -keystore $keystore -storetype PKCS12 -alias follow-money-beta -keyalg RSA -keysize 4096 -validity 10000 -dname 'CN=Mohamed Gamal, O=Follow Money Beta' -storepass:env FOLLOW_MONEY_BETA_CREATION_PASSWORD -keypass:env FOLLOW_MONEY_BETA_CREATION_PASSWORD

@@ -10,15 +10,21 @@ $keystore = Join-Path $SigningDirectory 'follow-money-upload.p12'
 $passwordFile = Join-Path $SigningDirectory 'password.dpapi.xml'
 if ((Test-Path -LiteralPath $keystore) -or (Test-Path -LiteralPath $passwordFile)) { throw 'Signing material already exists. Do not replace an upload key.' }
 New-Item -ItemType Directory -Force -Path $SigningDirectory | Out-Null
-$acl = Get-Acl -LiteralPath $SigningDirectory
+# Restrict the folder to this Windows user with .NET directly: Set-Acl on Windows PowerShell 5.1 also tries to
+# write the audit section and fails without SeSecurityPrivilege.
+$directory = Get-Item -LiteralPath $SigningDirectory
+$acl = $directory.GetAccessControl('Access')
 $acl.SetAccessRuleProtection($true,$false)
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$rule = [Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+$rule = New-Object Security.AccessControl.FileSystemAccessRule($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
 $acl.SetAccessRule($rule)
-Set-Acl -LiteralPath $SigningDirectory -AclObject $acl
+$directory.SetAccessControl($acl)
 $previousPassword = $env:FOLLOW_MONEY_KEY_CREATION_PASSWORD
 try {
-    $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+    # Windows PowerShell 5.1 has no static RandomNumberGenerator.GetBytes(int); the instance form works in 5.1 and 7.
+    $randomBytes = New-Object byte[] 32
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($randomBytes)
+    $password = [Convert]::ToBase64String($randomBytes)
     $securePassword = ConvertTo-SecureString -String $password -AsPlainText -Force
     # Windows DPAPI: decryptable only by this Windows user on this machine.
     $securePassword | Export-Clixml -LiteralPath $passwordFile
