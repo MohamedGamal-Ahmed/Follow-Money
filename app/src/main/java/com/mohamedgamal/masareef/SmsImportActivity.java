@@ -1,7 +1,6 @@
 package com.mohamedgamal.masareef;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
@@ -154,7 +153,7 @@ public final class SmsImportActivity extends Activity {
             selection=text("",12);footer.addView(selection);
             LinearLayout nav=new LinearLayout(this);
             nav.addView(button("السابق",()->{if(pageNumber>0){pageNumber--;drawRows();scroll.scrollTo(0,0);}}),new LinearLayout.LayoutParams(0,-2,1));
-            nav.addView(button("التالي",()->{if((pageNumber+1)*PAGE_SIZE<session.items.size()+session.rejected.size()){pageNumber++;drawRows();scroll.scrollTo(0,0);}}),new LinearLayout.LayoutParams(0,-2,1));footer.addView(nav);
+            nav.addView(button("التالي",()->{if((pageNumber+1)*PAGE_SIZE<session.items.size()){pageNumber++;drawRows();scroll.scrollTo(0,0);}}),new LinearLayout.LayoutParams(0,-2,1));footer.addView(nav);
             if(reviewing){save=button("استيراد المحدد",this::confirmApply);primary(save);footer.addView(save);}
             else footer.addView(button("رجوع للنتيجة",()->{session.phase="done";show();}));
             drawRows();
@@ -190,7 +189,7 @@ public final class SmsImportActivity extends Activity {
             }
             page.addView(button("تفاصيل الرسائل",()->{session.phase="details";pageNumber=0;show();}));
             Button open=button("عرض العمليات",this::openTransactions);primary(open);footer.addView(open);
-            footer.addView(button("استيراد فترة أخرى",()->{session.items.clear();session.rejected.clear();session.phase="idle";pageNumber=0;show();}));
+            footer.addView(button("استيراد فترة أخرى",()->{session.items.clear();session.phase="idle";pageNumber=0;show();}));
         }else{
             page.addView(text(session.error,15));footer.addView(button("اختيار فترة أخرى",()->{session.phase="idle";show();}));
         }
@@ -226,15 +225,9 @@ public final class SmsImportActivity extends Activity {
     }
     private void drawRows() {
         if(rows==null)return;rows.removeAllViews();
-        int total=session.items.size()+session.rejected.size();
+        int total=session.items.size();
         int end=Math.min(total,(pageNumber+1)*PAGE_SIZE);
         for(int i=pageNumber*PAGE_SIZE;i<end;i++) {
-            if(i>=session.items.size()) {
-                RejectedSms rejected=session.rejected.get(i-session.items.size());
-                LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
-                box.addView(text(rejected.sender+" · صيغة غير متعرّفة، لم تُسجل",14));
-                box.addView(button("أرسل صيغتها",()->reportFormat(rejected)));rows.addView(box);continue;
-            }
             SmsPreview r=session.items.get(i);
             LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
             box.setPadding(dp(12),dp(8),dp(12),dp(8));
@@ -268,31 +261,6 @@ public final class SmsImportActivity extends Activity {
         updateSelection();
     }
 
-    private void reportFormat(RejectedSms row) {
-        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(dp(16),0,dp(16),0);
-        form.addView(text("المرسل: "+row.sender,14));
-        form.addView(text("حجبنا الأرقام والمبالغ وبعض الأسماء تلقائيًا. راجع النص وعدّل أي بيانات شخصية باقية؛ هيفتح مسودة وإنت اللي ترسلها.",13));
-        EditText body=new EditText(this);body.setTypeface(font);body.setMinLines(4);body.setGravity(Gravity.TOP|Gravity.START);
-        body.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        body.setText(Redaction.text(row.body));form.addView(body);
-        ScrollView preview=new ScrollView(this);preview.addView(form);
-        new AlertDialog.Builder(this).setTitle("أرسل صيغة الرسالة").setView(preview)
-                .setPositiveButton("فتح مسودة إيميل",(dialog,which)->{
-                    String reviewed="صيغة رسالة غير متعرّفة\nالمرسل: "+row.sender+"\n\n"+body.getText().toString();
-                    try{startActivity(EmailSupport.draft(this,false,reviewed));}
-                    catch(android.content.ActivityNotFoundException unavailable){
-                        android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                        if(clipboard!=null){clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Follow Money support",EmailSupport.copyText(this,false,reviewed)));
-                            Toast.makeText(this,"مفيش تطبيق إيميل؛ اتنسخت المسودة وعنوان الدعم",Toast.LENGTH_LONG).show();}
-                        else Toast.makeText(this,"تعذر فتح البريد أو النسخ؛ عنوان الدعم: "+EmailSupport.ADDRESS,Toast.LENGTH_LONG).show();
-                    }
-                }).setNegativeButton("إلغاء",null).show();
-    }
-
-    static final class RejectedSms {
-        final String sender,body;
-        RejectedSms(String sender,String body){this.sender=sender;this.body=body;}
-    }
     private void showOriginal(SmsPreview row){
         TextView body=text(row.body==null?"النص الأصلي غير متاح":row.body,14);body.setTextIsSelectable(true);body.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG);
         sheet("المصدر · "+row.sender,body,"إغلاق",null);
@@ -308,7 +276,7 @@ public final class SmsImportActivity extends Activity {
     }
     private void updateSelection(){
         int n=0;for(SmsPreview r:session.items)if(r.selected)n++;
-        if(selection!=null)selection.setText(("ready".equals(session.phase)?"المحدد "+n+" رسالة · ":"")+"صفحة "+(pageNumber+1)+" / "+Math.max(1,(session.items.size()+session.rejected.size()+PAGE_SIZE-1)/PAGE_SIZE));
+        if(selection!=null)selection.setText(("ready".equals(session.phase)?"المحدد "+n+" رسالة · ":"")+"صفحة "+(pageNumber+1)+" / "+Math.max(1,(session.items.size()+PAGE_SIZE-1)/PAGE_SIZE));
         if(save!=null){save.setEnabled(n>0);save.setText("استيراد "+n+" رسالة محددة");save.setAlpha(n>0?1f:.5f);}
     }
     private void confirmApply(){
@@ -331,7 +299,6 @@ public final class SmsImportActivity extends Activity {
     private static final class Session {
         final Context app;
         final List<SmsPreview> items=new ArrayList<>();
-        final List<RejectedSms> rejected=new ArrayList<>();
         volatile String phase="idle",error="",startLabel="";
         volatile int total,scanned,skipped;
         boolean reviewBeforeImport;
@@ -351,13 +318,12 @@ public final class SmsImportActivity extends Activity {
         }
         synchronized void cancelScan(){if("scan".equals(phase)){cancelled=true;generation++;phase="idle";}}
         synchronized void start(LocalDate start) {
-            cancelled=false;final int token=++generation;items.clear();rejected.clear();total=0;scanned=0;skipped=0;imported=null;phase="scan";
+            cancelled=false;final int token=++generation;items.clear();total=0;scanned=0;skipped=0;imported=null;phase="scan";
             startLabel=start==null?"كل الرسائل":start.toString();
             long since=start==null?0:start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
             long until=System.currentTimeMillis();rangeStart=since;rangeEnd=Long.MAX_VALUE;pending=java.util.Collections.emptyList();
             AppResources.read(()->{
                 List<SmsPreview> candidates=new ArrayList<>();
-                List<RejectedSms> unrecognized=new ArrayList<>();
                 // A receipt timestamp can equal another SMS's sent timestamp. Never treat that key as a legacy alias.
                 Set<String> sentKeys;
                 try {sentKeys=ExpenseDb.smsSentKeys(app,since,until);}
@@ -368,14 +334,15 @@ public final class SmsImportActivity extends Activity {
                     if(token!=generation)return;
                     if(c==null)throw new IllegalStateException("SMS provider unavailable");
                     total=c.getCount();
+                    PipelineDecider.Context decisions=PipelineDecider.context(readDb,"import");
                     if(c!=null)while(c.moveToNext()) {
                         if(cancelled||token!=generation)return;
-                        SmsPreview r=SmsPreview.parse(c.getString(0),c.getString(1),c.getLong(2),c.getLong(3));
+                        // Decided once by the new pipeline, with one context for the whole scan; written exactly as listed.
+                        SmsPreview r=PipelineDecider.importRow(decisions,c.getString(0),c.getString(1),c.getLong(2),c.getLong(3));
                         if(r!=null){r.receiptKeySafe=r.canUseReceiptKey(sentKeys);r.captureStatus=readDb.smsCaptureStatus(r.sender,r.body,r.receivedAt,r.captureAt,r.receiptKeySafe);candidates.add(r);}
-                        else if(SmsPreview.canReport(c.getString(0),c.getString(1)))unrecognized.add(new RejectedSms(c.getString(0),c.getString(1)));
                         scanned++;if(scanned%25==0)publish(false);
                     }
-                    synchronized(this){if(cancelled||token!=generation)return;items.addAll(candidates);rejected.addAll(unrecognized);phase="ready";if(!reviewBeforeImport){SmsPreview.selectForImport(items);apply();}}
+                    synchronized(this){if(cancelled||token!=generation)return;items.addAll(candidates);phase="ready";if(!reviewBeforeImport){SmsPreview.selectForImport(items);apply();}}
                     publish(true);
                 } catch(RuntimeException e){if(token==generation){error="تعذر الفحص. راجع إذن SMS وأعد المحاولة؛ لم نحفظ بيانات الفحص.";phase="error";publish(true);}}
             });

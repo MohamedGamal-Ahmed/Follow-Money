@@ -92,5 +92,58 @@ final class PipelineDecider {
         }
     }
 
+    /**
+     * One inbox message as the import screen lists it, or null when it is not one to import, decided once with the
+     * batch's context (spec m3/m4). A movement the pipeline records is listed from its decision. A message it records
+     * nothing for is listed only when the legacy reading finds non-ledger work in it (a balance, a commitment update, a
+     * cancellation to review); the decision still goes with it, so it never becomes a ledger row. When the pipeline
+     * fails, the legacy reading is listed and the legacy parser writes it.
+     */
+    static SmsPreview importRow(Context ctx, String sender, String body, long receivedAt, long sentAt) {
+        if (body == null) return null;
+        Result decided = decide(ctx, CaptureRequest.inboxSms(sender, body, receivedAt, sentAt, false));
+        SmsPreview legacy = SmsPreview.parse(sender, body, receivedAt, sentAt);
+        if (decided instanceof Failed) {
+            if (legacy != null) legacy.failure = ((Failed) decided).reason;
+            return legacy;
+        }
+        Decided d = (Decided) decided;
+        if (d.decision.records) return SmsPreview.fromDecision(sender, body, receivedAt, sentAt, d.decision, d.observation, legacy);
+        if (legacy == null || legacy.isTransaction()) return null;
+        legacy.decision = d.decision; legacy.observation = d.observation;
+        return legacy;
+    }
+
+    /** The reading an import row is written with: the one it was listed with, or (a row built elsewhere) decided now. */
+    static Result forImport(ExpenseDb db, SmsPreview row) {
+        if (row.failure != null) return new Failed(row.failure);
+        if (row.decision != null && row.observation != null) return new Decided(row.decision, row.observation);
+        return decide(context(db, "import"), CaptureRequest.sms(row.sender, row.body, row.captureAt));
+    }
+
+    /**
+     * The decision an import row is written with, or null when the legacy parser writes it. A return listed before its
+     * charge was written finds that charge now, among the batch's own rows (origin import); nothing else is re-decided.
+     */
+    static PipelineDecision importDecision(ExpenseDb db, SmsPreview row, Result decided) {
+        if (!(decided instanceof Decided)) return null;
+        Decided d = (Decided) decided;
+        if (!d.decision.records || !"in".equals(d.decision.direction) || d.decision.offsetOfTransactionId != null) return d.decision;
+        try {
+            SQLiteDatabase sql = db.getWritableDatabase();
+            long observationId = ShadowStore.offsetOf(sql, "import", row.sender, row.captureAt, d.observation);
+            Long charge = observationId < 0 ? null : ShadowStore.transactionOf(sql, observationId);
+            return charge == null ? d.decision : d.decision.withOffset(charge, "REVIEW".equals(d.observation.decision));
+        } catch (RuntimeException | LinkageError unreadable) {
+            return d.decision;
+        }
+    }
+
+    /** Stores the import row's observation (origin import) or its failure note beside what was written. */
+    static void storeImport(ExpenseDb db, SmsPreview row, Result decided, CaptureResult.Write write) {
+        CaptureTransaction.store(db, "import", CaptureRequest.sms(row.sender, row.body, row.captureAt), decided,
+                write.reason, write.rowId >= 0 ? write.rowId : null);
+    }
+
     private PipelineDecider() {}
 }

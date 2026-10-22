@@ -43,6 +43,11 @@ final class PipelineDecision {
                 review || unlinkedOffset ? "REVIEW" : "AUTO", offsetOfTransactionId, unlinkedOffset);
     }
 
+    /** The same recording decision, now linked to the charge it returns (an expense offset, no longer waiting for the user). */
+    PipelineDecision withOffset(long chargeId, boolean pipelineReview) {
+        return record(pipelineReview, amountMinor, currency, direction, merchant, category, cardLast4, counterparty, chargeId, false);
+    }
+
     /** The legacy ledger kind for this direction. */
     String kind() { return "in".equals(direction) ? "income" : "expense"; }
 

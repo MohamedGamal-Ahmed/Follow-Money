@@ -359,10 +359,16 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      */
     CaptureResult.Write addHistoricalSmsObserved(SmsPreview row){
         lastCaptureEvent=null;lastCapturedId=-1;
+        // Known identities (capture evidence, import receipts, exclusions) are skipped before anything is decided or written.
         if(smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe)!=0)return null;
-        CaptureResult.Write write=addAutomaticCapture(row.sender,row.sender,row.body,row.captureAt,"SMS",row.receiptKeySafe?row.receivedAt:row.captureAt,false);
+        // The new pipeline's reading, as the row was listed; null when it failed and the legacy parser writes the row.
+        PipelineDecider.Result decided=PipelineDecider.forImport(this,row);
+        PipelineDecision decision=PipelineDecider.importDecision(this,row,decided);
+        // automaticCancellation=false: a historical cancellation waits for review and never archives a debit unattended.
+        CaptureResult.Write write=addAutomaticCapture(row.sender,row.sender,row.body,row.captureAt,"SMS",row.receiptKeySafe?row.receivedAt:row.captureAt,false,decision);
         rememberCapture(write.inserted?write.rowId:-1,write.event);
         ContentValues receipt=new ContentValues();receipt.put("unique_key",sha256(row.sender+"\n"+row.captureAt+"\n"+row.body));getWritableDatabase().insertWithOnConflict("sms_import_receipts",null,receipt,SQLiteDatabase.CONFLICT_IGNORE);
+        PipelineDecider.storeImport(this,row,decided,write);
         return write;
     }
 

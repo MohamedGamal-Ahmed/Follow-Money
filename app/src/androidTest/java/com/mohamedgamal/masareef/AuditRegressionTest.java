@@ -1447,7 +1447,7 @@ final class AuditRegressionTest {
 
     public void testImportBaselineCallerTransactionNeverReportsACommittedImport(){
         long t=at(LocalDate.now(),10);
-        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA PENDING",t);ok(row!=null);
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA CALLER",t);ok(row!=null); // not "pending": the pipeline reads that word as an unexecuted operation
         SQLiteDatabase sql=db.getWritableDatabase();
         long rows=db.transactionCount(),revision=db.changes(),value;
         sql.beginTransaction();
@@ -1599,6 +1599,50 @@ final class AuditRegressionTest {
         eq(result.offered,result.rows.size());
         eq(result.offered,result.created+result.matchedExisting+result.skippedDuplicate+result.excluded+result.refused+result.noLedgerChange);
         ok(result.survivingCreated<=result.created);
+    }
+
+    /**
+     * The owner's day, 22 Oct 2026 (tools/fixtures/owner-day-2026-10-22.tsv): messages 1-3 and 5 imported from the inbox,
+     * then 4 and 6 delivered live. The import decides with the new pipeline, discovers the sources silently, and ends with
+     * the same ledger as live capture: two internal transfers, one fee and one income, no standalone income.
+     */
+    public void testOwnerDayImportThenLiveEndsInTwoInternalTransfers(){
+        long morning=LocalDate.of(2026,10,22).atTime(6,47).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        long september=LocalDate.of(2026,9,25).atTime(10,0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        String[][] inbox={
+                {"HSBC","Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre",Long.toString(morning)},
+                {"BankMisr","تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ",Long.toString(morning+30_000L)},
+                {"BankMisr","تم تحويل 30.00 جنيه بنجاح إلى talda من حساب رقم xxx7392 عن طريق التحويل اللحظي",Long.toString(morning+10*60_000L)},
+                {"HSBC","From HSBC: 25SEP26 Phone Banking Transfer to ********0001 from HEBATALLAH SAMI EGP 87,650.00+ Avl Bal EGP 87,700.00",Long.toString(september)}};
+        PipelineDecider.Context batch=PipelineDecider.context(db,"import");
+        List<SmsPreview> rows=new java.util.ArrayList<>();
+        for(String[] m:inbox){
+            SmsPreview row=PipelineDecider.importRow(batch,m[0],m[1],Long.parseLong(m[2]),Long.parseLong(m[2]));
+            ok(row!=null&&row.isTransaction(),"Imported as a movement: "+m[1]);
+            ok(row.decision!=null&&row.decision.records,"Decided by the new pipeline: "+m[1]);
+            row.captureStatus=db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe);rows.add(row);
+        }
+        SmsPreview.selectForImport(rows);
+        ImportResult result=new ImportBatch(db).executeDetailed(rows);ok(result.committed,"Batch committed");
+        db.captureNotification("io.telda.app","Telda","تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية",morning+34*60_000L);
+        db.captureNotification("com.egyptianbanks.instapay","InstaPay","إستلام نقود لقد استلمت 4.00 جنيه من mo.gamalhsbc@instapay",morning+5*60_000L);
+        Long hsbc=null,misr=null,telda=null;
+        for(ExpenseDb.PaymentSource s:db.paymentSources()){
+            if("0001".equals(s.last4))hsbc=s.id;
+            if("7392".equals(s.last4))misr=s.id;
+            if("TELDA".equals(SourceIdentity.bank(s.name)))telda=s.id;
+        }
+        ok(hsbc!=null&&misr!=null&&telda!=null,"Sources HSBC 0001, Banque Misr 7392 and Telda discovered: "+db.paymentSources().size());
+        int transfers=0,fees=0,incomes=0;StringBuilder ledger=new StringBuilder();
+        for(ExpenseDb.Transaction tx:db.transactions()){
+            ledger.append(" | ").append(tx.kind).append(' ').append(tx.amountMinor).append(' ').append(tx.paymentSourceId).append("->").append(tx.destinationSourceId);
+            if("transfer".equals(tx.kind)&&tx.amountMinor==400&&hsbc.equals(tx.paymentSourceId)&&misr.equals(tx.destinationSourceId))transfers++;
+            else if("transfer".equals(tx.kind)&&tx.amountMinor==3000&&misr.equals(tx.paymentSourceId)&&telda.equals(tx.destinationSourceId))transfers++;
+            else if("expense".equals(tx.kind)&&tx.amountMinor==50)fees++;
+            else if("income".equals(tx.kind)&&tx.amountMinor==8765000)incomes++;
+            else throw new AssertionError("Unexpected row:"+ledger);
+        }
+        ok(transfers==2&&fees==1&&incomes==1&&db.transactionCount()==4,"Two internal transfers, a 0.50 fee and the 87,650 income:"+ledger);
     }
 
     public void testImportContractFreshRowIsCreatedWithItsSideEffects(){
@@ -1804,7 +1848,7 @@ final class AuditRegressionTest {
 
     public void testImportContractPendingCallerDetailCannotLookSuccessful(){
         long t=at(LocalDate.now(),10);
-        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA CONTRACT PENDING",t);ok(row!=null);
+        SmsPreview row=SmsPreview.parse("BANK","Card purchase EGP 600 at QA CONTRACT CALLER",t);ok(row!=null); // not "pending": the pipeline reads that word as an unexecuted operation
         SQLiteDatabase sql=db.getWritableDatabase();
         long rows=db.transactionCount(),revision=db.changes();ImportResult result;
         sql.beginTransaction();

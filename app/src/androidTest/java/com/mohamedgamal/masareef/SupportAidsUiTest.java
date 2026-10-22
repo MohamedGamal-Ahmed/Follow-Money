@@ -109,26 +109,9 @@ final class SupportAidsUiTest {
                 }catch(Exception error){throw new RuntimeException(error);}});
                 for(int i=0;i<100&&!"ready".equals(get(session,"phase"));i++){android.os.SystemClock.sleep(100);idle();}
                 ok("ready".equals(get(session,"phase")),"Synthetic inbox preview did not finish");
-                List<SmsImportActivity.RejectedSms> rejected=(List<SmsImportActivity.RejectedSms>)get(session,"rejected");
-                SmsImportActivity.RejectedSms sample=null;
-                for(SmsImportActivity.RejectedSms row:rejected){
-                    ok(!row.body.contains("OTP")&&!row.body.contains("cashback")&&!row.sender.startsWith("+"),"OTP/promotion/personal message offered for support");
-                    if(row.body.contains("SUPPORT_QA"))sample=row;
-                }
-                ok(sample!=null,"Unknown bank format absent from actual SMS scan");
+                // 0.4.0: the import lists only what the new pipeline reads; unknown formats are no longer offered from here.
+                ok(!has("أرسل صيغتها")&&!has("صيغة غير متعرّفة"),"The import still offers unknown formats for support");
                 ok(AppResources.database(target).transactionCount()==0,"Support preview wrote a financial transaction");
-                SmsImportActivity.RejectedSms selected=sample;
-                runner.runOnMainSync(()->{try{
-                    int index=((List<?>)get(session,"items")).size()+rejected.indexOf(selected);set(sms,"pageNumber",index/40);call(sms,"drawRows");
-                }catch(Exception error){throw new RuntimeException(error);}});idle();
-                ok(has("أرسل صيغتها"),"Rejected-message row has no format button");
-                runner.runOnMainSync(()->{try{Method report=SmsImportActivity.class.getDeclaredMethod("reportFormat",SmsImportActivity.RejectedSms.class);report.setAccessible(true);report.invoke(sms,selected);}catch(Exception error){throw new RuntimeException(error);}});idle();
-                ok(has("المرسل: HSBC")&&has("NAME"),"Redacted sender/name preview absent");
-                ok(!has("SECRET PERSON")&&!has("12345678"),"Raw financial identifiers in draft preview");shot(target,"04-redacted-message");
-                ok(setEdit(runner.getUiAutomation().getRootInActiveWindow(),"USER REVIEWED FORMAT"),"Redacted text is not editable");idle();
-                Intent format=interceptMail();
-                ok(format!=null&&format.getStringExtra(Intent.EXTRA_TEXT).contains("USER REVIEWED FORMAT")
-                        &&!format.getStringExtra(Intent.EXTRA_TEXT).contains("SECRET PERSON"),"Mail draft did not use edited text");
             }
             result.putString("stream","Support aids UI checks passed: "+checked+"; mode="+mode+"\n");
         }catch(Throwable error){status=0;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Support aids UI FAILED: "+trace);}

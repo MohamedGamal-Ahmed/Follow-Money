@@ -9,6 +9,14 @@ final class SmsPreview {
     boolean selected;
     boolean receiptKeySafe;
     int captureStatus;
+    /**
+     * The new pipeline's reading, computed once when the import lists the message and written exactly as listed:
+     * decision with its observation, or failure (the pipeline could not decide; the legacy parser writes it). Plain
+     * types so this class stays free of Android storage.
+     */
+    PipelineDecision decision;
+    ParserShadow.Observation observation;
+    String failure;
 
     private SmsPreview(String sender, String body, long receivedAt, long captureAt, String title, String category,
                        String currency, long amountMinor, String kind, boolean balance, boolean commitment) {
@@ -58,6 +66,19 @@ final class SmsPreview {
         if(commitment) return new SmsPreview(sender,body,when,captureAt,sender,"تحديث التزام · بدون تسجيل مصروف",
                 "",0,"commitment",false,true);
         return null;
+    }
+
+    /**
+     * A movement the new pipeline records, listed with its own name, category and amount. legacy, when the legacy
+     * reading also saw a balance or a commitment in the text, keeps those flags for the list.
+     */
+    static SmsPreview fromDecision(String sender, String body, long receivedAt, long sentAt, PipelineDecision decision,
+                                   ParserShadow.Observation observation, SmsPreview legacy) {
+        SmsPreview row=new SmsPreview(sender,body,receivedAt,CaptureIdentity.smsTimestamp(receivedAt,sentAt),decision.merchant,
+                decision.category,decision.currency,decision.amountMinor,decision.kind(),
+                legacy!=null&&legacy.balanceIncluded,legacy!=null&&legacy.commitmentIncluded);
+        row.decision=decision; row.observation=observation;
+        return row;
     }
 
     boolean isTransaction() { return "expense".equals(kind)||"income".equals(kind)||"transfer".equals(kind); }

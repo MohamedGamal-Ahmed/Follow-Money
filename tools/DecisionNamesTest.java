@@ -60,6 +60,20 @@ public final class DecisionNamesTest {
         same(row("BANK", "You sent EGP 42.00 to Butlers"), "AUTO|Butlers|تحويلات", "Sending money is a transfer");
         same(row("BANK", "Card purchase EGP 91.25 at KASHIER*BUTLERS & CO MALL"), "AUTO|Butlers|مقاهي", "The user's rule names the purchase category");
         ParserShadow.learning().setMerchantRules(List.of());
+        // The owner's day (spec task B): every message is a movement the pipeline records, and the device test that imports
+        // and captures them uses these exact texts.
+        try {
+            String device = java.nio.file.Files.readString(java.nio.file.Path.of("app/src/androidTest/java/com/mohamedgamal/masareef/AuditRegressionTest.java"));
+            List<String> day = java.nio.file.Files.readAllLines(java.nio.file.Path.of("tools/fixtures/owner-day-2026-10-22.tsv"));
+            same(day.size(), 7, "Six owner messages and a header");
+            for (String line : day.subList(1, day.size())) {
+                String[] f = line.split("\t", 5);
+                check(device.contains(f[4]), "Device test uses owner message " + f[0] + " verbatim");
+                ParserShadow.Observation o = "sms".equals(f[1]) ? observe(f[2], f[4]) :
+                        ParserShadow.observe(MessageNormalizer.Raw.notification(f[2], 0, f[3], f[4], null, null, null, null), "TEST", null, 1792656501960L, 1792656501960L);
+                check(ShadowDiff.newRecords(o.decision), "Owner message " + f[0] + " is a movement: " + o.decision + " " + o.reasons);
+            }
+        } catch (java.io.IOException missing) { check(false, "Owner day fixture: " + missing); }
         if (!failures.isEmpty()) throw new AssertionError(failures.size() + " of " + checks + " failed:\n" + String.join("\n", failures));
         System.out.println("Decision names checks passed: " + checks);
     }

@@ -1,0 +1,7 @@
+n	channel	source	label	body
+1	sms	HSBC	HSBC	Your HSBC Account ********0001 was debited with IPN outward transfer for EGP 4.50 on 22-10-2026 06:46 to 7392 with reference 12fb34cc. For further details, please contact HSBC call centre
+2	sms	BankMisr	BankMisr	تم اضافة مبلغ 4EGP الى حساب رقم xxx7392 فى 22-Oct-2026 عن طريق التحويل اللحظي من MOHAMED GAMAL ABDELAZIZ
+3	sms	BankMisr	BankMisr	تم تحويل 30.00 جنيه بنجاح إلى talda من حساب رقم xxx7392 عن طريق التحويل اللحظي
+4	notification	io.telda.app	Telda	تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية
+5	sms	HSBC	HSBC	From HSBC: 25SEP26 Phone Banking Transfer to ********0001 from HEBATALLAH SAMI EGP 87,650.00+ Avl Bal EGP 87,700.00
+6	notification	com.egyptianbanks.instapay	InstaPay	إستلام نقود لقد استلمت 4.00 جنيه من mo.gamalhsbc@instapay
