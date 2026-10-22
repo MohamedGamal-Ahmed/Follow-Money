@@ -124,6 +124,12 @@ final class ParsingPolicy {
             "بسعر|السعر الجديد|سعر اشتراك|الحصول علي قرض|قرض (?:شخصي )?خلال|للتقديم|النقاط|ترحيبي|ستحصل|اشتر الان|" +
             "(?:خصم|كاش ?باك|cashback|save) ?\\d+ ?%|\\d+ ?% ?(?:off|خصم|كاش ?باك|cashback|discount)|" +
             "apply now|\\bget\\b|\\bwin\\b|enjoy|cashback|\\boffer\\b|promo|reward|eligible|\\bsave\\b|upgrade|price will change|new benefits|subscription price";
+    /**
+     * «pending» as the operation's status ("is pending", "pending payment", "Status: pending", a message that opens with
+     * it, «قيد التنفيذ»); the bare word inside a merchant name ("PENDING COFFEE") is not a status.
+     */
+    static final String PENDING_STATUS = "\\b(?:is|are|remains?|still) pending\\b|\\bpending (?:transaction|payment|authori[sz]ation)s?\\b|" +
+            "^\\W*pending\\b|\\bstatus\\s*:?\\s*pending\\b|(?<!\\p{L})قيد (?:ال)?(?:تنفيذ|انتظار|مراجعه)(?!\\p{L})";
     /** Payment wording about the future or a request; a completed event in the same message wins over it. */
     static final String FUTURE_OR_REQUEST = "(?<!\\p{L})(?:و)?(?:سيتم|سوف يتم|سوف) (?:خصم|تحويل|سداد|دفع|سحب|تنفيذ)|هيتخصم|نذكرك|بنفكرك|" +
             "(?:يرجي|برجاء) (?:دفع|سداد)|طلب سداد|في انتظار موافقتك|" +
@@ -132,7 +138,7 @@ final class ParsingPolicy {
             // Statement and due wording: a future obligation, never a movement ("Your minimum payment is … to be paid by …").
             "\\b(?:to|must|should) be (?:paid|settled)\\b|\\bminimum (?:amount|payment|due)\\b|\\b(?:statement|outstanding|closing) balance\\b|" +
             "(?<!\\p{L})(?:ال)?حد (?:ال)?ادني\\s+(?:لل)?(?:سداد|دفع|مطلوب|مستحق)|(?<!\\p{L})(?:تاريخ|موعد)\\s+(?:ال)?(?:استحقاق|سداد)|(?<!\\p{L})(?:ال)?مستحق\\p{L}*\\s+(?:لل)?(?:سداد|دفع)|" +
-            "\\bscheduled\\b|\\bpending\\b|payment request|accept or decline|" +
+            "\\bscheduled\\b|" + PENDING_STATUS + "|payment request|accept or decline|" +
             "(?<!\\p{L})مستحق(?:ه)? (?:غدا|اليوم|في|بتاريخ|خلال)|تاريخ الاستحقاق|(?<!\\p{L})يستحق";
     static final String UNSUCCESSFUL = "declined|\\bfailed\\b|unsuccessful|could not|insufficient funds|\\bcancel(?:l)?ed\\b|" +
             "تم رفض|رفضت|مرفوض|(?<!\\p{L})لم (?:يتم|تتم)|فشل|تعذر|غير ناجح|تم الغاء";
