@@ -58,6 +58,15 @@ public final class MessageClassifierTest {
             {"Your available balance is EGP 12,000.00", "BALANCE_INQUIRY", "IGNORE"},
             {"Your package has shipped. Order 77881.", "OTHER", "IGNORE"},
             {"Support case EGP-2211 closed.", "OTHER", "IGNORE"},
+            // «pending» is a status only in status wording, never inside a merchant name (0.4.1 item 1).
+            {"Paid EGP 120 at PENDING COFFEE", "TRANSACTION", "EXTRACT"},
+            {"Your transaction of EGP 120 at X is pending", "REMINDER", "IGNORE"},
+            {"Payment of EGP 120 at X still pending", "REMINDER", "IGNORE"},
+            {"Pending authorization EGP 120 at X", "REMINDER", "IGNORE"},
+            {"Pending: EGP 120 at X", "REMINDER", "IGNORE"},
+            {"Payment of EGP 120 at X. Status: pending", "REMINDER", "IGNORE"},
+            {"عملية بمبلغ 120 جنيه لدى متجر النور قيد التنفيذ", "REMINDER", "IGNORE"},
+            {"تحويل 120 جنيه قيد المراجعة", "REMINDER", "IGNORE"},
         };
         for (String[] probe : heldOut) {
             MessageClassifier.Result result = classify(probe[0]);

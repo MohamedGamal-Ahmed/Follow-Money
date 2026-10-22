@@ -254,7 +254,7 @@ final class FeatureAuditTest {
         SQLiteDatabase sql=db.getWritableDatabase();
         sql.execSQL("DROP TABLE commitment_payments");sql.execSQL("DROP TABLE commitment_cycles");
         sql.execSQL("ALTER TABLE recurring DROP COLUMN settlement_key");sql.setVersion(24);db.close();db=new ExpenseDb(context);
-        eq(25,db.getWritableDatabase().getVersion());eq(2,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(due));
+        eq(ExpenseDb.SCHEMA_VERSION,db.getWritableDatabase().getVersion());eq(2,db.recurringById(plan).paidCount);ok(db.recurringById(plan).nextDue.equals(due));
         eq("legacy:"+plan,db.commitmentIdentity(plan));eq(identity,db.rowIdentityKey(tx));eq(body,db.sourceEvidence(tx).get(0).body);
         eq(5000,db.transactionById(tx).amountMinor);eq(0,countRows("commitment_cycles"));eq(0,countRows("commitment_payments"));
     }

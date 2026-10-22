@@ -80,6 +80,8 @@ public final class TransactionExtractorTest {
             // Telda's receipt names the channel after «من خلال»: no merchant, an instant transfer in.
             {"تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", "AUTO", "3000", "EGP", "in", null, null, null, null, null},
             {"استلمت 30 ج.م. من خلال شبكة المدفوعات اللحظية", "AUTO", "3000", "EGP", "in", null, null, null, null, null},
+            // «pending» inside a merchant name is not a status (0.4.1 item 1).
+            {"Paid EGP 120 at PENDING COFFEE", "AUTO", "12000", "EGP", "out", "pending coffee", null, null, null, null},
         };
         for (String[] probe : heldOut) {
             TransactionExtractor.Extraction x = run(probe[0], received);
@@ -88,6 +90,7 @@ public final class TransactionExtractorTest {
             for (int k = 0; k < got.length; k++) same(got[k], probe[k + 1], "Held-out field " + k + ": " + probe[0] + " " + x.reasons);
         }
         same(run("إستلام نقود لقد استلمت 4.00 جنيه من mo.gamalhsbc@instapay", received).counterparty, "mo.gamalhsbc@instapay", "InstaPay address is the counterparty");
+        check(!"AUTO".equals(run("Your transaction of EGP 120 at X is pending", received).decision), "A pending transaction is not recorded");
         same(run("تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", received).movementKind, "instant_transfer_in", "IPN network phrase is an instant transfer");
         // Folding keeps a map to the original spelling, so the merchant surface keeps its letters.
         same(run("تم دفع 50 جنيه لدى \"مَكْتَبَة النور\"", received).merchantSurface, "مَكْتَبَة النور", "Surface keeps harakat");

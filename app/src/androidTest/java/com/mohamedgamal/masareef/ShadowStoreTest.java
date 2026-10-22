@@ -217,6 +217,37 @@ final class ShadowStoreTest {
             CaptureResult next = db.captureSms("QABANK", "Paid EGP 46.00 at \"QA Kiosk\". Card ****1234.", t + 3_700_000L);
             check(next.transaction != null && "AUTO".equals(first(sql, "SELECT decision FROM shadow_observations WHERE transaction_id=" + next.transaction.id)), "The next message is decided by the pipeline again");
             check(db.transactionById(kept) != null, "Earlier rows stay");
+            // 10f0. Each guard alone (0.4.1 item 4): a message the pipeline decides AUTO, held by exactly one legacy guard,
+            // records no ledger row and its own observation names that guard; the notice also records a capture event.
+            // UNSUCCESSFUL and NOTICE are absolute.
+            String[][] alone = {
+                    {"UNSUCCESSFUL", "Transfer EGP 331 from account ending 1111 will be reversed"},
+                    {"NOTICE", "Payment EGP 332 from account ending 1111 reversed"}};
+            // FUTURE_ONLY yields to an AUTO decision with a completed event outside future wording (reviewer, 23 Oct 2026):
+            // the mixed alert is one purchase, not an installment, and nothing notes a guard on it.
+            long mixedAt = t + 3_940_000L, beforeMixed = db.transactionCount();
+            CaptureResult mixed = db.captureSms("QAGUARD", "Paid EGP 333 at QA SHOP. Your installment will be debited tomorrow", mixedAt);
+            String mixedSeen = first(sql, "SELECT decision || '/' || reasons FROM shadow_observations WHERE origin='live' AND source='QAGUARD' AND received_at=" + mixedAt);
+            check(mixed.transaction != null && db.transactionCount() == beforeMixed + 1 && mixed.transaction.amountMinor == 33300
+                    && "expense".equals(mixed.transaction.kind) && !"أقساط".equals(mixed.transaction.category),
+                    "A completed purchase with a future installment note is one purchase: " + (mixed.transaction == null ? mixed.reason : mixed.transaction.category));
+            check(mixedSeen != null && mixedSeen.startsWith("AUTO/") && !mixedSeen.contains("LEGACY_GUARD"), "No guard noted on the recorded purchase: " + mixedSeen);
+            // A purely future message records nothing: the pipeline itself ignores it (FUTURE_ONLY), so no legacy guard runs.
+            long futureAt = t + 3_945_000L, beforeFuture = db.transactionCount();
+            CaptureResult future = db.captureSms("QAGUARD", "Your installment of EGP 333 will be debited tomorrow", futureAt);
+            String futureSeen = first(sql, "SELECT decision || '/' || reasons FROM shadow_observations WHERE origin='live' AND source='QAGUARD' AND received_at=" + futureAt);
+            check(future.transaction == null && db.transactionCount() == beforeFuture, "A purely future message records nothing: " + future.reason);
+            check(futureSeen != null && futureSeen.startsWith("IGNORE/") && futureSeen.contains("FUTURE_ONLY"), "The pipeline holds it as FUTURE_ONLY: " + futureSeen);
+            for (int g = 0; g < alone.length; g++) {
+                long at = t + 3_950_000L + g * 1000L, rowsBefore = db.transactionCount();
+                long events = count(sql, "SELECT COUNT(*) FROM capture_events");
+                CaptureResult held = db.captureSms("QAGUARD", alone[g][1], at);
+                String seen = first(sql, "SELECT decision || '/' || reasons FROM shadow_observations WHERE origin='live' AND source='QAGUARD' AND received_at=" + at);
+                check(held.transaction == null && db.transactionCount() == rowsBefore, alone[g][0] + " alone records no ledger row: " + held.reason);
+                check(seen != null && seen.startsWith("AUTO/") && seen.endsWith(",LEGACY_GUARD:" + alone[g][0]), alone[g][0] + " alone is noted on an AUTO decision: " + seen);
+                check(count(sql, "SELECT COUNT(*) FROM capture_events") == events + ("NOTICE".equals(alone[g][0]) ? 1 : 0),
+                        alone[g][0] + " alone: a capture event only for the notice");
+            }
             // 10f. Legacy guards stand when the pipeline records: an unsuccessful or notice message is never a ledger row,
             // and the observation says which guard held it (owner review, 22 Oct 2026).
             long guarded = db.transactionCount();

@@ -37,6 +37,8 @@ final class PipelineDecider {
         final ExpenseDb db;
         final String origin;
         private boolean loaded;
+        /** Import scan: messages the pipeline decided record nothing for (IGNORE, UNUNDERSTOOD, INFO_ONLY; user ignore rules among them). */
+        int notTransactions;
         Context(ExpenseDb db, String origin) { this.db = db; this.origin = origin; }
 
         private void load() {
@@ -89,7 +91,7 @@ final class PipelineDecider {
             try { balance = v.get("balance_minor") == null ? null : Long.valueOf(v.get("balance_minor")); } catch (NumberFormatException unreadable) { balance = null; }
             return new Decided(PipelineDecision.record(review, amount, v.get("currency"), direction, DecisionNames.merchant(v, o.movementKind, request.label),
                     DecisionNames.category(v, o.movementKind, direction, request.label), PipelineDecision.sourceLast4(v), v.get("counterparty"), offsetOf, offset && offsetOf == null)
-                    .withBalance(balance, v.get("balance_currency")), o);
+                    .withBalance(balance, v.get("balance_currency")).withCompletedEvent(o.reasons.contains("COMPLETED_EVENT")), o);
         } catch (RuntimeException | LinkageError failed) {
             return new Failed("EXCEPTION:" + failed.getClass().getSimpleName()); // the legacy parser decides this message
         }
@@ -112,6 +114,7 @@ final class PipelineDecider {
         }
         Decided d = (Decided) decided;
         if (d.decision.records) return SmsPreview.fromDecision(sender, body, receivedAt, sentAt, d.decision, d.observation, legacy);
+        ctx.notTransactions++;
         if (legacy == null || legacy.isTransaction()) return null;
         legacy.decision = d.decision; legacy.observation = d.observation;
         return legacy;
@@ -154,6 +157,32 @@ final class PipelineDecider {
             return charge == null ? d.decision : d.decision.withOffset(charge, "REVIEW".equals(d.observation.decision));
         } catch (RuntimeException | LinkageError unreadable) {
             return d.decision;
+        }
+    }
+
+    /**
+     * A return the batch listed before its charge found no charge when it was written (a return looks only at rows
+     * already stored). Once every row of the batch is written, and before its repair, such a return looks again and is
+     * linked to the charge it returns, review as the pipeline decided it, as if the charge had been listed first.
+     */
+    static void linkLateCharge(ExpenseDb db, SmsPreview row, Long transactionId) {
+        PipelineDecision d = row.decision;
+        if (transactionId == null || d == null || row.observation == null || !d.records || !"in".equals(d.direction) || d.offsetOfTransactionId != null) return;
+        try {
+            if (db.reimbursedExpense(transactionId) != null) return;
+            SQLiteDatabase sql = db.getWritableDatabase();
+            long observationId = ShadowStore.offsetOf(sql, "import", row.sender, row.captureAt, row.observation);
+            Long charge = observationId < 0 ? null : ShadowStore.transactionOf(sql, observationId);
+            if (charge == null || charge.longValue() == transactionId) return;
+            // Checked here, not caught: a refused link inside the batch's transaction would roll the whole batch back.
+            ExpenseDb.Transaction income = db.transactionById(transactionId), expense = db.transactionById(charge);
+            if (income == null || expense == null || !"income".equals(income.kind) || !"expense".equals(expense.kind) || !income.currency.equals(expense.currency)
+                    || MoneyFlow.isCashWithdrawal(expense.kind, expense.category) || expense.amountMinor - db.reimbursedOf(charge) <= 0) return;
+            db.linkReimbursement(transactionId, charge);
+            if (d.unlinkedOffset) sql.execSQL("UPDATE transactions SET needs_review=? WHERE id=?",
+                    new Object[]{"REVIEW".equals(row.observation.decision) ? 1 : 0, transactionId});
+        } catch (RuntimeException | LinkageError unreadable) {
+            // The return stays as written, waiting for the user to link it.
         }
     }
 

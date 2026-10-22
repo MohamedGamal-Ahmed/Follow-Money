@@ -35,6 +35,21 @@ final class SmsImportUiTest{
     private void awaitDone()throws Exception{for(int i=0;i<300;i++){runner.waitForIdleSync();Object session=field(activity,"session");String phase=(String)field(session,"phase");if("done".equals(phase))return;
         // Automatic import passes through «ready» while it reads pending cancellations; only a review session stops there.
         if("ready".equals(phase)&&(Boolean)field(session,"reviewBeforeImport")||"error".equals(phase))throw new AssertionError("Automatic import stopped at "+phase);Thread.sleep(100);}throw new AssertionError("Import did not finish");}
+    /** Inbox messages the pipeline decides record nothing for (IGNORE, UNUNDERSTOOD, INFO_ONLY), read straight from the provider. */
+    private int notTransactions(Context target){
+        int count=0;
+        try(android.database.Cursor c=target.getContentResolver().query(android.provider.Telephony.Sms.Inbox.CONTENT_URI,new String[]{android.provider.Telephony.Sms.ADDRESS,android.provider.Telephony.Sms.BODY,android.provider.Telephony.Sms.DATE,android.provider.Telephony.Sms.DATE_SENT},null,null,null)){
+            PipelineDecider.Context decisions=PipelineDecider.context(db,"import");
+            while(c.moveToNext()){if(c.getString(1)==null)continue;PipelineDecider.Result r=PipelineDecider.decide(decisions,CaptureRequest.inboxSms(c.getString(0),c.getString(1),c.getLong(2),c.getLong(3),false));
+                if(r instanceof PipelineDecider.Decided&&!((PipelineDecider.Decided)r).decision.records)count++;}
+        }
+        return count;
+    }
+    private void counts(int added,int skipped,int before){
+        String expected="أُضيفت: "+added+"\nتم تخطيها (ليست معاملات): "+skipped+"\nمستوردة من قبل: "+before;
+        if(find(activity.getWindow().getDecorView(),expected)==null){View shown=findPrefix(activity.getWindow().getDecorView(),"أُضيفت: ");
+            throw new AssertionError("Import counts not shown: "+expected.replace('\n','|')+" shown: "+(shown==null?"none":((TextView)shown).getText().toString().replace('\n','|')));}checked++;
+    }
     private void shot(String name)throws Exception{runner.waitForIdleSync();Thread.sleep(600);android.graphics.Bitmap b=runner.getUiAutomation().takeScreenshot();if(b==null)throw new AssertionError("No screenshot");try(FileOutputStream out=new FileOutputStream(new File(captures,name+".png"))){ok(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}}
     @SuppressWarnings("unchecked") void run(boolean dark,float scale){
         int status=-1;Bundle result=new Bundle();android.content.res.Configuration original=null;
@@ -48,7 +63,10 @@ final class SmsImportUiTest{
             if(scale>1)main(()->{android.content.res.Configuration c=new android.content.res.Configuration(activity.getResources().getConfiguration());c.fontScale=scale;activity.getResources().updateConfiguration(c,activity.getResources().getDisplayMetrics());call("show");});
             ok((Boolean)field(activity,"dark")==dark);shot("01-period");ok(find(activity.getWindow().getDecorView(),"مراجعة الرسائل قبل الحفظ (اختياري)")!=null);
             click("من تاريخ تختاره");shot("00-calendar");runner.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);runner.waitForIdleSync();ok("idle".equals(field(field(activity,"session"),"phase")));
-            click("كل الرسائل");awaitDone();ImportResult first=(ImportResult)field(field(activity,"session"),"imported");ok(first!=null&&first.committed&&first.survivingCreated>0);ok(db.transactionCount()>0);shot("02-result");
+            click("كل الرسائل");awaitDone();ImportResult first=(ImportResult)field(field(activity,"session"),"imported");ok(first!=null&&first.committed&&first.survivingCreated>0);ok(db.transactionCount()>0);
+            // 0.4.1 item 2: added, skipped as not transactions, and imported before are three separate numbers.
+            int skipped=notTransactions(target);ok(skipped>0);counts(first.created,skipped,0);shot("02-result");
+            int recordingTaken=0;for(Object item:(List<?>)field(field(activity,"session"),"items")){SmsPreview r=(SmsPreview)item;if(r.selected&&(r.decision==null||r.decision.records))recordingTaken++;}
             if(new CaptureEvents(db).pendingHistory(0,Long.MAX_VALUE).isEmpty()){StringBuilder why=new StringBuilder("No pending historical cancellation; now="+System.currentTimeMillis());
                 try(android.database.Cursor c=db.getReadableDatabase().rawQuery("SELECT status,received_at,source FROM capture_events",null)){while(c.moveToNext())why.append(" | ").append(c.getString(0)).append(" at ").append(c.getLong(1)).append(" via ").append(c.getString(2));}
                 for(Object item:(List<?>)field(field(activity,"session"),"items")){SmsPreview r=(SmsPreview)item;if("correction".equals(r.kind))why.append(" | row status ").append(r.captureStatus).append(r.selected?" selected ":" unselected ").append(r.captureAt);}
@@ -56,6 +74,8 @@ final class SmsImportUiTest{
             ok(findPrefix(activity.getWindow().getDecorView(),"مراجعة الإلغاء · ")!=null);
             main(()->{View pending=findPrefix(activity.getWindow().getDecorView(),"مراجعة الإلغاء · ");pending.getParent().requestChildFocus(pending,pending);});shot("02b-pending-cancellation");
             long before=db.transactionCount();click("استيراد فترة أخرى");click("كل الرسائل");awaitDone();ok(before==db.transactionCount());ImportResult repeated=(ImportResult)field(field(activity,"session"),"imported");ok(repeated==null||repeated.committed&&repeated.created==0);
+            // Every transaction message the first batch took is now imported before; the not-transaction count does not change.
+            counts(0,skipped,recordingTaken);
             click("تفاصيل الرسائل");ok("details".equals(field(field(activity,"session"),"phase")));ok(field(activity,"save")==null);shot("03-details");
             main(()->{Method m=SmsImportActivity.class.getDeclaredMethod("showOriginal",SmsPreview.class);m.setAccessible(true);m.invoke(activity,SmsPreview.parse("QA BANK","Card purchase at QA IMPORT EGP 15.00",System.currentTimeMillis()));});shot("04-source");
             runner.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);runner.waitForIdleSync();

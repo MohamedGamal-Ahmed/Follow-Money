@@ -57,6 +57,18 @@ public final class MissedMessagesTest {
         ParserShadow.Observation seen = ParserShadow.observe(app, "TEST", null, 1792656501960L, 1792656501960L);
         check(!ShadowDiff.newRecords(seen.decision) && MissedMessages.listed("Telda", seen, MessageNormalizer.normalize(app).text, learning, Set.of()),
                 "A selected app's unread notification is listed: " + seen.decision + "/" + seen.type);
+        // 0.4.1 review: a message a legacy guard kept out of the ledger (LEGACY_GUARD:*) is a possible miss, with the same
+        // sender and amount conditions; the same message recorded is not.
+        String guarded = "Transfer EGP 331 from account ending 1111 will be reversed";
+        ParserShadow.Observation held = ParserShadow.observe(MessageNormalizer.Raw.sms("HSBC", guarded), "TEST", null, 1792656501960L, 1792656501960L);
+        String heldText = MessageNormalizer.normalize(MessageNormalizer.Raw.sms("HSBC", guarded)).text;
+        check(ShadowDiff.newRecords(held.decision), "The guarded fixture is a recording decision: " + held.decision);
+        check(MissedMessages.listed("HSBC", held, heldText, learning, BANKS, true), "A guarded message from the user's bank is listed");
+        check(!MissedMessages.listed("HSBC", held, heldText, learning, BANKS, false), "The same message, recorded, is not");
+        check(!MissedMessages.listed("NBE", held, heldText, learning, BANKS, true), "A guarded message from a bank the user has no account with is not");
+        String zero = "Transfer EGP 0.00 from account ending 1111 will be reversed";
+        check(!MissedMessages.listed("HSBC", held, MessageNormalizer.normalize(MessageNormalizer.Raw.sms("HSBC", zero)).text, learning, BANKS, true),
+                "A guarded message naming no amount above zero is not");
         if (!failures.isEmpty()) throw new AssertionError(failures.size() + " of " + checks + " failed:\n" + String.join("\n", failures));
         System.out.println("Missed messages checks passed: " + checks);
     }

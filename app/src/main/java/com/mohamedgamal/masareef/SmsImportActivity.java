@@ -152,6 +152,7 @@ public final class SmsImportActivity extends Activity {
         }else if("done".equals(session.phase)){
             TextView done=text("اكتمل الاستيراد",22);done.setTypeface(font,Typeface.BOLD);page.addView(done);
             ImportResult imported=session.imported;
+            page.addView(text("أُضيفت: "+(imported==null?0:imported.created)+"\nتم تخطيها (ليست معاملات): "+session.notTransactions+"\nمستوردة من قبل: "+session.importedBefore,16));
             if(imported==null||imported.offered==0){
                 page.addView(text("لم نعتمد أي رسالة محددة؛ لم تتغير العمليات.",16));
             }else{
@@ -293,6 +294,8 @@ public final class SmsImportActivity extends Activity {
         final List<SmsPreview> items=new ArrayList<>();
         volatile String phase="idle",error="",startLabel="";
         volatile int total,scanned,skipped;
+        /** Not transactions: the pipeline recorded nothing for them, or the user excluded them before. Imported before: already recorded. */
+        volatile int notTransactions,importedBefore;
         boolean reviewBeforeImport;
         /** What the approved batch actually did; null until a committed batch reports one. */
         volatile ImportResult imported;
@@ -310,7 +313,7 @@ public final class SmsImportActivity extends Activity {
         }
         synchronized void cancelScan(){if("scan".equals(phase)){cancelled=true;generation++;phase="idle";}}
         synchronized void start(LocalDate start) {
-            cancelled=false;final int token=++generation;items.clear();total=0;scanned=0;skipped=0;imported=null;phase="scan";
+            cancelled=false;final int token=++generation;items.clear();total=0;scanned=0;skipped=0;notTransactions=0;importedBefore=0;imported=null;phase="scan";
             startLabel=start==null?"كل الرسائل":start.toString();
             long since=start==null?0:start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
             long until=System.currentTimeMillis();rangeStart=since;rangeEnd=Long.MAX_VALUE;pending=java.util.Collections.emptyList();
@@ -334,7 +337,8 @@ public final class SmsImportActivity extends Activity {
                         if(r!=null){r.receiptKeySafe=r.canUseReceiptKey(sentKeys);r.captureStatus=readDb.smsCaptureStatus(r.sender,r.body,r.receivedAt,r.captureAt,r.receiptKeySafe);candidates.add(r);}
                         scanned++;if(scanned%25==0)publish(false);
                     }
-                    synchronized(this){if(cancelled||token!=generation)return;items.addAll(candidates);phase="ready";if(!reviewBeforeImport){SmsPreview.selectForImport(items);apply();}}
+                    int excludedBefore=0,recordedBefore=0;for(SmsPreview r:candidates){if(r.decision!=null&&!r.decision.records)continue;if(r.captureStatus==2)excludedBefore++;else if(r.captureStatus==1)recordedBefore++;}
+                    synchronized(this){if(cancelled||token!=generation)return;notTransactions=decisions.notTransactions+excludedBefore;importedBefore=recordedBefore;items.addAll(candidates);phase="ready";if(!reviewBeforeImport){SmsPreview.selectForImport(items);apply();}}
                     publish(true);
                 } catch(RuntimeException e){if(token==generation){error="تعذر الفحص. راجع إذن SMS وأعد المحاولة؛ لم نحفظ بيانات الفحص.";phase="error";publish(true);}}
             });
