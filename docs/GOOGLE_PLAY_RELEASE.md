@@ -14,7 +14,7 @@ Registration/payment is complete per the owner; account verification is pending.
 - Review found that commitment pages closed before queued writes completed. They now close only after a successful write, retain the draft with an inline error on rejection, and suppress repeated submissions while pending. A late completion cannot close a different page.
 - The unified UI matrix is now included in emulator CI; local runners remain restricted to disposable emulators. Existing phone data is not a test fixture.
 - APK application ID and signing certificate must match the installed variant for an in-place update. Beta, original debug and Play-signed installations are distinct; a version number alone does not establish compatibility. Keep a password-encrypted full backup before phone acceptance.
-- Remaining publication gates: final phone/background and permission acceptance, API 26 runtime checks, manual TalkBack coverage, portable signing-key recovery, final store screenshots/reviewer video, Console declarations and the applicable closed test. Account verification does not approve the app or its SMS exception.
+- Remaining publication gates: final phone/background and permission acceptance, API 26 runtime checks, manual TalkBack coverage, portable signing-key recovery, uploading the prepared store media/reviewer video, Console declarations and the applicable closed test. Account verification does not approve the app or its SMS exception.
 
 | Item | Evidence / remaining action |
 | --- | --- |
@@ -26,7 +26,7 @@ Registration/payment is complete per the owner; account verification is pending.
 | Release diagnostics | Developer review entry is debug-only; release uses R8. Verify release APK/Dex for audit classes, debug entry points and sensitive strings. Local financial review is not the same as basic support app/device metadata. |
 | Signing | First-publication upload key generated locally outside Git; password protected with Windows DPAPI. AAB signature verification passed. Key backup/recovery and Play App Signing setup remain owner actions. |
 | Financial features | Declare actual personal-finance/budgeting functionality. Recording debts/installments is bookkeeping; the app does not issue loans, execute payments or fetch bank balances. Verify available Console choices. |
-| Store listing | Draft Arabic/English text below. Synthetic screenshots, final icon/feature graphic and reviewer demo video are pending. |
+| Store listing | Draft Arabic/English text below. Icon, Arabic/English feature graphics, five 9:16 synthetic screenshots and the reviewer video were prepared on 22 October (see the media checkpoint below); upload and Console acceptance are pending. |
 | Reviewer access | No app login. Provide synthetic SMS instructions/video; do not expect a reviewer to have Egyptian bank SMS. |
 | Financial QA | Re-run synthetic database/reconciliation checks. Historical financial-audit claims, including the previously mentioned inter-account difference and repair dry run, need a separate local evidence review after timestamp correction. No phone export or repair is authorized by this publishing task. |
 | Account setup | Registration and USD 25 payment reported complete on 21 October; details under review. Confirm account type, account/device verification, countries, pricing, target audience and content rating. A new personal account requires the 12-tester/14-day closed test; the old Gmail date is irrelevant. |
@@ -131,6 +131,14 @@ Use a disposable emulator with invented bank/card/amount data. Never record a re
 6. Privacy: open the exact policy from Help and Data/Privacy; check Arabic readability and scrolling. Verify exported CSV excludes original SMS text, and explain that deleting app data cannot delete external files.
 7. Release: no developer review tools; basic support metadata contains no ledger/SMS. Financial totals, refunds, own-account transfers and estimated balances need synthetic regression checks.
 8. Provide the reviewer video link and tested navigation instructions in Console; do not claim automated reviewer SMS delivery if it has not been tested.
+
+### Reviewer video and store media — 22 October 2026
+
+- Release APK 0.4.1 / code 11 from `main` was installed on a freshly wiped emulator (API 36 Google Play image); no phone database, backup or snapshot was used. All bank, card, merchant and amount data is invented (`***1234`, QA/DEMO merchants).
+- Reviewer video (2:59, silent, 1080x2400): SMS disclosure before the system prompt, live debit/credit capture, historical import preview with an unselected row and duplicate-free re-import, masked misread report as an email draft only, Android revoke with no further capture while manual entry works, privacy policy and deleting all local data. Each step was checked in the app; idle automation time was trimmed and the result sped up 1.18x.
+- Store media: 512x512 icon (unchanged launcher design), Arabic/English 1024x500 feature graphics from the current Home screen, and five 1080x1920 screenshots (Home, Transactions, import preview, category analytics, transaction details). Sizes match the Play limits; Console acceptance is not yet confirmed.
+- Reviewer instructions use the same `adb emu sms send` messages and state that app lock is optional and off by default. The emulator shows SMS times one hour after the status-bar clock because the app uses the emulator modem's sent timestamp.
+- Video, instructions and media are local (`.tmp/play-review/`, `release/play-store/2026-10-22/`) and excluded from Git; the owner uploads them. Onboarding still shows a real retail brand as an example, which should be reviewed before publication.
 
 ## Official sources checked 12 October 2026
 
