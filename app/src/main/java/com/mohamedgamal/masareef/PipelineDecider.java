@@ -160,6 +160,32 @@ final class PipelineDecider {
         }
     }
 
+    /**
+     * A return the batch listed before its charge found no charge when it was written (a return looks only at rows
+     * already stored). Once every row of the batch is written, and before its repair, such a return looks again and is
+     * linked to the charge it returns, review as the pipeline decided it, as if the charge had been listed first.
+     */
+    static void linkLateCharge(ExpenseDb db, SmsPreview row, Long transactionId) {
+        PipelineDecision d = row.decision;
+        if (transactionId == null || d == null || row.observation == null || !d.records || !"in".equals(d.direction) || d.offsetOfTransactionId != null) return;
+        try {
+            if (db.reimbursedExpense(transactionId) != null) return;
+            SQLiteDatabase sql = db.getWritableDatabase();
+            long observationId = ShadowStore.offsetOf(sql, "import", row.sender, row.captureAt, row.observation);
+            Long charge = observationId < 0 ? null : ShadowStore.transactionOf(sql, observationId);
+            if (charge == null || charge.longValue() == transactionId) return;
+            // Checked here, not caught: a refused link inside the batch's transaction would roll the whole batch back.
+            ExpenseDb.Transaction income = db.transactionById(transactionId), expense = db.transactionById(charge);
+            if (income == null || expense == null || !"income".equals(income.kind) || !"expense".equals(expense.kind) || !income.currency.equals(expense.currency)
+                    || MoneyFlow.isCashWithdrawal(expense.kind, expense.category) || expense.amountMinor - db.reimbursedOf(charge) <= 0) return;
+            db.linkReimbursement(transactionId, charge);
+            if (d.unlinkedOffset) sql.execSQL("UPDATE transactions SET needs_review=? WHERE id=?",
+                    new Object[]{"REVIEW".equals(row.observation.decision) ? 1 : 0, transactionId});
+        } catch (RuntimeException | LinkageError unreadable) {
+            // The return stays as written, waiting for the user to link it.
+        }
+    }
+
     /** Stores the import row's observation (origin import) or its failure note beside what was written. */
     static void storeImport(ExpenseDb db, SmsPreview row, Result decided, CaptureResult.Write write) {
         CaptureTransaction.store(db, "import", CaptureRequest.sms(row.sender, row.body, row.captureAt), decided,

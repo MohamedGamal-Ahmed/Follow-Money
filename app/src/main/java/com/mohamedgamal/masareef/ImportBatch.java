@@ -25,6 +25,7 @@ final class ImportBatch {
         try {
             long revisionBefore=db.changes();
             List<ImportResult.Row> rows=applyRows(selected);
+            for(int i=0;i<rows.size();i++)PipelineDecider.linkLateCharge(db,selected.get(i),rows.get(i).initialTransactionId);
             ExpenseDb.RepairWrites beforeRepair=db.repairWrites();
             long first=Long.MAX_VALUE,last=Long.MIN_VALUE;
             for(SmsPreview r:selected){first=Math.min(first,r.captureAt);last=Math.max(last,r.captureAt);}

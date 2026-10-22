@@ -1645,6 +1645,42 @@ final class AuditRegressionTest {
     }
 
     /**
+     * 0.4.1 item 3: a charge and its return five minutes later, imported in one batch, end as one expense linked to its
+     * return (reimbursedExpense), never a standalone income; the order the batch lists them in does not matter.
+     */
+    private void importChargeAndReturn(boolean returnFirst){
+        long t=LocalDate.of(2026,10,20).atTime(12,0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        String[][] inbox={
+                {"شكرًا لاستخدامك بطاقة بنك مصر ***4636، تم الآن خصم EGP 5.00عند FAWRY يوم 20/10/2026 ، الرصيد المتاح EGP 100.00",Long.toString(t)},
+                {"تم اعادة قيد معاملتك ل EGP 5.00 التي تمت علي البطاقة 1234*4636يوم 20/10/2026 عندFAWRY ، لمزيد من المعلومات. تفضل بالاتصال ب 19888",Long.toString(t+5*60_000L)}};
+        if(returnFirst)inbox=new String[][]{inbox[1],inbox[0]};
+        PipelineDecider.Context batch=PipelineDecider.context(db,"import");
+        List<SmsPreview> rows=new java.util.ArrayList<>();
+        for(String[] m:inbox){
+            SmsPreview row=PipelineDecider.importRow(batch,"BankMisr",m[0],Long.parseLong(m[1]),Long.parseLong(m[1]));
+            ok(row!=null&&row.decision!=null&&row.decision.records,"Decided by the new pipeline: "+m[0]);
+            row.captureStatus=db.smsCaptureStatus(row.sender,row.body,row.receivedAt,row.captureAt,row.receiptKeySafe);rows.add(row);
+        }
+        SmsPreview.selectForImport(rows);
+        ok(new ImportBatch(db).executeDetailed(rows).committed,"Batch committed");
+        ExpenseDb.Transaction charge=null;int expenses=0,linked=0,standalone=0;StringBuilder ledger=new StringBuilder();
+        for(ExpenseDb.Transaction tx:db.transactions()){
+            ledger.append(" | ").append(tx.kind).append(' ').append(tx.amountMinor);
+            if("expense".equals(tx.kind)&&tx.amountMinor==500){charge=tx;expenses++;}
+        }
+        ok(expenses==1,"One 5.00 charge:"+ledger);
+        for(ExpenseDb.Transaction tx:db.transactions()){
+            if(!"income".equals(tx.kind))continue;
+            ExpenseDb.Transaction offset=db.reimbursedExpense(tx.id);
+            if(offset!=null&&offset.id==charge.id)linked++;else standalone++;
+        }
+        ok(linked==1&&standalone==0,"The return is linked to the charge, no standalone income:"+ledger);
+        eq(500,db.reimbursedOf(charge.id),"Reimbursed amount");
+    }
+    public void testImportedChargeThenReturnLinksTheReturn(){importChargeAndReturn(false);}
+    public void testImportedReturnBeforeItsChargeStillLinksTheReturn(){importChargeAndReturn(true);}
+
+    /**
      * Owner acceptance, 22 Oct 2026: rows the older build recorded that morning had no source, so the repair never saw the
      * transfer. The data check reads each automatic row's saved message, attaches its source and pairs the transfer.
      */
