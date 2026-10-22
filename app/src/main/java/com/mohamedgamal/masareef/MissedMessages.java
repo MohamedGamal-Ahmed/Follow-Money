@@ -11,6 +11,15 @@ final class MissedMessages {
      * userBanks: SourceIdentity.bank of the user's live sources (owner acceptance: not the general brand catalog, so
      * we-Landline, VFCashGifts and B.TECH never appear).
      */
+    /**
+     * The same, for a message a legacy guard kept out of the ledger (LEGACY_GUARD:*, reviewer 23 Oct 2026): the pipeline
+     * would have recorded it, so with the same sender and amount conditions it is a possible miss, never lost silently.
+     */
+    static boolean listed(String source, ParserShadow.Observation o, String normalizedText, LocalLearning learning, java.util.Set<String> userBanks, boolean guarded) {
+        if (!guarded) return listed(source, o, normalizedText, learning, userBanks);
+        return !learning.dismissedShape(source, normalizedText) && knownSender(source, o, userBanks) && positiveAmount(normalizedText);
+    }
+
     static boolean listed(String source, ParserShadow.Observation o, String normalizedText, LocalLearning learning, java.util.Set<String> userBanks) {
         if (learning.dismissedShape(source, normalizedText)) return false;
         if (!knownSender(source, o, userBanks) || !positiveAmount(normalizedText)) return false;

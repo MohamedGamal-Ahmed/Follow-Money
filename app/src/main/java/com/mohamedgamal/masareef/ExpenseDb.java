@@ -500,8 +500,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             ExpenseParser.EventTime event=ExpenseParser.eventTimeWithPrecision(body,receivedAt);
             long eventAt = event.when;
             // Legacy guards stand even when the new pipeline records: a future-only alert, an unsuccessful attempt or a
-            // notice (cancellation, reversal) never becomes a ledger row; CaptureTransaction notes LEGACY_GUARD on it.
-            if (ExpenseParser.isFutureOnly(body)) {
+            // notice (cancellation, reversal) never becomes a ledger row; CaptureTransaction notes LEGACY_GUARD on it. The
+            // future-only guard yields to an AUTO decision with a completed event (reviewer, 23 Oct 2026); the others never do.
+            if (ExpenseParser.isFutureOnly(body) && !(decided != null && decided.overridesFutureOnly())) {
                 result.reason=CaptureResult.Reason.FUTURE_ONLY;
                 result.rowId=markRejectedCaptureForReview(hash, eventAt);
                 writable.setTransactionSuccessful();

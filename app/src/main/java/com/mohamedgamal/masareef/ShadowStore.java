@@ -101,7 +101,8 @@ final class ShadowStore {
         sql.insert("shadow_observations", null, row);
         bound(sql, origin);
         // m6: what waits on «رسائل من بنوكك ما اتسجلتش» (MissedMessages decides; a dismissed shape never comes back).
-        if (raw != null && MissedMessages.listed(source, o, MessageNormalizer.normalize(raw).text, ParserShadow.learning(), userBanks(sql)))
+        boolean guarded = extraReason != null && extraReason.startsWith("LEGACY_GUARD:");
+        if (raw != null && MissedMessages.listed(source, o, MessageNormalizer.normalize(raw).text, ParserShadow.learning(), userBanks(sql), guarded))
             rememberUnunderstood(sql, raw, content, source, o, receivedAt, "REPLAY".equals(dedupe.capture));
     }
 

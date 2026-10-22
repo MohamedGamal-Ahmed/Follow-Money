@@ -33,6 +33,23 @@ final class PipelineDecision {
         return this;
     }
 
+    /**
+     * The pipeline read a completed event (COMPLETED_EVENT). MessageClassifier reads one only in a clause that is not
+     * future wording, and the extractor never takes the amount from a future clause.
+     */
+    boolean completedEvent;
+
+    PipelineDecision withCompletedEvent(boolean completed) {
+        completedEvent = completed;
+        return this;
+    }
+
+    /**
+     * The legacy future-only guard yields to this decision (reviewer, 23 Oct 2026): AUTO with a completed event, so a
+     * future clause beside it («Your installment will be debited tomorrow») is a note, not the message.
+     */
+    boolean overridesFutureOnly() { return records && "AUTO".equals(decision) && completedEvent; }
+
     /** The user's own merchant rule ignored this message (LEARNED_IGNORED_MERCHANT): a refusal, as legacy reported it. */
     boolean ignoredByUser;
 
@@ -54,7 +71,8 @@ final class PipelineDecision {
 
     /** The same recording decision, now linked to the charge it returns (an expense offset, no longer waiting for the user). */
     PipelineDecision withOffset(long chargeId, boolean pipelineReview) {
-        return record(pipelineReview, amountMinor, currency, direction, merchant, category, cardLast4, counterparty, chargeId, false).withBalance(balanceMinor, balanceCurrency);
+        return record(pipelineReview, amountMinor, currency, direction, merchant, category, cardLast4, counterparty, chargeId, false).withBalance(balanceMinor, balanceCurrency)
+                .withCompletedEvent(completedEvent);
     }
 
     /** The legacy ledger kind for this direction. */
