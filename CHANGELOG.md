@@ -1,5 +1,13 @@
 # Change log
 
+## 0.4.1 — 23 October 2026
+
+- «pending» is a status only in status wording («is pending», «pending payment/transaction/authorization», «still pending», «Status: pending», a message that opens with it, «قيد التنفيذ/الانتظار/المراجعة»); the word inside a merchant name («PENDING COFFEE») no longer stops the purchase being recorded.
+- The import result shows three separate numbers: «أُضيفت», «تم تخطيها (ليست معاملات)» (messages the new pipeline records nothing for, the user's ignore rules among them, plus messages the user excluded before) and «مستوردة من قبل».
+- A return imported in the same batch as its charge is linked to the charge (expense offset) even when the batch lists the return first; it looks again once every row is written, before the batch's repair.
+- Cash and fees in the new pipeline: «تم سحب … من حسابك» with no merchant is a cash withdrawal (not spending); a fee charged for a withdrawal is «رسوم بنكية», not cash; an installment named only in a future clause («Installment will be debited monthly») does not make the purchase an installment.
+- Tests: each legacy guard (UNSUCCESSFUL, NOTICE, FUTURE_ONLY) checked on its own in ShadowStoreTest; the 14 device failures known since 4ab28ed are diagnosed in docs/superpowers/notes/2026-10-23-known-device-failures.md (4 pipeline defects fixed, 10 stale tests updated); the five device modes have no failures. Upgrades from five real phone databases (v13–v23) to v26 keep every row and total.
+
 ## 0.4.0 — 22 October 2026
 
 - The new pipeline decides every message in every build. The legacy parser runs only when the pipeline cannot decide a message (a failed stage, an exception, or a recording decision with no amount, currency or direction); each such message leaves a `PIPELINE_FAILED` note with its reason. The decision switch, its activation time and the 30-day legacy opinion are gone. When the pipeline decides, a message matching a row already recorded only adds its evidence (a delivery of the same message at another time no longer becomes a second row). The version name has no «- Test» suffix.
