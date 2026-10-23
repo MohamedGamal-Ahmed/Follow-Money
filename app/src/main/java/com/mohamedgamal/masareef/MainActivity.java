@@ -5508,7 +5508,9 @@ public final class MainActivity extends Activity {
         else if (futureTerms != null) amount.setText(String.format(Locale.ROOT, "%.2f", futureTerms.amountMinor / 100.0));
         Spinner currency = new AppChoiceSpinner("العملة", CURRENCIES);
         currency.setBackground(outlined(SURFACE, BORDER, 12));
-        LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(dp(96), dp(UiTheme.TOUCH));
+        // Grows with the font (200% clipped "EGP" at a fixed size); never narrower or shorter than a touch target.
+        currency.setMinimumWidth(dp(96)); currency.setMinimumHeight(dp(UiTheme.TOUCH));
+        LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(-2, -2);
         currencyParams.setMarginStart(dp(8));
         amountRow.addView(currency, currencyParams);
         if (futureTerms != null) for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(futureTerms.currency)) currency.setSelection(i);
