@@ -4238,6 +4238,46 @@ public final class MainActivity extends Activity {
         financialJourneySheet("الرسالة الأصلية",content,"إغلاق",android.app.Dialog::dismiss,null,null);
     }
 
+    /** Other incomes of the same amount and currency from the day before to the day after, nearest first. */
+    private List<ExpenseDb.Transaction> incomeCopies(ExpenseDb.Transaction item) {
+        List<ExpenseDb.Transaction> copies = new ArrayList<>();
+        LocalDate day = Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate();
+        for (ExpenseDb.Transaction other : db.transactionsBetween(day.minusDays(1), day.plusDays(2)))
+            if (other.id != item.id && "income".equals(other.kind) && other.amountMinor == item.amountMinor && other.currency.equals(item.currency))
+                copies.add(other);
+        copies.sort((a, b) -> Long.compare(Math.abs(a.when - item.when), Math.abs(b.when - item.when)));
+        return copies;
+    }
+
+    /**
+     * Tester, 24 Oct 2026: the same incoming transfer arrived as a bank SMS and an InstaPay notification and was counted
+     * twice, with no way to say so. The bank copy is kept (it names the account); both messages stay as evidence.
+     */
+    private void mergeIncomeCopyDialog(ExpenseDb.Transaction item, List<ExpenseDb.Transaction> copies) {
+        String[] names = new String[copies.size()];
+        for (int i = 0; i < copies.size(); i++) {
+            ExpenseDb.Transaction copy = copies.get(i);
+            names[i] = UiKit.displayName(copy.merchant) + "\n" + money(copy.amountMinor, copy.currency) + " · " + sourceDate(copy.when) + " · " + copy.source;
+        }
+        new ChoiceDialogBuilder().setTitle("أنهي عملية هي نفس الفلوس دي؟").setItems(names, (picker, which) -> {
+            ExpenseDb.Transaction copy = copies.get(which);
+            boolean keepItem = RepairRules.keepFirst(item.source, copy.source);
+            ExpenseDb.Transaction keep = keepItem ? item : copy, drop = keepItem ? copy : item;
+            new ChoiceDialogBuilder().setTitle("ادمجهم في عملية واحدة؟")
+                    .setMessage("هتفضل «" + UiKit.displayName(keep.merchant) + "» من " + keep.source + "، والنسخة التانية تتشال من الدخل. الرسالتين الأصليتين محفوظين في تفاصيل العملية.")
+                    .setPositiveButton("ادمجهم", (confirm, ignored) -> {
+                        try {
+                            db.reconcileIncome(keep.id, java.util.Collections.singletonList(drop.id));
+                            selectedTransaction = db.transactionById(keep.id);
+                            toast("اتدمجت؛ الفلوس دي بقت محسوبة مرة واحدة");
+                            render();
+                        } catch (IllegalArgumentException conflict) {
+                            toast("مقدرناش ندمجهم: واحدة منهم مربوطة بحاجة تانية. راجعها الأول");
+                        }
+                    }).setNegativeButton("إلغاء", null).show();
+        }).show();
+    }
+
     private void transactionOptions(ExpenseDb.Transaction item) {
         List<String> labels = new ArrayList<>();
         List<Runnable> actions = new ArrayList<>();
@@ -4275,6 +4315,8 @@ public final class MainActivity extends Activity {
             });
         }
         if ("income".equals(item.kind)) {
+            List<ExpenseDb.Transaction> copies = incomeCopies(item);
+            if (!copies.isEmpty()) { labels.add("اتسجلت مرتين؟ ادمجها مع عملية تانية"); actions.add(() -> mergeIncomeCopyDialog(item, copies)); }
             if (db.reimbursedExpense(item.id) == null) { labels.add("دي فلوس رجعتلي عن مشتريات"); actions.add(() -> reimbursementDialog(item)); }
             else {
                 labels.add(db.ignoredReimbursement(item.id) != null ? "فك ربط استرداد غير محتسب" : "فك ربط الاسترداد");
@@ -5252,7 +5294,7 @@ public final class MainActivity extends Activity {
             components.caption("١ · دورة الاستحقاق",body);
             EditText due=dateField("دورة الاستحقاق","due",body);
             due.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void afterTextChanged(Editable s){}
-                public void onTextChanged(CharSequence s,int a,int b,int c){if(draft.getBoolean("searched")){draft.putBoolean("searched",false);draft.putLong("transaction",-1);formPages.rebuild();}}});
+                public void onTextChanged(CharSequence s,int a,int b,int c){if(draft.getBoolean("searched")){draft.putBoolean("searched",false);draft.putBoolean("show_all",false);draft.putLong("transaction",-1);formPages.rebuild();}}});
             body.addView(components.label("اختار دورة من الجدول؛ هنجيب العمليات المسجلة في الشهر المحيط بها.",UiTheme.CAPTION,MUTED));
             if(!draft.getBoolean("searched")){
                 LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(10);
@@ -5260,18 +5302,32 @@ public final class MainActivity extends Activity {
                 errorLabel(body);return;
             }
             LocalDate selected=LocalDate.parse(text("due"));
-            List<ExpenseDb.Transaction> candidates=db.commitmentPaymentCandidates(selected);
+            // Tester, 24 Oct 2026: two months of purchases newest first hid the payment; the likely ones come first now.
+            java.util.Map<Long,ExpenseDb.Transaction> byId=new java.util.HashMap<>();List<PaymentCandidates.Item> items=new ArrayList<>();
+            for(ExpenseDb.Transaction tx:db.commitmentPaymentCandidates(selected)){byId.put(tx.id,tx);items.add(new PaymentCandidates.Item(tx.id,tx.merchant,tx.amountMinor,tx.currency,tx.when));}
+            List<PaymentCandidates.Item> ranked=PaymentCandidates.rank(items,item.amountMinor,item.currency,item.merchant,selected);
             components.caption("٢ · اختار الدفعة اللي تخص "+item.merchant,body);
-            if(candidates.isEmpty()){body.addView(components.label("مفيش دفعات مؤهلة في الفترة دي. راجع تاريخ الدورة أو فك رابط سابق من التسويات.",UiTheme.BODY,MUTED));errorLabel(body);return;}
+            if(ranked.isEmpty()){body.addView(components.label("مفيش دفعات مؤهلة في الفترة دي. راجع تاريخ الدورة أو فك رابط سابق من التسويات.",UiTheme.BODY,MUTED));errorLabel(body);return;}
+            List<PaymentCandidates.Item> likely=new ArrayList<>(),rest=new ArrayList<>();
+            for(PaymentCandidates.Item candidate:ranked)(PaymentCandidates.likely(candidate,item.amountMinor,item.currency,item.merchant)?likely:rest).add(candidate);
+            boolean showAll=draft.getBoolean("show_all")||likely.isEmpty()||rest.stream().anyMatch(c->c.id==draft.getLong("transaction"));
+            body.addView(components.label(likely.isEmpty()?"مفيش دفعة بنفس الاسم أو المبلغ؛ دي العمليات الأقرب لتاريخ الدورة.":
+                    "الأقرب بالاسم والمبلغ "+money(item.amountMinor,item.currency)+":",UiTheme.CAPTION,MUTED));
             android.widget.RadioGroup group=new android.widget.RadioGroup(MainActivity.this);body.addView(group);
-            for(ExpenseDb.Transaction tx:candidates){
+            List<PaymentCandidates.Item> shown=new ArrayList<>(likely);if(showAll)shown.addAll(rest);
+            for(PaymentCandidates.Item candidate:shown){
+                ExpenseDb.Transaction tx=byId.get(candidate.id);
                 android.widget.RadioButton option=new android.widget.RadioButton(MainActivity.this);option.setId(View.generateViewId());option.setSaveEnabled(false);
-                option.setText(tx.merchant+" · "+money(tx.amountMinor,tx.currency)+" · "+Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate());
+                // Two lines, each piece isolated, so a Latin merchant and an Arabic currency never reorder each other.
+                option.setText("\u2068"+UiKit.displayName(tx.merchant)+"\u2069\n\u2068"+money(tx.amountMinor,tx.currency)+"\u2069 · "+dayLabel(Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate()));
                 option.setTypeface(REGULAR);option.setTextSize(UiTheme.BODY);option.setTextColor(INK);option.setMinHeight(dp(UiTheme.TOUCH));
+                option.setPadding(dp(8),dp(8),dp(8),dp(8));
                 option.setButtonTintList(ColorStateList.valueOf(ACCENT));option.setChecked(tx.id==draft.getLong("transaction"));
                 option.setOnClickListener(v->{if(draft.getLong("transaction")==tx.id)return;draft.putLong("transaction",tx.id);draft.putString("amount","");formPages.rebuild();});
                 group.addView(option);
             }
+            if(!showAll&&!rest.isEmpty())
+                body.addView(components.button("عرض باقي العمليات ("+rest.size()+")",false,false,()->{draft.putBoolean("show_all",true);formPages.rebuild();}));
             long chosen=draft.getLong("transaction");
             if(chosen>=0){
                 try{preview=db.commitmentPaymentPreview(item.id,selected,chosen);}
@@ -5440,21 +5496,20 @@ public final class MainActivity extends Activity {
             page.addView(source);
         }
 
-        caption("المبلغ");
         if(existing!=null&&!db.commitmentCycles(existing.id).isEmpty())
             note("الدورات التي بدأت تحتفظ بمبلغها وعملتها؛ تعديل المبلغ يخص الدورات الجديدة. تسويات الدفعات محفوظة.");
-        LinearLayout amountRow = new LinearLayout(this); amountRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout amountRow = new LinearLayout(this); amountRow.setGravity(Gravity.BOTTOM);
         page.addView(amountRow, new LinearLayout.LayoutParams(-1, -2));
         EditText amount = input(kind[0].equals("installment") ? "القسط الشهري" : "المبلغ", amountRow);
-        ((LinearLayout.LayoutParams) amount.getLayoutParams()).width = 0;
-        ((LinearLayout.LayoutParams) amount.getLayoutParams()).weight = 1;
+        amount.setTag("commitment_amount");
+        TextView amountCaption = (TextView) ((LinearLayout) amount.getParent()).getChildAt(0);
         amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         if(suggestion!=null && suggestion.amount>0) amount.setText(String.format(Locale.ROOT,"%.2f",suggestion.amount/100.0));
         else if (futureTerms != null) amount.setText(String.format(Locale.ROOT, "%.2f", futureTerms.amountMinor / 100.0));
         Spinner currency = new AppChoiceSpinner("العملة", CURRENCIES);
         currency.setBackground(outlined(SURFACE, BORDER, 12));
-        LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(dp(96), dp(50));
-        currencyParams.topMargin = dp(10); currencyParams.setMarginStart(dp(8));
+        LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(dp(96), dp(UiTheme.TOUCH));
+        currencyParams.setMarginStart(dp(8));
         amountRow.addView(currency, currencyParams);
         if (futureTerms != null) for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(futureTerms.currency)) currency.setSelection(i);
         if (suggestion != null) for (int i=0;i<CURRENCIES.length;i++) if(CURRENCIES[i].equals(suggestion.currency)) currency.setSelection(i);
@@ -5467,13 +5522,11 @@ public final class MainActivity extends Activity {
         LinearLayout counts = new LinearLayout(this);
         installmentBox.addView(counts);
         EditText total = input("الإجمالي، مثال 12", counts);
-        ((LinearLayout.LayoutParams) total.getLayoutParams()).width = 0;
-        ((LinearLayout.LayoutParams) total.getLayoutParams()).weight = 1;
+        total.setTag("commitment_total");
         total.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         EditText paid = input("اتدفع منهم كام", counts);
-        ((LinearLayout.LayoutParams) paid.getLayoutParams()).width = 0;
-        ((LinearLayout.LayoutParams) paid.getLayoutParams()).weight = 1;
-        ((LinearLayout.LayoutParams) paid.getLayoutParams()).setMarginStart(dp(8));
+        paid.setTag("commitment_paid");
+        ((LinearLayout.LayoutParams) ((View) paid.getParent()).getLayoutParams()).setMarginStart(dp(8));
         paid.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         if (existing != null && existing.totalCount != null) total.setText(Integer.toString(existing.totalCount));
         else if(suggestion!=null && suggestion.count!=null) total.setText(suggestion.count.toString());
@@ -5595,6 +5648,7 @@ public final class MainActivity extends Activity {
             cycle.setVisibility("installment".equals(kind[0]) ? View.GONE : View.VISIBLE);
             cycleCaption.setVisibility(cycle.getVisibility());
             amount.setHint("installment".equals(kind[0]) ? "القسط الشهري" : "المبلغ");
+            amountCaption.setText(amount.getHint());
             providers.removeAllViews();
             LinearLayout row = null;
             int index = 0;
@@ -7681,7 +7735,7 @@ public final class MainActivity extends Activity {
     private void runRepair(boolean manual) {
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         // Task D1: a phone that already ran this repair version still moves an older Telda card source to a payment app
-        // (cheap and idempotent; REPAIR_VERSION stays 3, m7).
+        // (cheap and idempotent, every launch).
         if (!manual) CaptureQueue.submit(() -> { try { db.migrateAppSources(); } catch (RuntimeException ignored) { } });
         if (!manual && prefs.getInt("repair_version", 0) >= ExpenseDb.REPAIR_VERSION) return;
         if (manual) toast("بفحص البيانات...");

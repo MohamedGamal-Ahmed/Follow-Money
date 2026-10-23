@@ -18,7 +18,7 @@ allprojects { p ->
         p.afterEvaluate { p.android.buildTypes.debug.applicationIdSuffix = '.lifetimeqa' }
     }
 }
-'@ | Set-Content .tmp/lifetime.init.gradle -Encoding utf8
+'@ | ForEach-Object { [IO.File]::WriteAllText("$PWD/.tmp/lifetime.init.gradle", $_, (New-Object Text.UTF8Encoding $false)) }
     $wrapper = if ($windowsHost) { './gradlew.bat' } else { './gradlew' }
     $arguments = @('-I','.tmp/lifetime.init.gradle','assembleDebug','assembleDebugAndroidTest')
     if (-not $Online) { $arguments = @('--offline') + $arguments }

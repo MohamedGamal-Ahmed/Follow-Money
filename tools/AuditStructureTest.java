@@ -113,6 +113,12 @@ public final class AuditStructureTest {
                         "Native dropdown rows must not bypass the app theme: " + source);
             }
         }
+        // 0.4.1 regression (tester, 24 Oct 2026): a labelled field placed in a horizontal row lost its width to its own caption.
+        String components = read("app/src/main/java/com/mohamedgamal/masareef/UiComponents.java");
+        check(body(components, "EditText field(String title, LinearLayout parent)").contains("LinearLayout.HORIZONTAL"),
+                "A labelled field in a horizontal row must get its own column");
+        check(!java.util.regex.Pattern.compile("input\\([^;]*\\);\\s*\\(\\(LinearLayout\\.LayoutParams\\)\\s*\\w+\\.getLayoutParams\\(\\)\\)\\.(?:width|weight)").matcher(main).find(),
+                "A labelled field's own layout params are inside its column; size the column, not the input");
         System.out.println("Source structure checks passed: " + checked);
     }
 

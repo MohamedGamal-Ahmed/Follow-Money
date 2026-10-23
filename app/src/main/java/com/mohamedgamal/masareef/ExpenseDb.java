@@ -2257,8 +2257,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     // ---- Data repair: promotions, double captures, own transfers (see RepairRules) ----
 
-    /** Bump when a new rule must re-run once over all existing data. */
-    public static final int REPAIR_VERSION = 3;
+    /**
+     * Bump when a new rule must re-run once over all existing data.
+     * 4 (0.4.2): an InstaPay handle now matches the bank SMS naming the same person, so earlier double incomes merge.
+     */
+    public static final int REPAIR_VERSION = 4;
 
     public static final class RepairReport {
         boolean failed;

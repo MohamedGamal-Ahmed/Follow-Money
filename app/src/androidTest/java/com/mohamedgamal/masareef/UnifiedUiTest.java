@@ -261,6 +261,22 @@ final class UnifiedUiTest {
                 activity.onBackPressed();
             });
             click("تجاهل التعديلات");
+            main(()->invoke("openCommitmentEditor",new Class<?>[]{ExpenseDb.Recurring.class},(Object)null));
+            main(()->{
+                // 0.4.1 regression: field captions filled their horizontal row, so these inputs and the currency
+                // picker had zero width and an installment could not be saved. Typing by tag never noticed.
+                int width=root().getWidth();
+                for(String tag:new String[]{"commitment_amount","commitment_total","commitment_paid"}){
+                    View input=root().findViewWithTag(tag);int[] at=new int[2];
+                    ok(input!=null&&input.isShown(),"Commitment field is shown: "+tag);
+                    input.getLocationInWindow(at);
+                    ok(input.getWidth()>=width/4&&at[0]>=0&&at[0]+input.getWidth()<=width,"Commitment field is on screen and wide enough to type in: "+tag);
+                }
+                View currency=((android.view.ViewGroup)((View)root().findViewWithTag("commitment_amount").getParent()).getParent()).getChildAt(1);
+                int[] at=new int[2];currency.getLocationInWindow(at);
+                ok(currency instanceof android.widget.Spinner&&currency.getWidth()>0&&at[0]>=0&&at[0]+currency.getWidth()<=width,"Currency picker sits beside the amount");
+            });
+            screen("09b-commitment-editor");
             main(()->{
                 set("selectedTab",0);invoke("render",new Class<?>[0]);
                 invoke("dailyBudgetDialog",new Class<?>[0]);

@@ -19,7 +19,7 @@ allprojects { p ->
         p.afterEvaluate { p.android.buildTypes.debug.applicationIdSuffix = '.notificationqa' }
     }
 }
-'@ | Set-Content .tmp/notification-capture/init.gradle -Encoding utf8
+'@ | ForEach-Object { [IO.File]::WriteAllText("$PWD/.tmp/notification-capture/init.gradle", $_, (New-Object Text.UTF8Encoding $false)) }
     $wrapper=if($windowsHost){'./gradlew.bat'}else{'./gradlew'}
     & $wrapper --offline -I .tmp/notification-capture/init.gradle assembleDebug assembleDebugAndroidTest
     if($LASTEXITCODE -ne 0){throw 'Notification QA build failed'}

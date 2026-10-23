@@ -22,7 +22,7 @@ allprojects { p ->
         p.afterEvaluate { p.android.buildTypes.debug.applicationIdSuffix = '.cardreview.journeyqa' }
     }
 }
-'@ | Set-Content '.tmp/unified-ui.init.gradle' -Encoding utf8
+'@ | ForEach-Object { [IO.File]::WriteAllText("$PWD/.tmp/unified-ui.init.gradle", $_, (New-Object Text.UTF8Encoding $false)) }
         $wrapper = if ($windowsHost) { './gradlew.bat' } else { './gradlew' }
         & $wrapper --offline -I .tmp/unified-ui.init.gradle assembleDebug assembleDebugAndroidTest
         if ($LASTEXITCODE -ne 0) { throw 'Unified UI APK build failed' }
