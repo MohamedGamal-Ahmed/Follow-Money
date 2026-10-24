@@ -6777,7 +6777,11 @@ public final class MainActivity extends Activity {
             icon.setPadding(dp(16), dp(4), dp(16), dp(4));
             icon.setBackground(active ? rounded(ACCENT_PALE, 99) : null);
             TextView caption = label(labels[i], 11, active ? INK : MUTED, active); caption.setGravity(Gravity.CENTER);
-            caption.setPadding(0, 0, 0, 0);
+            caption.setPadding(0, 0, 0, 0); caption.setTag("nav_label:" + labels[i]);
+            // A tab label never breaks inside a word: it grows with the system font up to 1.3× and stays on one line.
+            // The item's description and tooltip keep the full word at every font size.
+            cappedTextSize(caption, 11, 1.3f); caption.setSingleLine(true); caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            item.setTooltipText(labels[i]);
             LinearLayout.LayoutParams iconSize = new LinearLayout.LayoutParams(dp(56), dp(32));
             iconSize.bottomMargin = dp(4); item.addView(icon, iconSize); item.addView(caption);
             item.setContentDescription(labels[i]+(active?"، الصفحة الحالية":""));
@@ -6862,6 +6866,11 @@ public final class MainActivity extends Activity {
         row.addView(tintedIcon(R.drawable.ic_chevron_forward, MUTED), new LinearLayout.LayoutParams(dp(18), dp(18)));
         row.setTag("setting:" + name); settingsGroup.addView(row);
         row.setOnClickListener(v -> action.run());
+    }
+
+    /** Text that follows the system font only up to {@code cap}× its size; used where a fixed bar or shape holds it. */
+    private void cappedTextSize(TextView view, float sp, float cap) {
+        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, sp * Math.min(getResources().getConfiguration().fontScale, cap));
     }
 
     private TextView label(String value, int sp, int color, boolean bold) {

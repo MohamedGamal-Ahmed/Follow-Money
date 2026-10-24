@@ -116,6 +116,17 @@ final class UnifiedUiTest {
                 ok(root().findViewWithTag("statement_component:مشتريات ورسوم") == null, "No outflow details when closed");
                 ok(root().findViewWithTag("statement_unlinked") != null, "Unlinked transfer warning retained");
                 homeAmounts(root());
+                int labels = 0;
+                for (String name : new String[]{"الرئيسية", "العمليات", "الالتزامات", "التحليلات"}) {
+                    android.widget.TextView caption = root().findViewWithTag("nav_label:" + name);
+                    ok(caption != null, "Tab label present: " + name); labels++;
+                    View item = (View)caption.getParent();
+                    ok(item.getContentDescription() != null && item.getContentDescription().toString().startsWith(name), "Tab keeps its full description: " + name);
+                    ok(name.contentEquals(item.getTooltipText()), "Tab keeps its tooltip: " + name);
+                    ok(caption.getVisibility() != View.VISIBLE || caption.getLayout() != null && caption.getLayout().getLineCount() == 1,
+                            "Tab label on one line, never split inside a word: " + name);
+                }
+                ok(labels == 4, "Four labelled tabs");
             });
             screen("10-home-closed");
             main(() -> root().findViewWithTag("statement_out").performClick());
