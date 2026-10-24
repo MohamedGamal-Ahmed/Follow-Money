@@ -3444,21 +3444,19 @@ public final class MainActivity extends Activity {
         row.setTag("statement_component:" + item.name);
         LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
         copy.addView(label(item.name, 12, INK, true));
-        LinearLayout shares = new LinearLayout(this); shares.setGravity(Gravity.CENTER_VERTICAL);
+        // Detail, bar and percent share the second line. The bar flexes 48–90dp so the amount stays beside the label at
+        // normal size; the row stacks the amount only when even the shortest bar does not fit (large fonts).
+        ShareLine second = new ShareLine(this); second.setTag("statement_component_detail");
+        TextView detailText = label(detail, 10, MUTED, false); detailText.setSingleLine(true);
+        if (detail.isEmpty()) detailText.setVisibility(View.GONE);
+        second.addView(detailText);
         ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(10000); bar.setProgress((int)Math.round(StatementRows.share(item.amount, total) * 10000));
         bar.setProgressTintList(ColorStateList.valueOf(tint)); bar.setProgressBackgroundTintList(ColorStateList.valueOf(BORDER));
         bar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        shares.addView(bar, new LinearLayout.LayoutParams(dp(90), dp(5)));
-        TextView percent = label(StatementRows.percent(item.amount, total), 10, MUTED, false);
-        percent.setPadding(dp(5), 0, 0, 0); shares.addView(percent);
-        // Detail and share share the second line; a hugging WrapRow drops the bar below only when they do not fit.
-        if (detail.isEmpty()) copy.addView(shares);
-        else {
-            WrapRow second = new WrapRow(this, true); second.setTag("statement_component_detail");
-            second.addView(label(detail, 10, MUTED, false)); second.addView(shares); copy.addView(second);
-        }
-        row.addView(copy);
+        second.addView(bar);
+        second.addView(label(StatementRows.percent(item.amount, total), 10, MUTED, false));
+        copy.addView(second); row.addView(copy); row.setSqueeze(second.slack());
         LinearLayout trailing = new LinearLayout(this); trailing.setGravity(Gravity.CENTER_VERTICAL);
         trailing.addView(statementAmount(item.amount, INK, ""));
         ImageView chevron = tintedIcon(R.drawable.ic_chevron_forward, MUTED); chevron.setTag("statement_chevron");

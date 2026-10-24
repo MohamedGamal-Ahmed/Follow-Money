@@ -263,10 +263,15 @@ final class UnifiedUiTest {
             ok(!stripText(row).contains("›") && !stripText(row).contains("‹"), "No text chevron glyph");
             ViewGroup copy = (ViewGroup)row.getChildAt(0);
             ok(copy.getChildCount() == 2, "Sub-row has two lines: " + view.getTag());
-            View second = row.findViewWithTag("statement_component_detail");
-            if (second != null && fontScale <= 1f) {
-                View detail = ((ViewGroup)second).getChildAt(0), shares = ((ViewGroup)second).getChildAt(1);
-                ok(detail.getTop() < shares.getBottom() && shares.getTop() < detail.getBottom(), "Detail and share bar on one line: " + view.getTag());
+            ViewGroup second = row.findViewWithTag("statement_component_detail");
+            if (fontScale <= 1f) {
+                View detail = second.getChildAt(0), bar = second.getChildAt(1);
+                if (detail.getVisibility() == View.VISIBLE)
+                    ok(detail.getTop() < bar.getBottom() && bar.getTop() < detail.getBottom(), "Detail and share bar on one line: " + view.getTag());
+                // At normal size the amount never drops below its label; stacking is for large fonts only.
+                View trailing = row.getChildAt(1);
+                ok(trailing.getTop() < copy.getBottom() && copy.getTop() < trailing.getBottom(), "Amount on the same line as its label at 1.0: " + view.getTag());
+                ok(bar.getWidth() >= Math.round(ShareLine.MIN_BAR_DP * activity.getResources().getDisplayMetrics().density) - 1, "Share bar keeps its 48dp minimum: " + view.getTag());
             }
         }
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup)view).getChildCount(); i++) componentRows(((ViewGroup)view).getChildAt(i), fontScale);
