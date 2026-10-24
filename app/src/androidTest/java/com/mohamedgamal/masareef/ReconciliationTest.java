@@ -30,6 +30,9 @@ public final class ReconciliationTest extends Instrumentation {
     private boolean captureRing;
     @Override public void onCreate(Bundle args) { super.onCreate(args);journeyUi="true".equals(args.getString("journey_ui"));featureAudit=args.getString("feature_audit");realFixture="true".equals(args.getString("fixture"));inspectIds=args.getString("inspect");confirmedPlan=args.getString("confirmed_plan");confirmedCardLink=args.getString("confirmed_card_link");captureBalances="true".equals(args.getString("capture_balances"));captureRing="true".equals(args.getString("capture_ring"));phaseOne="true".equals(args.getString("phase_one"));phaseCapture="true".equals(args.getString("phase_capture"));auditSources=args.getString("audit_sources");auditDaily="true".equals(args.getString("audit_daily"));start(); }
     @Override public void onStart() {
+        if(featureAudit!=null&&featureAudit.startsWith("home_")){
+            new UnifiedUiTest(this).runHome(featureAudit.contains("_dark"), featureAudit.endsWith("_max")?2f:featureAudit.endsWith("_large")?1.3f:1f);return;
+        }
         if(featureAudit!=null&&featureAudit.startsWith("source_link_")){new SourceLinkUiTest(this).run(!"source_link_light".equals(featureAudit),"source_link_max".equals(featureAudit)?2f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("transactions_")){new TransactionPagesUiTest(this).run(!"transactions_light".equals(featureAudit),"transactions_max".equals(featureAudit)?2f:1f);return;}
         if(featureAudit!=null&&featureAudit.startsWith("unified_")){

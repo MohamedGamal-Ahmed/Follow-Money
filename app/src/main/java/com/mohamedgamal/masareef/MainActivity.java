@@ -90,6 +90,7 @@ public final class MainActivity extends Activity {
     private long[] transactionStatementIds;
     /** Source id → kind, read once per render for the statement's internal/cash rules on list rows. */
     private Map<Long, String> sourceKindCache;
+    private Map<Long, Long> statementOffsetCache;
     private String transactionBucketFilter = "";
     private long flowSourceId = -1;
     private java.time.YearMonth monthlyMonth=java.time.YearMonth.now().minusMonths(1);
@@ -1698,9 +1699,9 @@ public final class MainActivity extends Activity {
         LinearLayout leading = new LinearLayout(this); leading.setGravity(Gravity.CENTER_VERTICAL);
         TextView icon = label(state == UpdatePrompt.Card.RESTART ? "✓" : "↓", 18, LIME, true);
         icon.setGravity(Gravity.CENTER); icon.setBackground(rounded(BRAND, 99));
-        leading.addView(icon, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        icon.setMinHeight(dp(28)); leading.addView(icon, new LinearLayout.LayoutParams(dp(28), -2));
         String title = state == UpdatePrompt.Card.OFFER ? "فيه نسخة جديدة" : state == UpdatePrompt.Card.DOWNLOADING ? "التحديث بيتحمّل…" : "التحديث جاهز";
-        TextView copy = label(title + (state == UpdatePrompt.Card.OFFER && version > 0 ? " " + isolate(String.valueOf(version)) : ""), 12, INK, true);
+        TextView copy = label(title + (state == UpdatePrompt.Card.OFFER && version > 0 ? " " + isolate("إصدار " + version) : ""), 12, INK, true);
         if (state == UpdatePrompt.Card.OFFER && version > 0) {
             android.text.SpannableString text = new android.text.SpannableString(copy.getText());
             text.setSpan(new android.text.style.RelativeSizeSpan(0.8f), title.length(), text.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); copy.setText(text);
@@ -1964,7 +1965,7 @@ public final class MainActivity extends Activity {
                     cell.setContentDescription(MONTH_NAMES[m - 1] + " " + year[0] + (enabled ? "" : "، مفيش عمليات"));
                     cell.setOnClickListener(v -> {
                         selectedMonth = LocalDate.of(year[0], m, 1);
-                        transactionPeriod = null; transactionCurrencyFilter = ""; transactionExcludeTransfers = false;
+                        transactionPeriod = null; transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionStatementList=false; transactionStatementIds=null;
                         if (selectedTab == 4 || selectedTab == 3 || selectedTab == 13) insightsRange = MoneyFlow.Range.MONTH;
                         dialog.dismiss(); render();
                     });
@@ -3080,7 +3081,7 @@ public final class MainActivity extends Activity {
         if (formPages != null && formPages.isOpen()) { formPages.show(); return; }
         // Any committed tracked write bumps the persistent revision, so the cached suggestions cannot stay stale
         // behind a page whose only refresh path is this render().
-        sourceKindCache = null;
+        sourceKindCache = null; statementOffsetCache = null;
         if (db != null) {
             long changes = db.changes();
             if (ledgerChanges == null) ledgerChanges = changes;
@@ -3371,15 +3372,15 @@ public final class MainActivity extends Activity {
         WrapRow row = new WrapRow(this); row.setPadding(dp(12), dp(7), dp(12), dp(7)); row.setMinimumHeight(dp(UiTheme.TOUCH));
         LinearLayout leading = new LinearLayout(this); leading.setGravity(Gravity.CENTER_VERTICAL);
         if (!badge.isEmpty()) {
-            TextView icon = label(badge, 17, tint, true); icon.setGravity(Gravity.CENTER); icon.setBackground(rounded(ACCENT_PALE, 99));
-            leading.addView(icon, new LinearLayout.LayoutParams(dp(30), dp(30)));
+            TextView icon = label(badge, 17, tint, true); icon.setGravity(Gravity.CENTER); icon.setBackground(rounded(badge.equals("↑") ? (dark ? 0xff493425 : 0xffffecd0) : badge.equals("=") ? (dark ? 0xff5d4a26 : 0xfff0c987) : ACCENT_PALE, 99));
+            icon.setMinHeight(dp(30)); leading.addView(icon, new LinearLayout.LayoutParams(dp(30), -2));
         }
         LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
         copy.addView(label(name, 13, INK, true));
         if (!detail.isEmpty()) copy.addView(label(detail, 10, MUTED, false));
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2); cp.setMarginStart(dp(8)); leading.addView(copy, cp);
         row.addView(leading);
-        TextView value = statementAmount(amount, tint, disclosure ? "  ⌄" : ""); row.addView(value);
+        TextView value = statementAmount(amount, "الفرق".equals(name) ? tint : INK, disclosure ? (homeStatementOpen == ("فلوس دخلت".equals(name) ? 1 : 2) ? "  ⌃" : "  ⌄") : ""); row.addView(value);
         return row;
     }
 
@@ -3624,7 +3625,7 @@ public final class MainActivity extends Activity {
             banner.setOnClickListener(v -> {
                 // Uncategorized expenses and everything waiting for review (the new parser's REVIEW with its reason).
                 transactionCategoryFilter = NEEDS_ATTENTION_FILTER; transactionKindFilter = "";
-                transactionBucketFilter = ""; transactionCurrencyFilter = ""; transactionSourceFilter = null;
+                transactionBucketFilter = ""; transactionCurrencyFilter = ""; transactionSourceFilter = null; transactionStatementList=false; transactionStatementIds=null;
                 transactionExcludeTransfers = false; transactionSearch = ""; searchOpen = false;
                 bulkMode = false; bulkSelected.clear(); render();
             });
@@ -3653,6 +3654,7 @@ public final class MainActivity extends Activity {
         page.addView(results);
         Set<Long> candidates = recurringCandidates;
         Map<Long, Long> dayOffsets = db.reimbursementOffsets();
+        statementOffsetCache = dayOffsets;
         List<TransactionTimelineRow> timeline=transactionTimeline(month);
         Runnable refresh = () -> {
             results.removeAllViews();bulkChecks.clear();Set<Long> visible=new HashSet<>();
@@ -3686,7 +3688,7 @@ public final class MainActivity extends Activity {
                 }
                 if(entry.event!=null)captureEventRow(group,entry.event);
                 else{
-                    net.add(tx.currency,tx.kind,tx.category,transactionStatementList ? tx.amountMinor : ExpenseDb.effectiveAmount(tx,dayOffsets));
+                    net.add(tx.currency,tx.kind,tx.category,ExpenseDb.effectiveAmount(tx,dayOffsets));
                     if("expense".equals(tx.kind))visible.add(tx.id);
                     transactionRow(group, tx, candidates.contains(tx.id));
                 }
@@ -3888,7 +3890,7 @@ public final class MainActivity extends Activity {
         @Override String saveLabel(){return "تطبيق";}
         @Override boolean save(){
             if(draft.getBoolean("clear")){clearTransactionFilters();return true;}
-            transactionKindFilter=draft.getString("kind","");if(!transactionKindFilter.isEmpty())transactionBucketFilter="";
+            transactionKindFilter=draft.getString("kind","");if(!transactionKindFilter.isEmpty()){transactionBucketFilter="";transactionStatementList=false;transactionStatementIds=null;}
             transactionCategoryFilter=draft.getString("category","");long source=draft.getLong("source",-1);transactionSourceFilter=source<0?null:source;
             return true;
         }
@@ -3900,6 +3902,7 @@ public final class MainActivity extends Activity {
     }
 
     private void transactionRow(LinearLayout container, ExpenseDb.Transaction item, boolean suggested) {
+        boolean statementRows = selectedTab == 6 && transactionStatementList;
         if (container.getChildCount() > 0) divider(container);
         LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.VERTICAL);
         row.setPadding(0, dp(10), 0, dp(10));
@@ -3931,11 +3934,19 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(12));
         line.addView(copy, copyParams);
         // In the home «مصروفات» list a refunded purchase shows what it contributes (net), so the rows add up to the header.
-        long repaid = MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter) && "expense".equals(item.kind) ? db.reimbursedOf(item.id) : 0;
-        TextView amount = label(repaid > 0 ? "−" + money(Math.max(0, item.amountMinor - repaid), item.currency) : signedMoney(item), 14, kindColor(item.kind), true);
+        long repaid = (statementRows || MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)) && "expense".equals(item.kind) ? db.reimbursedOf(item.id) : 0;
+        String shownAmount = statementRows ? ("income".equals(item.kind) ? "+" : "expense".equals(item.kind) ? "−" : "")
+                + money(statementContribution(item), item.currency)
+                : repaid > 0 ? "−" + money(Math.max(0, item.amountMinor - repaid), item.currency) : signedMoney(item);
+        TextView amount = label(shownAmount, 14, kindColor(item.kind), true);
+        if (statementRows) amount.setTag("statement_transaction_amount:" + item.id);
         amount.setTextDirection(View.TEXT_DIRECTION_LTR);
         line.addView(amount);
         row.addView(line);
+        if (statementRows && "income".equals(item.kind) && statementContribution(item) < item.amountMinor) {
+            row.addView(label("المبلغ المسجل " + isolate(money(item.amountMinor, item.currency)) + " · المحسوب في كشف الفترة "
+                    + isolate(money(statementContribution(item), item.currency)), 12, MUTED, false));
+        }
         if (repaid > 0) {
             TextView net = label("الشراء " + money(item.amountMinor, item.currency) + " − استرداد " + money(repaid, item.currency) + " = نصيبك", 12, INCOME, true);
             net.setPadding(dp(8), dp(6), dp(54), 0); row.addView(net);
@@ -4115,6 +4126,12 @@ public final class MainActivity extends Activity {
         for(CaptureEvents.Event event:new CaptureEvents(db).timelineBetween(start.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),end.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()))rows.add(new TransactionTimelineRow(null,event));
         rows.sort((a,b)->Long.compare(b.when(),a.when()));return rows;
     }
+    /** Same effective contribution used by ExpenseDb.flowItems; cache once per render, never alter the ledger. */
+    private long statementContribution(ExpenseDb.Transaction tx) {
+        if (statementOffsetCache == null) statementOffsetCache = db.reimbursementOffsets();
+        return ExpenseDb.effectiveAmount(tx, statementOffsetCache);
+    }
+
     private boolean matchesTransactionFilters(ExpenseDb.Transaction tx,String text){
         return (transactionKindFilter.isEmpty()||transactionKindFilter.equals(tx.kind))
                 &&(transactionCategoryFilter.isEmpty()||transactionCategoryFilter.equals(tx.category)||
@@ -4122,7 +4139,8 @@ public final class MainActivity extends Activity {
                 &&(!transactionExcludeTransfers||!isSentTransfer(tx))
                 &&MoneyFlow.matchesFilter(transactionBucketFilter,bucketOf(tx))
                 &&(!transactionStatementList || !MoneyFlow.isStatementOut(bucketOf(tx)) || bucketOf(tx)==MoneyFlow.Bucket.CASH_WITHDRAWAL || !ExpenseDb.paidFromCash(tx,sourceKinds()))
-                &&(transactionStatementIds==null || java.util.Arrays.stream(transactionStatementIds).anyMatch(id -> id==tx.id))
+                &&(!transactionStatementList || transactionStatementIds==null || java.util.Arrays.stream(transactionStatementIds).anyMatch(id -> id==tx.id))
+                &&(!transactionStatementList || statementContribution(tx) > 0)
                 &&(transactionCurrencyFilter.isEmpty()||transactionCurrencyFilter.equals(tx.currency))
                 &&(transactionSourceFilter==null||transactionSourceFilter.equals(tx.paymentSourceId)||transactionSourceFilter.equals(tx.destinationSourceId))
                 &&(text.isEmpty()||(tx.merchant+" "+tx.category+" "+money(tx.amountMinor,tx.currency)).toLowerCase(Locale.ROOT).contains(text));
@@ -6730,7 +6748,7 @@ public final class MainActivity extends Activity {
             item.setOnClickListener(v -> {
                 if (tab == 4) insightsSection="";
                 transactionsReturnDialog="";transactionsPointsCurrency="";transactionJourney.clear();
-                if (tab == 6) { transactionBucketFilter = ""; transactionPeriod = null; transactionCurrencyFilter = ""; transactionsBackTab = 0; }
+                if (tab == 6) { transactionStatementList=false;transactionStatementIds=null;transactionBucketFilter = ""; transactionPeriod = null; transactionCurrencyFilter = ""; transactionsBackTab = 0; }
                 selectedTab = tab; render();
             });
         }
@@ -7407,7 +7425,7 @@ public final class MainActivity extends Activity {
         UiKit.StackedBars chart = new UiKit.StackedBars(this);
         chart.setData(values, labels, colors, -1, MUTED, BORDER, REGULAR, "اللي خرج كل يوم في " + insightsPeriodName(), index -> {
             LocalDate day = period[0].plusDays(index);
-            transactionPeriod = new LocalDate[]{day, day.plusDays(1)};
+            transactionPeriod = new LocalDate[]{day, day.plusDays(1)}; transactionStatementList=false; transactionStatementIds=null;
             transactionKindFilter = ""; transactionCategoryFilter = ""; transactionBucketFilter = ""; transactionSourceFilter = null;
             transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionSearch = ""; searchOpen = false;
             selectedTab = 6; render();

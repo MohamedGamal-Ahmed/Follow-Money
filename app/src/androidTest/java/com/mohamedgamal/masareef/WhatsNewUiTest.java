@@ -68,20 +68,20 @@ final class WhatsNewUiTest {
 
             target.getSharedPreferences(STATE,0).edit().clear().commit();
             launch(null);
-            ok(has("جديد في النسخة "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)),"Update from before the feature (no key, intro done) did not show the card");
+            ok(has("جديد في النسخة"),"Update from before the feature (no key, intro done) did not show the card");
             ok(lastSeen()==-99,"Number recorded before «تمام» on a pre-feature update");
 
             target.getSharedPreferences(STATE,0).edit().putInt(KEY,BuildConfig.VERSION_CODE-1).commit();
             launch(null);
-            ok(has("جديد في النسخة "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)),"Shipped notes did not produce a card after an update");
+            ok(has("جديد في النسخة"),"Shipped notes did not produce a card after an update");
             ok(lastSeen()==BuildConfig.VERSION_CODE-1,"Number recorded before the user dismissed the card");
             launch(notes);
-            ok(has("QA POINT ONE")&&has("QA POINT TWO"),"Headline points missing");
-            ok(!has("QA POINT THREE"),"Card shows more than two points");ok(has("كل التفاصيل"),"Details link missing");shot("05-whats-new-card");
-            click("كل التفاصيل");ok(has("النسخة "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)),"Details dialog does not show the notes");click("إغلاق");
-            click("تمام");
-            ok(!has("جديد في النسخة"),"Card stayed after «تمام»");
-            ok(lastSeen()==BuildConfig.VERSION_CODE,"«تمام» did not record the version code");
+            ok(!has("QA POINT ONE") && !has("QA POINT TWO") && !has("QA POINT THREE"),"Compact news line has no body points");
+            ok(has("جديد في النسخة"),"Compact headline missing");shot("05-whats-new-card");
+            click("جديد في النسخة");ok(has("النسخة "+WhatsNew.baseVersion(BuildConfig.VERSION_NAME)),"Details page does not show the notes");click("إغلاق");
+            click("إخفاء الجديد");
+            ok(!has("جديد في النسخة"),"Line stayed after dismissal");
+            ok(lastSeen()==BuildConfig.VERSION_CODE,"Dismissal did not record the version code");
             launch(notes);
             ok(!has("جديد في النسخة"),"Card returned after relaunch");
 
