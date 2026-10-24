@@ -5886,7 +5886,7 @@ public final class MainActivity extends Activity {
             TextView points=label("نقاط الالتزام · "+code+" ←",13,ACCENT,true);
             points.setPadding(0,dp(8),0,dp(12));points.setOnClickListener(v->{if(dailyDetails!=null)dailyDetails.dismiss();pointsDialog(code);});dailyDetailsContent.addView(points);
         }
-        dailyDetailsContent.addView(label("مصروف اليوم = صرف يومي بس (شراء ورسوم). سحب الكاش اتنقل من حسابك لكاش ومش مصروف. الأقساط والفواتير والتحويلات لناس ليها سطر لوحدها في التحليلات ومش بتاكل من الحد اليومي. الدخل والتحويلات الداخلية لا تزود الحد. المتبقي لا ينتقل لبكرة. كل عملة لها حد منفصل.",12,MUTED,false));
+        dailyDetailsContent.addView(label("مصروف اليوم = مشتريات ورسوم بس. سحب الكاش اتنقل من حسابك لكاش ومش مصروف. الأقساط والفواتير والتحويلات لناس ليها سطر لوحدها في التحليلات ومش بتاكل من الحد اليومي. الدخل والتحويلات الداخلية لا تزود الحد. المتبقي لا ينتقل لبكرة. كل عملة لها حد منفصل.",12,MUTED,false));
         dailyDetailsContent.addView(label("اليوم من 00:00 حتى 00:00 التالي حسب "+summary.zone+" · تحديث "+summary.date+" "+summary.updated.atZone(summary.zone).toLocalTime().withNano(0),11,MUTED,false));
     }
 
@@ -6918,7 +6918,7 @@ public final class MainActivity extends Activity {
         hero.addView(label(current.outCount()+" عملية · "+current.byDay.size()+" يوم فيه حركة مسجلة",12,0xffb9d3c8,false));
         hero.setOnClickListener(v->openMonthlyTransactions(null,"",""));
         section("حركة الشهر",null,null);LinearLayout totals=listCard(page);
-        monthlyMetric(totals,"صرف يومي",current.of(MoneyFlow.Bucket.LIVING),CORAL,()->openMonthlyTransactions(MoneyFlow.Bucket.LIVING,"",""));
+        monthlyMetric(totals,"مشتريات ورسوم",current.of(MoneyFlow.Bucket.LIVING),CORAL,()->openMonthlyTransactions(MoneyFlow.Bucket.LIVING,"",""));
         monthlyMetric(totals,"التزامات مدفوعة",current.of(MoneyFlow.Bucket.COMMITMENT),dark?0xffa0aafc:INDIGO,()->openMonthlyTransactions(MoneyFlow.Bucket.COMMITMENT,"",""));
         monthlyMetric(totals,"تحويلات لناس غير محددة الغرض",current.of(MoneyFlow.Bucket.OPEN_TRANSFER),dark?0xfff2ac65:ORANGE,()->openMonthlyTransactions(MoneyFlow.Bucket.OPEN_TRANSFER,"",""));
         monthlyMetric(totals,"وارد مسجل",current.of(MoneyFlow.Bucket.INFLOW),INCOME,()->openMonthlyTransactions(MoneyFlow.Bucket.INFLOW,"",""));
@@ -6927,14 +6927,14 @@ public final class MainActivity extends Activity {
         monthlyMetric(totals,"صافي الصرف والدخل المسجل",current.of(MoneyFlow.Bucket.INFLOW)-current.totalOut(),INK,null);
         note("العملات منفصلة. الصافي مش رصيد بنك أو وفر مؤكد. الصرف اليومي يشمل الشراء والرسوم؛ سحب الكاش اتنقل من حسابك لكاش ومش مصروف. الاسترداد المرتبط يُخصم من العملية الأصلية والوارد زي باقي التحليلات.");
 
-        section("صرفك اليومي راح فين؟",null,null);LinearLayout categories=listCard(page);long living=current.of(MoneyFlow.Bucket.LIVING);
+        section("مشترياتك ورسومك راحت فين؟",null,null);LinearLayout categories=listCard(page);long living=current.of(MoneyFlow.Bucket.LIVING);
         for(Map.Entry<String,Long> entry:current.livingCategories()) {
             String name=entry.getKey();monthlyMetric(categories,name,entry.getValue(),categoryStyle(name)[1],()->openMonthlyTransactions(MoneyFlow.Bucket.LIVING,name,""));
             TextView share=pill(Math.round(100.0*entry.getValue()/Math.max(1,living))+"%",BORDER,MUTED);share.setTextDirection(View.TEXT_DIRECTION_LTR);
             LinearLayout.LayoutParams shareParams=new LinearLayout.LayoutParams(-2,-2);shareParams.setMarginStart(dp(8));
             ((LinearLayout)categories.getChildAt(categories.getChildCount()-1)).addView(share,shareParams);
         }
-        if(living==0)categories.addView(label("مفيش صرف يومي مسجل بالعملة دي",13,MUTED,false));
+        if(living==0)categories.addView(label("مفيش مشتريات ورسوم مسجلة بالعملة دي",13,MUTED,false));
         section("سلوك الصرف",null,null);LinearLayout habits=card();
         if("EGP".equals(monthlyCurrency))monthlyMetric(habits,"مدفوعات حتى 100 جنيه · "+data.smallCount+" عمليات",data.smallTotal,INK,null);
         habits.addView(label("متوسط العملية اليومية: "+money(current.livingAverage(),monthlyCurrency)+" · عددها "+current.countOf(MoneyFlow.Bucket.LIVING),13,MUTED,false));
@@ -6943,8 +6943,8 @@ public final class MainActivity extends Activity {
         if(current.uncategorized>0)note(current.uncategorized+" عمليات غير مصنفة بقيمة "+money(current.uncategorizedAmount,monthlyCurrency)+"؛ التصنيفات ونِسبها تعتمد على التسجيل المتاح.");
 
         section("مقارنة بالشهر السابق",null,null);LinearLayout comparison=card();
-        monthlyMetric(comparison,"صرف يومي · "+monthlyName(monthlyMonth.minusMonths(1)),data.previous.of(MoneyFlow.Bucket.LIVING),MUTED,null);
-        monthlyMetric(comparison,"صرف يومي · "+monthlyName(monthlyMonth),living,INK,null);
+        monthlyMetric(comparison,"مشتريات ورسوم · "+monthlyName(monthlyMonth.minusMonths(1)),data.previous.of(MoneyFlow.Bucket.LIVING),MUTED,null);
+        monthlyMetric(comparison,"مشتريات ورسوم · "+monthlyName(monthlyMonth),living,INK,null);
         SharedPreferences prefs=MonthlySummaryReceiver.settings(this);
         String nowKey="coverage_"+monthlyMonth+"_"+monthlyCurrency,previousKey="coverage_"+monthlyMonth.minusMonths(1)+"_"+monthlyCurrency;
         boolean confirmed=data.currentFingerprint.equals(prefs.getString(nowKey,"")) && data.previousFingerprint.equals(prefs.getString(previousKey,""));
@@ -7074,7 +7074,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero = new LinearLayout(this); hero.setOrientation(LinearLayout.VERTICAL);
         hero.setPadding(dp(20), dp(18), dp(20), dp(18));
         hero.setBackground(rounded(BRAND, 24));
-        hero.addView(label("صرف يومي · " + insightsPeriodName(), 13, 0xffb9d3c8, false));
+        hero.addView(label("مشتريات ورسوم · " + insightsPeriodName(), 13, 0xffb9d3c8, false));
         TextView living = label(money(s.of(MoneyFlow.Bucket.LIVING), "EGP"), 30, Color.WHITE, true);
         living.setTextDirection(View.TEXT_DIRECTION_LTR);
         hero.addView(living);
@@ -7095,7 +7095,7 @@ public final class MainActivity extends Activity {
         total.setPadding(0, dp(12), 0, dp(12));
         LinearLayout totalCopy = new LinearLayout(this); totalCopy.setOrientation(LinearLayout.VERTICAL);
         totalCopy.addView(label("إجمالي المصروف", 13, MUTED, false));
-        totalCopy.addView(label("صرف يومي + أقساط + تحويلات لناس · " + s.outCount() + " عملية", 11, MUTED, false));
+        totalCopy.addView(label("مشتريات ورسوم + أقساط + تحويلات لناس · " + s.outCount() + " عملية", 11, MUTED, false));
         total.addView(totalCopy, new LinearLayout.LayoutParams(0, -2, 1));
         TextView totalAmount = label(money(s.totalOut(), "EGP"), 14, MUTED, true);
         totalAmount.setTextDirection(View.TEXT_DIRECTION_LTR);
@@ -7106,7 +7106,7 @@ public final class MainActivity extends Activity {
         if(livingReport && !overview) {
             section("تكلفة المعيشة المسجلة",null,null);
             LinearLayout cost=card();cost.addView(label(money(s.of(MoneyFlow.Bucket.LIVING)+s.of(MoneyFlow.Bucket.COMMITMENT),"EGP"),28,INK,true));
-            cost.addView(label("صرف يومي "+money(s.of(MoneyFlow.Bucket.LIVING),"EGP")+" · التزامات "+money(s.of(MoneyFlow.Bucket.COMMITMENT),"EGP"),13,MUTED,false));
+            cost.addView(label("مشتريات ورسوم "+money(s.of(MoneyFlow.Bucket.LIVING),"EGP")+" · التزامات "+money(s.of(MoneyFlow.Bucket.COMMITMENT),"EGP"),13,MUTED,false));
             cost.addView(label("للفترة المختارة، حسب العمليات المسجلة. التحويلات مجهولة الغرض وبين حساباتك مستبعدة، وسحب الكاش اتنقل من حسابك لكاش ومش مصروف.",12,MUTED,false));
         }
         // Findings: forecast, what is left, commitment burden, habits, unusual payments...
@@ -7192,13 +7192,13 @@ public final class MainActivity extends Activity {
         for (Map.Entry<String, MoneyFlow.Summary> entry : all.entrySet()) {
             if ("EGP".equals(entry.getKey())) continue;
             MoneyFlow.Summary other = entry.getValue();
-            others.append(others.length() == 0 ? "" : "\n").append(entry.getKey()).append(": صرف يومي ")
+            others.append(others.length() == 0 ? "" : "\n").append(entry.getKey()).append(": مشتريات ورسوم ")
                     .append(money(other.of(MoneyFlow.Bucket.LIVING), entry.getKey())).append(" · التزامات ")
                     .append(money(other.of(MoneyFlow.Bucket.COMMITMENT), entry.getKey())).append(" · دخلت ")
                     .append(money(other.of(MoneyFlow.Bucket.INFLOW), entry.getKey()));
         }
         if (others.length() > 0) note("عملات تانية (مش مجموعة مع الجنيه):\n" + others);
-        note("نفس التعريفات في كل الصفحات: «صرف يومي» شراء ورسوم. الأقساط والفواتير والاشتراكات سطر لوحدها. " +
+        note("نفس التعريفات في كل الصفحات: «مشتريات ورسوم» شراء ورسوم. الأقساط والفواتير والاشتراكات سطر لوحدها. " +
                 "التحويلات لناس لحد ما تحدد غرضها سطر لوحدها. التحويل بين حساباتك وسحب الكاش مش صرف ولا دخل. الأرقام بالجنيه.");
     }
 
@@ -7313,7 +7313,7 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(8), dp(8)); dotParams.setMarginEnd(dp(4));
             if (legend.getChildCount() > 0) dotParams.setMarginStart(dp(10));
             legend.addView(dot, dotParams);
-            legend.addView(label(bucket == MoneyFlow.Bucket.OPEN_TRANSFER ? "تحويلات لناس" : bucket == MoneyFlow.Bucket.COMMITMENT ? "أقساط والتزامات" : "صرف يومي", 11, MUTED, false));
+            legend.addView(label(bucket == MoneyFlow.Bucket.OPEN_TRANSFER ? "تحويلات لناس" : bucket == MoneyFlow.Bucket.COMMITMENT ? "أقساط والتزامات" : "مشتريات ورسوم", 11, MUTED, false));
         }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(6);
         box.addView(legend, params);
