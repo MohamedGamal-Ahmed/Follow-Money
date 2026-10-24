@@ -16,6 +16,7 @@ public final class AuditStructureTest {
 
     public static void main(String[] args) throws IOException {
         String main = read("app/src/main/java/com/mohamedgamal/masareef/MainActivity.java");
+        classificationWriters();
         String daily = read("app/src/main/java/com/mohamedgamal/masareef/DailyRefreshReceiver.java");
         check(!body(main, "private void render()").contains("normalizeEarlyPayments"),
                 "render() must not normalize (it writes to the ledger)");
@@ -124,6 +125,30 @@ public final class AuditStructureTest {
 
     private static String read(String path) throws IOException {
         return new String(Files.readAllBytes(Path.of(path)), StandardCharsets.UTF_8);
+    }
+
+    /** Enumerate SQL writes, not a fixed list of vulnerable methods: a new automatic writer must be guarded too. */
+    private static void classificationWriters() throws IOException {
+        try(java.util.stream.Stream<Path> files=Files.list(Path.of("app/src/main/java/com/mohamedgamal/masareef"))) {
+        for(Path path:(Iterable<Path>)files.filter(p->p.toString().endsWith(".java"))::iterator) {
+            String file=path.getFileName().toString().replace(".java","");
+            String source=read(path.toString());
+            java.util.regex.Matcher methods=java.util.regex.Pattern.compile("(?m)^    (?:public |private |protected |static |final |synchronized )*(?:[\\w<>.,?\\[\\]]+ )+(\\w+)\\([^;{]*\\)\\s*\\{").matcher(source);
+            while(methods.find()) {
+                String name=methods.group(1),method=body(source,methods.group().substring(0,methods.group().lastIndexOf('{')).trim());
+                // Explicit user decisions set user_edited=1, including card/own-transfer confirmations.
+                boolean explicit=java.util.Set.of("TransactionRepository.update","ExpenseDb.classifyReviewed","ExpenseDb.confirmReview","ExpenseDb.reconcileOwnTransfer","ExpenseDb.reconcileIncome","ExpenseDb.confirmRepeatingTransfer","ExpenseDb.markAsTransfer","CardSettlements.confirm").contains(file+"."+name);
+                java.util.regex.Matcher writes=java.util.regex.Pattern.compile("(?:\\.update\\(\\s*\"transactions\"|execSQL\\(\"UPDATE transactions)[^;]+;",java.util.regex.Pattern.DOTALL).matcher(method);
+                while(writes.find()) {
+                    String write=writes.group();boolean classification=write.contains("needs_review")||write.contains("category");
+                    java.util.regex.Matcher values=java.util.regex.Pattern.compile("\\.update\\(\\s*\"transactions\"\\s*,\\s*(\\w+)").matcher(write);
+                    if(values.find()) classification=java.util.regex.Pattern.compile("\\b"+values.group(1)+"\\.put\\(\\s*\"(?:category|needs_review)\"").matcher(method).find();
+                    if(!classification)continue;
+                    check(explicit?method.contains("\"user_edited\",1")||method.contains("\"user_edited\", 1"):write.contains("user_edited=0"),file+"."+name+" classification/review writer needs an explicit decision or WHERE user_edited=0: "+write);
+                }
+            }
+        }
+        }
     }
 
     /** Body of the named method, matched by brace depth while skipping comments and literals. */

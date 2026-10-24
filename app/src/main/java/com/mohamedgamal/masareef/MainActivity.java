@@ -105,6 +105,7 @@ public final class MainActivity extends Activity {
     private boolean bulkMode;
     private final Set<Long> bulkSelected=new HashSet<>();
     private final Map<Long,CheckBox> bulkChecks=new LinkedHashMap<>();
+    private final Set<Long> bulkVisibleIds=new HashSet<>();
     private TextView bulkCount;
     private Button bulkApply;
     private AlertDialog dailyDetails;
@@ -179,6 +180,11 @@ public final class MainActivity extends Activity {
     private final java.util.concurrent.atomic.AtomicLong ledgerVersion = new java.util.concurrent.atomic.AtomicLong();
     /** The change counter the applied snapshot was read at; render() reloads once the ledger moves past it. */
     private Long ledgerChanges;
+    private Long requestedLedgerChanges,lastRenderedChanges;
+    private Set<Long> lastRenderedCandidates=java.util.Collections.emptySet();
+    private LedgerSnapshot workerSnapshot;
+    private ExpenseDb workerDatabase;
+    private LocalDate workerSnapshotDate;
     private final BroadcastReceiver dataChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             refreshPointsSheet();
@@ -2960,6 +2966,7 @@ public final class MainActivity extends Activity {
 
     /** A local ledger edit: bump the generation so an in-flight snapshot is rejected, then reload the cache. */
     private void invalidateLedger() {
+        requestedLedgerChanges=db.changes();
         ledgerVersion.incrementAndGet();
         refreshLedger(true);
     }
@@ -2986,7 +2993,15 @@ public final class MainActivity extends Activity {
         final long version = ledgerVersion.get();
         CaptureQueue.submit(() -> {
             LedgerSnapshot snapshot = null;
-            try { snapshot = readLedgerSnapshot(db, version); }
+            try {
+                long revision=db.changes();LocalDate today=LocalDate.now();
+                if(workerDatabase==db&&workerSnapshot!=null&&workerSnapshot.changes==revision&&today.equals(workerSnapshotDate))
+                    snapshot=new LedgerSnapshot(workerSnapshot.candidates,new ArrayList<>(workerSnapshot.rows),version,revision,0);
+                else {
+                    snapshot = readLedgerSnapshot(db, version);
+                    workerDatabase=db;workerSnapshot=snapshot;workerSnapshotDate=today;
+                }
+            }
             catch (RuntimeException ignored) { }
             final LedgerSnapshot ready = snapshot;
             postUi(() -> {
@@ -3003,12 +3018,13 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 boolean changed = ledgerRedrawPending || ready.normalized > 0 || cacheDiffers(ready);
+                boolean visibleChanged=lastRenderedChanges==null||lastRenderedChanges!=ready.changes||!lastRenderedCandidates.equals(ready.candidates);
                 recurringCandidates = ready.candidates;
                 recurringCandidateRows = ready.rows;
                 ledgerChanges = ready.changes;
                 // Never rebuild the screen while the user is typing in it; the cache is already current, so the
                 // next render (leaving the editor, opening a page) shows the settled data.
-                if (rerender && changed && canRedrawNow()) {
+                if (rerender && changed && visibleChanged && canRedrawNow()) {
                     ledgerRedrawPending = false;
                     render();
                 }
@@ -3023,10 +3039,11 @@ public final class MainActivity extends Activity {
         // Any committed tracked write bumps the persistent revision, so the cached suggestions cannot stay stale
         // behind a page whose only refresh path is this render().
         sourceKindCache = null;
+        long renderRevision=db==null?-1:db.changes();
         if (db != null) {
             long changes = db.changes();
             if (ledgerChanges == null) ledgerChanges = changes;
-            else if (ledgerChanged(changes, ledgerChanges)) invalidateLedger();
+            else if (ledgerChanged(changes, ledgerChanges)&&(requestedLedgerChanges==null||requestedLedgerChanges!=changes)) invalidateLedger();
         }
         savePageScroll();
         DailyPointsStore.observeToday(this);
@@ -3072,6 +3089,7 @@ public final class MainActivity extends Activity {
         scroll.post(()->scroll.scrollTo(0,restoreY));
         if(selectedTab==5&&settingsFocus!=null){String focus=settingsFocus;settingsFocus=null;scroll.post(()->focusSettingRow(scroll,focus));}
         refreshWidgets();
+        lastRenderedChanges=renderRevision;lastRenderedCandidates=new HashSet<>(recurringCandidates);
     }
 
     private void savePageScroll() {
@@ -3480,14 +3498,14 @@ public final class MainActivity extends Activity {
         if(bulkMode) {
             LinearLayout tools=card();bulkCount=label("المحدد: "+bulkSelected.size(),14,INK,true);tools.addView(bulkCount);
             LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.CENTER_VERTICAL);
-            Button all=ui.button("اختيار النتائج كلها",false,false,()->{for(CheckBox c:bulkChecks.values())if(c.isEnabled())c.setChecked(true);});
+            Button all=ui.button("اختيار النتائج كلها",false,false,()->{bulkSelected.addAll(bulkVisibleIds);for(CheckBox c:bulkChecks.values())if(c.isEnabled())c.setChecked(true);updateBulkCount();});
             actions.addView(all,new LinearLayout.LayoutParams(0,-2,1));
-            Button clear=ui.button("إلغاء التحديد",false,false,()->{for(CheckBox c:bulkChecks.values())c.setChecked(false);});
+            Button clear=ui.button("إلغاء التحديد",false,false,()->{bulkSelected.clear();for(CheckBox c:bulkChecks.values())c.setChecked(false);updateBulkCount();});
             LinearLayout.LayoutParams clearParams=new LinearLayout.LayoutParams(0,-2,1);clearParams.setMarginStart(dp(8));actions.addView(clear,clearParams);
             LinearLayout.LayoutParams actionsParams=new LinearLayout.LayoutParams(-1,-2);actionsParams.topMargin=dp(10);tools.addView(actions,actionsParams);
             bulkApply=ui.button("تغيير تصنيف المحدد",true,false,this::bulkCategoryDialog);
             LinearLayout.LayoutParams applyParams=new LinearLayout.LayoutParams(-1,-2);applyParams.topMargin=dp(8);tools.addView(bulkApply,applyParams);
-            tools.addView(label("التعديل الجماعي للمصروفات فقط؛ الدخل والتحويلات الداخلية لا تتغير.",12,MUTED,false));
+            tools.addView(label("المصروفات يتغير تصنيفها؛ الدخل والتحويلات والتسويات المحتاجة مراجعة يتعلّموا إنهم اتراجعوا مع الحفاظ على نوعهم.",12,MUTED,false));
         }
         EditText search = null;
         if (searchOpen) {
@@ -3526,7 +3544,7 @@ public final class MainActivity extends Activity {
         List<ExpenseDb.Transaction> month = transactionPeriod==null ? db.transactionsForMonth(selectedMonth) : db.transactionsBetween(transactionPeriod[0],transactionPeriod[1]);
         int uncategorized = 0;
         for (ExpenseDb.Transaction item : month)
-            if ("expense".equals(item.kind) && "غير مصنف".equals(item.category) || item.needsReview) {
+            if (needsAttention(item)) {
                 uncategorized++;
             }
         if (uncategorized > 0) {
@@ -3571,25 +3589,36 @@ public final class MainActivity extends Activity {
         Set<Long> candidates = recurringCandidates;
         Map<Long, Long> dayOffsets = db.reimbursementOffsets();
         List<TransactionTimelineRow> timeline=transactionTimeline(month);
-        Runnable refresh = () -> {
+        // Bound view creation, not the ledger/filter/day totals. Every matching row remains selectable/searchable.
+        final int[] shown={12};
+        Runnable refresh = new Runnable(){@Override public void run(){
             results.removeAllViews();bulkChecks.clear();Set<Long> visible=new HashSet<>();
             String text = transactionSearch.trim().toLowerCase(Locale.ROOT);
+            List<TransactionTimelineRow> matching=new ArrayList<>();
+            Map<LocalDate,MoneyTotals> dayTotals=new LinkedHashMap<>();
+            for(TransactionTimelineRow entry:timeline){
+                ExpenseDb.Transaction tx=entry.transaction;
+                if(tx==null?!matchesCaptureFilters(entry.event,text):!matchesTransactionFilters(tx,text))continue;
+                if(tx!=null&&MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)&&ExpenseDb.effectiveAmount(tx,dayOffsets)==0)continue;
+                matching.add(entry);
+                LocalDate day=Instant.ofEpochMilli(entry.when()).atZone(ZoneId.systemDefault()).toLocalDate();
+                MoneyTotals total=dayTotals.computeIfAbsent(day,key->new MoneyTotals());
+                if(tx!=null){total.add(tx.currency,tx.kind,tx.category,ExpenseDb.effectiveAmount(tx,dayOffsets));if("expense".equals(tx.kind)||tx.needsReview)visible.add(tx.id);}
+            }
+            bulkVisibleIds.clear();bulkVisibleIds.addAll(visible);
             LocalDate currentDay = null;
             LinearLayout group = null;
             TextView dayTotal = null;
             MoneyTotals net = new MoneyTotals();
             int count = 0;
-            for (TransactionTimelineRow entry : timeline) {
+            for (TransactionTimelineRow entry : matching) {
                 ExpenseDb.Transaction tx=entry.transaction;
-                if(tx==null){if(!matchesCaptureFilters(entry.event,text))continue;}
-                else if(!matchesTransactionFilters(tx,text))continue;
-                // Rows fully refunded contribute nothing to the home «مصروفاتك» number, so they stay out of its list too.
-                if(tx!=null&&MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)&&ExpenseDb.effectiveAmount(tx,dayOffsets)==0)continue;
+                if(count>=shown[0])break;
                 LocalDate day = Instant.ofEpochMilli(entry.when()).atZone(ZoneId.systemDefault()).toLocalDate();
                 if (!day.equals(currentDay)) {
                     if (dayTotal != null) setDayTotal(dayTotal, net);
-                    currentDay = day; net = new MoneyTotals();
-                    LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+                    currentDay = day; net = dayTotals.get(day);
+                    LinearLayout header = new LinearLayout(MainActivity.this); header.setGravity(Gravity.CENTER_VERTICAL);
                     header.setPadding(dp(4), 0, dp(4), 0);
                     header.addView(label(dayLabel(day), 12, MUTED, false), new LinearLayout.LayoutParams(0, -2, 1));
                     dayTotal = label("", 12, MUTED, false);
@@ -3603,8 +3632,6 @@ public final class MainActivity extends Activity {
                 }
                 if(entry.event!=null)captureEventRow(group,entry.event);
                 else{
-                    net.add(tx.currency,tx.kind,tx.category,ExpenseDb.effectiveAmount(tx,dayOffsets));
-                    if("expense".equals(tx.kind))visible.add(tx.id);
                     transactionRow(group, tx, candidates.contains(tx.id));
                 }
                 count++;
@@ -3612,6 +3639,11 @@ public final class MainActivity extends Activity {
 
             if (dayTotal != null) setDayTotal(dayTotal, net);
             bulkSelected.retainAll(visible);updateBulkCount();
+            if(count<matching.size()) {
+                Button more=ui.button("عرض عمليات أقدم · "+(matching.size()-count)+" متبقية",false,false,()->{
+                    int y=pageScroll.getScrollY();shown[0]+=12;run();markDetailActions(results);pageScroll.post(()->pageScroll.scrollTo(0,y));
+                });results.addView(more);
+            }
             if (count == 0) {
                 LinearLayout box = card(results);
                 box.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -3619,7 +3651,7 @@ public final class MainActivity extends Activity {
                 Button reset=ui.button("مسح البحث والفلاتر",false,false,()->{resetTransactionFilters();render();});
                 LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(-2,-2);resetParams.topMargin=dp(10);box.addView(reset,resetParams);
             }
-        };
+        }};
         if (search != null) search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
@@ -3645,7 +3677,7 @@ public final class MainActivity extends Activity {
     }
 
     private void updateBulkCount() {
-        if(bulkCount!=null)bulkCount.setText("المحدد: "+bulkSelected.size()+" مصروف");
+        if(bulkCount!=null)bulkCount.setText("المحدد: "+bulkSelected.size()+" عملية");
         if(bulkApply!=null)bulkApply.setEnabled(!bulkSelected.isEmpty());
     }
 
@@ -3656,10 +3688,10 @@ public final class MainActivity extends Activity {
     }
 
     private final class BulkCategoryPage extends UiPages.Page {
-        BulkCategoryPage(Bundle draft,Bundle original){super("transaction_bulk_category","تغيير تصنيف المصروفات",draft,original);}
+        BulkCategoryPage(Bundle draft,Bundle original){super("transaction_bulk_category","تصنيف ومراجعة العمليات",draft,original);}
         private List<Long> ids(){List<Long> ids=new ArrayList<>();for(String id:draft.getString("ids","").split(","))if(!id.isEmpty())ids.add(Long.parseLong(id));return ids;}
         @Override void build(LinearLayout body,UiComponents components){
-            List<Long> ids=ids();components.caption("مراجعة "+ids.size()+" مصروف · الأرقام والحسابات والمصدر لن تتغير",body);
+            List<Long> ids=ids();components.caption("مراجعة "+ids.size()+" عملية · التصنيف للمصروفات المتاحة فقط؛ الباقي اعتماد مراجعة من غير تغيير النوع أو الأرقام والحسابات",body);
             boolean open=!ids.isEmpty();for(Long id:ids)open&=openTransferRow(id);
             String[] choices=open?withOwnTransfer(CATEGORIES):CATEGORIES;
             if(open)components.caption(OPEN_TRANSFER_HINT,body);
@@ -3671,7 +3703,7 @@ public final class MainActivity extends Activity {
         private List<Long> ownTransfers;
         @Override boolean save(){
             if(OWN_TRANSFER_CHOICE.equals(draft.getString("category"))){ownTransfers=ids();bulkSelected.clear();bulkMode=false;return true;}
-            int count=db.updateCategories(ids(),draft.getString("category"));bulkSelected.clear();bulkMode=false;toast("تم تصنيف "+count+" مصروف");return true;
+            ExpenseDb.ClassificationResult result=db.classifyReviewed(ids(),draft.getString("category"));bulkSelected.clear();bulkMode=false;toast(result.message());return true;
         }
         @Override void onSaved(){if(ownTransfers!=null)reconcileTransfers(ownTransfers);}
         @Override boolean restoreAfterRecreation(){return true;}
@@ -3824,7 +3856,7 @@ public final class MainActivity extends Activity {
         line.setGravity(Gravity.CENTER_VERTICAL);
         if(bulkMode&&selectedTab==6) {
             CheckBox check=new CheckBox(this);check.setContentDescription("تحديد "+item.merchant);
-            check.setEnabled("expense".equals(item.kind));check.setChecked(bulkSelected.contains(item.id));
+            check.setEnabled("expense".equals(item.kind)||item.needsReview);check.setChecked(bulkSelected.contains(item.id));
             check.setOnCheckedChangeListener((b,checked)->{if(checked)bulkSelected.add(item.id);else bulkSelected.remove(item.id);updateBulkCount();});
             bulkChecks.put(item.id,check);line.addView(check,new LinearLayout.LayoutParams(dp(48),dp(48)));
         }
@@ -3942,6 +3974,11 @@ public final class MainActivity extends Activity {
             if(why!=null&&!why.isEmpty())
                 detailRow(details,"حالة المراجعة",label(String.join("\n",ReviewReasons.text(java.util.Arrays.asList(why.split(",")))),12,CORAL,false));
             else detailRow(details,"حالة المراجعة",label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?"تحويل محتاج ربط؛ الخصم ما زال محسوبًا لحين مراجعتك":"مصدر العملية يحتاج مراجعة؛ المبلغ ما زال محسوبًا",12,CORAL,false));
+            details.addView(ui.button("تمام، دي صح",false,false,()->{
+                int changed=db.confirmReview(item.id);selectedTransaction=db.transactionById(item.id);
+                toast(changed>0?"اتعلّمت إنها اتراجعت":"العملية اتراجعت بالفعل أو لم تعد موجودة");
+                if(selectedTransaction==null)selectedTab=transactionReturnTab;render();
+            }));
         }
         TextView original=label("عرض الرسالة الأصلية",14,ACCENT,true);
         original.setOnClickListener(v -> showOriginalMessages(db.sourceEvidence(item.id)));
@@ -4035,7 +4072,7 @@ public final class MainActivity extends Activity {
     private boolean matchesTransactionFilters(ExpenseDb.Transaction tx,String text){
         return (transactionKindFilter.isEmpty()||transactionKindFilter.equals(tx.kind))
                 &&(transactionCategoryFilter.isEmpty()||transactionCategoryFilter.equals(tx.category)||
-                   NEEDS_ATTENTION_FILTER.equals(transactionCategoryFilter)&&("expense".equals(tx.kind)&&MoneyFlow.UNCATEGORIZED.equals(tx.category)||tx.needsReview))
+                   NEEDS_ATTENTION_FILTER.equals(transactionCategoryFilter)&&needsAttention(tx))
                 &&(!transactionExcludeTransfers||!isSentTransfer(tx))
                 &&MoneyFlow.matchesFilter(transactionBucketFilter,bucketOf(tx))
                 &&(!transactionStatementList||!ExpenseDb.paidFromCash(tx,sourceKinds()))
@@ -7382,8 +7419,8 @@ public final class MainActivity extends Activity {
         String[] purposes = withOwnTransfer(PURPOSES);
         new ChoiceDialogBuilder().setTitle("غرض التحويلات دي").setItems(purposes, (d, which) -> {
             if (which == 0) { reconcileTransfers(ids); return; }
-            int changed = db.updateCategories(ids, purposes[which]);
-            toast("اتحدد غرض " + changed + " تحويل"); render();
+            ExpenseDb.ClassificationResult result = db.classifyReviewed(ids, purposes[which]);
+            toast(result.message()); render();
         }).setNegativeButton("إلغاء", null).show();
     }
 
@@ -7554,8 +7591,12 @@ public final class MainActivity extends Activity {
     private String flowPeriodName() { return insightsPeriodName(); }
 
     /** A sent transfer to someone else whose purpose is not set yet (MoneyFlow OPEN_TRANSFER). */
-    private static boolean isSentTransfer(ExpenseDb.Transaction tx) {
-        return MoneyFlow.bucket(tx.kind, tx.category) == MoneyFlow.Bucket.OPEN_TRANSFER;
+    private static boolean needsAttention(ExpenseDb.Transaction tx) {
+        return "expense".equals(tx.kind)&&MoneyFlow.UNCATEGORIZED.equals(tx.category)||tx.needsReview;
+    }
+
+    private boolean isSentTransfer(ExpenseDb.Transaction tx) {
+        return bucketOf(tx) == MoneyFlow.Bucket.OPEN_TRANSFER;
     }
 
     private void flowAccountScreen() {

@@ -39,7 +39,7 @@ final class AccountRepository {
     }
 
     PaymentSource paymentSource(long id) {
-        for (PaymentSource source : paymentSources()) if (source.id == id) return source;
+        for (PaymentSource source : db.paymentSources()) if (source.id == id) return source;
         return null;
     }
 
