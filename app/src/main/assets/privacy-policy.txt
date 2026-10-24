@@ -1,5 +1,5 @@
 Follow Money — سياسة الخصوصية / Privacy Policy
-آخر تحديث / Last updated: 20 October 2026
+آخر تحديث / Last updated: 24 October 2026
 المطور / Developer: Mohamed Gamal
 للاستفسارات والخصوصية / Privacy contact: mgamal.ahmed@outlook.com
 
@@ -11,6 +11,8 @@ Follow Money تطبيق لتتبع المعاملات والميزانية مح�
 الوصول للإشعارات اختياري ويُفعّل من إعدادات Android. النظام يتيح الإشعارات للخدمة؛ التطبيق يعالج محتوى التطبيقات التي تختارها فقط، ويستبعد تطبيق SMS الافتراضي وTruecaller. يمكن معالجة الإشعارات النشطة عند الاتصال والجديدة في الخلفية؛ سجل الإشعارات القديم غير متاح. يعرض قائمة بالتطبيقات القابلة للفتح للاختيار محليًا؛ لا يرفع القائمة للمطور. اختَر تطبيقات الدفع فقط.
 
 نخزن المعاملات والحسابات والأرصدة والالتزامات والميزانيات والقواعد والتفضيلات والاسم والصورة الاختياريين على الجهاز. نصوص المصادر وأدلة العمليات المؤرشفة المحفوظة مشفرة باستخدام Android Keystore؛ قاعدة بيانات SQLite التي تحتوي على المعاملات نفسها ليست مشفرة بالكامل. إعدادات التطبيق تستبعد Android cloud backup وdevice transfer، لكنها لا تمنع النسخ بواسطة جهاز معدل أو أدوات خارجية. لا توجد حسابات مستخدم أو مزامنة سحابية أو خدمة إعلانات أو تحليلات استخدام داخل التطبيق، ولا يطلب التطبيق إذن INTERNET.
+
+التحقق من تحديثات التطبيق يتم عن طريق متجر Google Play المثبت على الجهاز؛ يتولى المتجر التحقق والتنزيل والتثبيت وفق شروط Google Play. لا يرسل Follow Money سجلك المالي أو رسائل SMS أو بياناتك إلى المطور، ولا يملك إذن INTERNET. يعالج متجر Play بيانات الجهاز الوصفية وإصدار التطبيق وقائمة الوحدات وحزم الأصول المثبتة لتحديد توفر التحديث وحجمه، وفق سياسات Google.
 
 قفل التطبيق اختياري ويستخدم قفل الجهاز. يمكن ضبط مهلة قبل طلب المصادقة، ومنع لقطات الشاشة ومعاينة التطبيق في شاشة التطبيقات الأخيرة. هذا القفل يحجب واجهة التطبيق عند فتحها؛ لا يشفّر قاعدة البيانات المالية ولا يوقف الالتقاط والإشعارات والويدجت. إذا أزلت قفل الشاشة من الجهاز، يتوقف قفل التطبيق مع تنبيه كي لا تفقد الوصول إلى بياناتك.
 
@@ -38,6 +40,8 @@ Follow Money tracks transactions and budgets locally. With your consent and Andr
 Optional Notification Access lets Android deliver notifications to the service. The app processes content only from apps you select, excluding the default SMS app and Truecaller. Active notifications may be processed when the service connects; new notifications can be processed in the background. Historical notification logs are not available. Launchable apps are listed locally for source selection; that list is not uploaded to the developer. Select payment apps only.
 
 Transactions, accounts, balances, commitments, budgets, rules, preferences and optional profile name/photo are stored locally. Saved source text and archived transaction evidence use Android Keystore encryption; the SQLite financial ledger is not fully encrypted. App configuration excludes Android cloud backup and device transfer; it does not prevent copying on modified devices or by external tools. The app has no user accounts, cloud sync, advertising service or usage analytics, and requests no INTERNET permission.
+
+App update checks use the Google Play Store app installed on the device. Play handles availability, downloading and installation under Google Play terms. Follow Money does not send your financial ledger, SMS or personal data to the developer and has no INTERNET permission. Play processes device metadata, application version and the installed modules and asset packs to determine update availability and size, under Google policies.
 
 Optional providers and sharing
 Voice entry invokes the system speech recognition provider, which may process audio off device under its own settings and privacy policy. An in-app disclosure precedes this action. Follow Money receives the resulting text for your review and does not save audio. Manual entry is available.
