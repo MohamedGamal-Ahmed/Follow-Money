@@ -49,7 +49,6 @@ final class InAppUpdate {
     }
 
     UpdatePrompt.Card card() { return card; }
-    int availableVersion() { return info == null ? 0 : info.availableVersionCode(); }
     long downloadedBytes() { return downloadedBytes; }
     long totalBytes() { return totalBytes; }
 

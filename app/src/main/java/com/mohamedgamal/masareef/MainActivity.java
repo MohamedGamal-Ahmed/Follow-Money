@@ -1693,21 +1693,21 @@ public final class MainActivity extends Activity {
     private void updateCard() {
         UpdatePrompt.Card state = updates == null ? UpdatePrompt.Card.NONE : updates.card();
         if (state == UpdatePrompt.Card.NONE) return;
-        updateStrip(state, updates.availableVersion(), updates.downloadedBytes(), updates.totalBytes());
+        updateStrip(state, updates.downloadedBytes(), updates.totalBytes());
     }
 
-    private void updateStrip(UpdatePrompt.Card state, int version, long downloaded, long total) {
+    private void updateStrip(UpdatePrompt.Card state, long downloaded, long total) {
         WrapRow row = homeStrip("in_app_update_card");
         LinearLayout leading = new LinearLayout(this); leading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView icon = label(state == UpdatePrompt.Card.RESTART ? "✓" : "↓", 18, LIME, true);
-        icon.setGravity(Gravity.CENTER); icon.setBackground(rounded(BRAND, 99));
-        icon.setMinHeight(dp(28)); leading.addView(icon, new LinearLayout.LayoutParams(dp(28), -2));
+        // A fixed 32dp circle: its glyph is capped so a large system font cannot stretch it into an oval.
+        TextView icon = label(state == UpdatePrompt.Card.RESTART ? "✓" : "↓", 16, LIME, true);
+        cappedTextSize(icon, 16, 1f); icon.setPadding(0, 0, 0, 0); icon.setIncludeFontPadding(false);
+        icon.setGravity(Gravity.CENTER); icon.setBackground(rounded(BRAND, 99)); icon.setTag("update_icon");
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        leading.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        // The version code means nothing to the user; Play's own sheet names the release.
         String title = state == UpdatePrompt.Card.OFFER ? "فيه نسخة جديدة" : state == UpdatePrompt.Card.DOWNLOADING ? "التحديث بيتحمّل…" : "التحديث جاهز";
-        TextView copy = label(title + (state == UpdatePrompt.Card.OFFER && version > 0 ? " " + isolate("إصدار " + version) : ""), 12, INK, true);
-        if (state == UpdatePrompt.Card.OFFER && version > 0) {
-            android.text.SpannableString text = new android.text.SpannableString(copy.getText());
-            text.setSpan(new android.text.style.RelativeSizeSpan(0.8f), title.length(), text.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); copy.setText(text);
-        }
+        TextView copy = label(title, 12, INK, true);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2); cp.setMarginStart(dp(6)); leading.addView(copy, cp); row.addView(leading);
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
         if (state == UpdatePrompt.Card.DOWNLOADING) {
@@ -1727,9 +1727,16 @@ public final class MainActivity extends Activity {
 
     private TextView stripAction(String title, boolean primary, Runnable action) {
         TextView button = label(title, 12, primary ? LIME : ACCENT, true);
-        button.setGravity(Gravity.CENTER); button.setPadding(dp(8), dp(3), dp(8), dp(3));
+        button.setGravity(Gravity.CENTER); button.setPadding(dp(12), 0, dp(12), 0);
+        cappedTextSize(button, 12, 1.3f); button.setSingleLine(true);
         button.setMinHeight(dp(UiTheme.TOUCH)); button.setMinWidth(dp(UiTheme.TOUCH));
-        if (primary) button.setBackground(new android.graphics.drawable.InsetDrawable(rounded(BRAND, 99), 0, dp(4), 0, dp(4)));
+        if (primary) {
+            // The pill stays 36dp tall and centred while the view itself keeps the 48dp touch target.
+            android.graphics.drawable.LayerDrawable pill = new android.graphics.drawable.LayerDrawable(
+                    new android.graphics.drawable.Drawable[]{rounded(BRAND, 99)});
+            pill.setLayerGravity(0, Gravity.FILL_HORIZONTAL | Gravity.CENTER_VERTICAL); pill.setLayerHeight(0, dp(36));
+            button.setBackground(pill); button.setTag("update_action");
+        }
         button.setOnClickListener(v -> action.run()); return button;
     }
 

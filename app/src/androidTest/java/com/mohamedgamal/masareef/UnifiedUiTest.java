@@ -203,12 +203,23 @@ final class UnifiedUiTest {
                 main(() -> {
                     LinearLayout page = (LinearLayout)get("page"); page.removeAllViews();
                     ((android.widget.ScrollView)get("pageScroll")).scrollTo(0, 0);
-                    invoke("updateStrip", new Class<?>[]{UpdatePrompt.Card.class, int.class, long.class, long.class}, state, 14, 62L, 100L);
+                    invoke("updateStrip", new Class<?>[]{UpdatePrompt.Card.class, long.class, long.class}, state, 62L, 100L);
                 });
                 main(() -> {
                     View strip = root().findViewWithTag("in_app_update_card"); android.graphics.Rect visible = new android.graphics.Rect();
                     ok(strip.getGlobalVisibleRect(visible) && visible.width() == strip.getWidth() && visible.height() == strip.getHeight(), "Entire update strip inside screen: " + state);
                     checkStripViews(strip);
+                    float density = activity.getResources().getDisplayMetrics().density;
+                    View icon = strip.findViewWithTag("update_icon");
+                    ok(icon.getWidth() == Math.round(32 * density) && icon.getHeight() == Math.round(32 * density), "Update icon stays a 32dp circle: " + icon.getWidth() + "x" + icon.getHeight());
+                    View action = strip.findViewWithTag("update_action");
+                    if (state != UpdatePrompt.Card.DOWNLOADING) {
+                        ok(action != null && action.getHeight() >= Math.round(UiTheme.TOUCH * density), "Update action keeps 48dp touch target");
+                        android.graphics.drawable.LayerDrawable background = (android.graphics.drawable.LayerDrawable)action.getBackground();
+                        background.setBounds(0, 0, action.getWidth(), action.getHeight()); android.graphics.Rect pill = background.getDrawable(0).getBounds();
+                        ok(Math.abs(pill.height() - Math.round(36 * density)) <= 1 && pill.width() == action.getWidth(), "Update pill drawn 36dp tall: " + pill);
+                    } else ok(action == null, "No action while downloading");
+                    ok(!stripText(strip).contains("إصدار"), "No version code in the update strip");
                 });
                 screen("11-update-" + state.name().toLowerCase(java.util.Locale.ROOT));
             }
@@ -227,6 +238,12 @@ final class UnifiedUiTest {
             try { if (activity != null) main(() -> activity.finish()); } catch (Throwable ignored) {}
             runner.finish(status, result);
         }
+    }
+    private String stripText(View view) {
+        if (view instanceof android.widget.TextView) return ((android.widget.TextView)view).getText().toString();
+        StringBuilder text = new StringBuilder();
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup)view).getChildCount(); i++) text.append(stripText(((ViewGroup)view).getChildAt(i))).append(' ');
+        return text.toString();
     }
     private void checkStripViews(View view) {
         if (view instanceof android.widget.TextView) {
