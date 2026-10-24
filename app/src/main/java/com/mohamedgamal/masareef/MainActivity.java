@@ -1666,51 +1666,74 @@ public final class MainActivity extends Activity {
 
     private void whatsNewCard() {
         if (whatsNew == null) return;
-        LinearLayout box = card();
-        box.addView(label("جديد في النسخة " + whatsNew.version, 15, INK, true));
-        // The card is a headline: two points at most. The rest is one tap away in the same dialog as the settings row.
-        for (int i = 0; i < Math.min(WHATS_NEW_CARD_POINTS, whatsNew.points.size()); i++) box.addView(label("• " + whatsNew.points.get(i), 12, MUTED, false));
-        LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
-        TextView done = label("تمام", 13, ACCENT, true); done.setPadding(0, dp(8), 0, 0);
-        done.setOnClickListener(v -> {
+        WrapRow row = homeStrip("whats_new_card");
+        TextView headline = label("جديد في النسخة " + isolate(whatsNew.version) + " ›", 12, INK, true);
+        headline.setMinHeight(dp(UiTheme.TOUCH)); headline.setGravity(Gravity.CENTER_VERTICAL);
+        headline.setOnClickListener(v -> whatsNewDialog()); row.addView(headline);
+        TextView close = label("✕", 16, MUTED, false); close.setGravity(Gravity.CENTER);
+        close.setContentDescription("إخفاء الجديد"); close.setMinWidth(dp(UiTheme.TOUCH)); close.setMinHeight(dp(UiTheme.TOUCH));
+        close.setOnClickListener(v -> {
             getSharedPreferences(APP_STATE, MODE_PRIVATE).edit().putInt(LAST_SEEN_VERSION, BuildConfig.VERSION_CODE).apply();
             whatsNew = null; render();
         });
-        actions.addView(done);
-        if (whatsNew.points.size() > WHATS_NEW_CARD_POINTS) {
-            TextView more = label("كل التفاصيل", 13, ACCENT, true); more.setPadding(0, dp(8), dp(24), 0);
-            more.setOnClickListener(v -> whatsNewDialog());
-            actions.addView(more);
-        }
-        box.addView(actions);
+        row.addView(close);
     }
 
-    /** Google Play's flexible update: offer, quiet download, then the restart. Nothing shows outside a Play install. */
+    private WrapRow homeStrip(String tag) {
+        WrapRow row = new WrapRow(this); row.setTag(tag); row.setMinimumHeight(dp(42));
+        row.setPadding(dp(6), dp(2), dp(6), dp(2)); row.setBackground(outlined(ACCENT_PALE, BORDER, 14));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(8); page.addView(row, params);
+        return row;
+    }
+
+    /** Play owns the update; this is only its compact, wrapping status surface. */
     private void updateCard() {
         UpdatePrompt.Card state = updates == null ? UpdatePrompt.Card.NONE : updates.card();
         if (state == UpdatePrompt.Card.NONE) return;
-        LinearLayout box = card();
-        box.setTag("in_app_update_card");
-        String title = state == UpdatePrompt.Card.OFFER ? "فيه نسخة جديدة من Follow Money"
-                : state == UpdatePrompt.Card.DOWNLOADING ? "التحديث بيتحمّل…" : "التحديث جاهز";
-        String body = state == UpdatePrompt.Card.OFFER ? "بيتحمّل في الخلفية وإنت شغال عادي، وهنقولك لما يبقى جاهز."
-                : state == UpdatePrompt.Card.DOWNLOADING ? "كمّل شغلك عادي؛ هنقولك لما يخلص."
-                : "اضغط «إعادة التشغيل» علشان يتركب. بياناتك زي ما هي.";
-        box.addView(label(title, 15, INK, true));
-        box.addView(label(body, 12, MUTED, false));
-        if (state == UpdatePrompt.Card.DOWNLOADING) return;
-        LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
-        TextView primary = label(state == UpdatePrompt.Card.OFFER ? "تحديث" : "إعادة التشغيل", 13, ACCENT, true);
-        primary.setPadding(0, dp(8), 0, 0); primary.setMinHeight(dp(UiTheme.TOUCH)); primary.setGravity(Gravity.CENTER_VERTICAL);
-        primary.setOnClickListener(v -> { if (state == UpdatePrompt.Card.OFFER) updates.start(); else updates.complete(); });
-        actions.addView(primary);
-        if (state == UpdatePrompt.Card.OFFER) {
-            TextView later = label("بعدين", 13, MUTED, true);
-            later.setPadding(dp(24), dp(8), 0, 0); later.setMinHeight(dp(UiTheme.TOUCH)); later.setGravity(Gravity.CENTER_VERTICAL);
-            later.setOnClickListener(v -> updates.later());
-            actions.addView(later);
+        updateStrip(state, updates.availableVersion(), updates.downloadedBytes(), updates.totalBytes());
+    }
+
+    private void updateStrip(UpdatePrompt.Card state, int version, long downloaded, long total) {
+        WrapRow row = homeStrip("in_app_update_card");
+        LinearLayout leading = new LinearLayout(this); leading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView icon = label(state == UpdatePrompt.Card.RESTART ? "✓" : "↓", 18, LIME, true);
+        icon.setGravity(Gravity.CENTER); icon.setBackground(rounded(BRAND, 99));
+        leading.addView(icon, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        String title = state == UpdatePrompt.Card.OFFER ? "فيه نسخة جديدة" : state == UpdatePrompt.Card.DOWNLOADING ? "التحديث بيتحمّل…" : "التحديث جاهز";
+        TextView copy = label(title + (state == UpdatePrompt.Card.OFFER && version > 0 ? " " + isolate(String.valueOf(version)) : ""), 12, INK, true);
+        if (state == UpdatePrompt.Card.OFFER && version > 0) {
+            android.text.SpannableString text = new android.text.SpannableString(copy.getText());
+            text.setSpan(new android.text.style.RelativeSizeSpan(0.8f), title.length(), text.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); copy.setText(text);
         }
-        box.addView(actions);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2); cp.setMarginStart(dp(6)); leading.addView(copy, cp); row.addView(leading);
+        LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
+        if (state == UpdatePrompt.Card.DOWNLOADING) {
+            ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+            progress.setIndeterminate(total <= 0); progress.setMax(10000);
+            progress.setProgress((int)Math.round(StatementRows.share(downloaded, total) * 10000));
+            progress.setProgressTintList(ColorStateList.valueOf(EMERALD));
+            actions.addView(progress, new LinearLayout.LayoutParams(dp(80), dp(5)));
+            if (total > 0) actions.addView(label(StatementRows.percent(downloaded, total), 10, MUTED, false));
+        } else {
+            if (state == UpdatePrompt.Card.OFFER) actions.addView(stripAction("بعدين", false, () -> { if (updates != null) updates.later(); }));
+            actions.addView(stripAction(state == UpdatePrompt.Card.OFFER ? "تحديث" : "إعادة التشغيل", true,
+                    () -> { if (updates != null) { if (state == UpdatePrompt.Card.OFFER) updates.start(); else updates.complete(); } }));
+        }
+        row.addView(actions);
+    }
+
+    private TextView stripAction(String title, boolean primary, Runnable action) {
+        TextView button = label(title, 12, primary ? LIME : ACCENT, true);
+        button.setGravity(Gravity.CENTER); button.setPadding(dp(8), dp(3), dp(8), dp(3));
+        button.setMinHeight(dp(UiTheme.TOUCH)); button.setMinWidth(dp(UiTheme.TOUCH));
+        if (primary) button.setBackground(new android.graphics.drawable.InsetDrawable(rounded(BRAND, 99), 0, dp(4), 0, dp(4)));
+        button.setOnClickListener(v -> action.run()); return button;
+    }
+
+    private ImageView homeIconButton(int resource, String description, Runnable action) {
+        ImageView button = iconButton(resource, description, action);
+        button.setBackground(new android.graphics.drawable.InsetDrawable(button.getBackground(), dp(4)));
+        button.setPadding(dp(14), dp(14), dp(14), dp(14)); return button;
     }
 
     private void whatsNewDialog() {
@@ -3195,23 +3218,23 @@ public final class MainActivity extends Activity {
         greeting.addView(label(profile.isEmpty() ? "Follow Money" : profile, 17, INK, true));
         LinearLayout.LayoutParams greetingParams = new LinearLayout.LayoutParams(0, -2, 1);
         greetingParams.setMarginStart(dp(10)); top.addView(greeting, greetingParams);
-        top.addView(iconButton(R.drawable.ic_search, "بحث في العمليات", () -> {
+        top.addView(homeIconButton(R.drawable.ic_search, "بحث في العمليات", () -> {
             selectedTab = 6; searchOpen = true; render();
         }), new LinearLayout.LayoutParams(dp(48), dp(48)));
         LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         settingsParams.setMarginStart(dp(8));
-        top.addView(iconButton(R.drawable.ic_settings, "الإعدادات", () -> { settingsSection="";selectedTab = 5; render(); }), settingsParams);
+        top.addView(homeIconButton(R.drawable.ic_settings, "الإعدادات", () -> { settingsSection="";selectedTab = 5; render(); }), settingsParams);
         page.addView(top);
 
-        whatsNewCard();
         updateCard();
-        monthlyReadyCard();
+        whatsNewCard();
         // MVP home: one number, one period, one definition. The daily budget and points keep their data, dialogs,
         // widgets and settings entry («الميزانية اليومية والراتب», «ميزانياتك»); only their home card is off.
         if (HOME_SHOWS_DAILY_BUDGET) dailyHomeCard();
         // One card, one period, one definition (MoneyFlow.statement): «دخل / خرج / باقي» from the pay day to today.
         // Nothing else on the home screen carries a number with another period or definition (lesson of 19 October).
         homeStatementCard();
+        monthlyReadyCard();
         backupReminderCard();
         nextCommitmentCard();
         section("كروتك وحساباتك", "عرض الكل", () -> { selectedTab = 1; render(); });

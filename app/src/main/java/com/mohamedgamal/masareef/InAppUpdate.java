@@ -25,6 +25,7 @@ final class InAppUpdate {
     private final AppUpdateManager manager;
     private final InstallStateUpdatedListener listener;
     private AppUpdateInfo info;
+    private long downloadedBytes, totalBytes;
     private UpdatePrompt.Status status = UpdatePrompt.Status.NONE;
     private UpdatePrompt.Card card = UpdatePrompt.Card.NONE;
 
@@ -35,15 +36,22 @@ final class InAppUpdate {
         try { created = AppUpdateManagerFactory.create(activity); } catch (RuntimeException unavailable) { /* no Play: no card */ }
         manager = created;
         listener = state -> {
+            long oldDownloaded = downloadedBytes, oldTotal = totalBytes;
+            downloadedBytes = state.bytesDownloaded(); totalBytes = state.totalBytesToDownload();
+            UpdatePrompt.Card previous = card;
             int install = state.installStatus();
             set(install == InstallStatus.DOWNLOADED ? UpdatePrompt.Status.DOWNLOADED
                     : install == InstallStatus.DOWNLOADING || install == InstallStatus.PENDING ? UpdatePrompt.Status.DOWNLOADING
                     : UpdatePrompt.Status.NONE);
+            if (previous == card && (oldDownloaded != downloadedBytes || oldTotal != totalBytes)) changed.run();
         };
         if (manager != null) manager.registerListener(listener);
     }
 
     UpdatePrompt.Card card() { return card; }
+    int availableVersion() { return info == null ? 0 : info.availableVersionCode(); }
+    long downloadedBytes() { return downloadedBytes; }
+    long totalBytes() { return totalBytes; }
 
     /** On every resume: an update downloaded while the app was away still needs its restart. */
     void refresh() {
@@ -51,6 +59,7 @@ final class InAppUpdate {
         try {
             manager.getAppUpdateInfo().addOnSuccessListener(found -> {
                 info = found;
+                downloadedBytes = found.bytesDownloaded(); totalBytes = found.totalBytesToDownload();
                 int install = found.installStatus();
                 status = install == InstallStatus.DOWNLOADED ? UpdatePrompt.Status.DOWNLOADED
                         : install == InstallStatus.DOWNLOADING || install == InstallStatus.PENDING ? UpdatePrompt.Status.DOWNLOADING
