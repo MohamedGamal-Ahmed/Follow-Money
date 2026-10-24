@@ -1728,16 +1728,21 @@ public final class MainActivity extends Activity {
     private TextView stripAction(String title, boolean primary, Runnable action) {
         TextView button = label(title, 12, primary ? LIME : ACCENT, true);
         button.setGravity(Gravity.CENTER); button.setPadding(dp(12), 0, dp(12), 0);
-        cappedTextSize(button, 12, 1.3f); button.setSingleLine(true);
+        cappedTextSize(button, 12, 1.3f); button.setMaxLines(1);
         button.setMinHeight(dp(UiTheme.TOUCH)); button.setMinWidth(dp(UiTheme.TOUCH));
         if (primary) {
             // The pill stays 36dp tall and centred while the view itself keeps the 48dp touch target.
-            android.graphics.drawable.LayerDrawable pill = new android.graphics.drawable.LayerDrawable(
-                    new android.graphics.drawable.Drawable[]{rounded(BRAND, 99)});
-            pill.setLayerGravity(0, Gravity.FILL_HORIZONTAL | Gravity.CENTER_VERTICAL); pill.setLayerHeight(0, dp(36));
-            button.setBackground(pill); button.setTag("update_action");
+            button.setBackground(pill(BRAND, 36)); button.setTag("update_action");
         }
         button.setOnClickListener(v -> action.run()); return button;
+    }
+
+    /** A pill of a fixed visual height, centred in a taller view that keeps the 48dp touch target. */
+    private android.graphics.drawable.LayerDrawable pill(int color, int heightDp) {
+        android.graphics.drawable.LayerDrawable pill = new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{rounded(color, 99)});
+        pill.setLayerGravity(0, Gravity.FILL_HORIZONTAL | Gravity.CENTER_VERTICAL); pill.setLayerHeight(0, dp(heightDp));
+        return pill;
     }
 
     private ImageView homeIconButton(int resource, String description, Runnable action) {
@@ -3309,8 +3314,10 @@ public final class MainActivity extends Activity {
         heading.addView(label("كشف الفترة", 18, INK, true));
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
         TextView periodChip = label(isolate(period[0].format(dayMonth)) + " – اليوم ⌄", 11, INK, false);
-        periodChip.setPadding(dp(8), dp(4), dp(8), dp(4)); periodChip.setMinHeight(dp(UiTheme.TOUCH));
-        periodChip.setGravity(Gravity.CENTER); periodChip.setBackground(rounded(ACCENT_PALE, 99));
+        // Drawn as a 34dp pill; the view keeps the 48dp touch height around it.
+        periodChip.setPadding(dp(12), 0, dp(12), 0); periodChip.setMinHeight(dp(UiTheme.TOUCH));
+        cappedTextSize(periodChip, 11, 1.3f); periodChip.setMaxLines(1); periodChip.setTag("statement_period");
+        periodChip.setGravity(Gravity.CENTER); periodChip.setBackground(pill(ACCENT_PALE, 34));
         periodChip.setContentDescription("الفترة من " + period[0].format(dayMonth) + " لليوم");
         // Home keeps its salary-aligned period. The chip explains it; custom ranges remain on the statement page.
         periodChip.setOnClickListener(v -> statementInfo(s)); tools.addView(periodChip);
@@ -3346,11 +3353,24 @@ public final class MainActivity extends Activity {
         // All contributing income and outflow rows; the statement page explains their signed difference.
         difference.setOnClickListener(v -> openStatement("", false, StatementRows.contributors(s, items, zone))); box.addView(difference, new LinearLayout.LayoutParams(-1, -2));
         if (s.unlinkedTransfer > 0) {
-            TextView warning = label("تحويل غير مربوط بقيمة " + isolate(money(s.unlinkedTransfer, "EGP")) + " قد يكون بين حساباتك — اربطه", 12, CORAL, true);
-            warning.setMinHeight(dp(UiTheme.TOUCH)); warning.setPadding(0, dp(8), 0, dp(4));
+            // A calm closing row of the card: an orange sign, plain text and a «اربطه» link, not a red underlined alarm.
+            divider(box);
+            LinearLayout warning = new LinearLayout(this); warning.setGravity(Gravity.CENTER_VERTICAL);
+            warning.setPadding(dp(14), dp(6), dp(14), dp(6)); warning.setMinimumHeight(dp(UiTheme.TOUCH));
             warning.setTag("statement_unlinked");
+            ImageView sign = tintedIcon(R.drawable.ic_warning, ORANGE);
+            sign.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            warning.addView(sign, new LinearLayout.LayoutParams(dp(18), dp(18)));
+            String copy = "تحويل غير مربوط بقيمة " + isolate(money(s.unlinkedTransfer, "EGP")) + "، ممكن يكون بين حساباتك";
+            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, -2, 1); tp.setMarginStart(dp(8)); tp.setMarginEnd(dp(8));
+            warning.addView(label(copy, 12, INK, false), tp);
+            warning.addView(label("اربطه", 12, ACCENT, true));
+            ImageView go = tintedIcon(R.drawable.ic_chevron_forward, ACCENT);
+            go.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            warning.addView(go, new LinearLayout.LayoutParams(dp(16), dp(16)));
+            warning.setContentDescription(copy + "، اربطه");
             warning.setOnClickListener(v -> { ExpenseDb.Transaction tx = db.transactionById(s.unlinkedTransferId); if (tx != null) reconcileTransferDialog(tx); });
-            page.addView(warning);
+            box.addView(warning, new LinearLayout.LayoutParams(-1, -2));
         }
     }
 
@@ -3424,7 +3444,6 @@ public final class MainActivity extends Activity {
         row.setTag("statement_component:" + item.name);
         LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
         copy.addView(label(item.name, 12, INK, true));
-        if (!detail.isEmpty()) copy.addView(label(detail, 10, MUTED, false));
         LinearLayout shares = new LinearLayout(this); shares.setGravity(Gravity.CENTER_VERTICAL);
         ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(10000); bar.setProgress((int)Math.round(StatementRows.share(item.amount, total) * 10000));
@@ -3432,8 +3451,20 @@ public final class MainActivity extends Activity {
         bar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         shares.addView(bar, new LinearLayout.LayoutParams(dp(90), dp(5)));
         TextView percent = label(StatementRows.percent(item.amount, total), 10, MUTED, false);
-        percent.setPadding(dp(5), 0, 0, 0); shares.addView(percent); copy.addView(shares); row.addView(copy);
-        row.addView(statementAmount(item.amount, INK, "  ‹"));
+        percent.setPadding(dp(5), 0, 0, 0); shares.addView(percent);
+        // Detail and share share the second line; a hugging WrapRow drops the bar below only when they do not fit.
+        if (detail.isEmpty()) copy.addView(shares);
+        else {
+            WrapRow second = new WrapRow(this, true); second.setTag("statement_component_detail");
+            second.addView(label(detail, 10, MUTED, false)); second.addView(shares); copy.addView(second);
+        }
+        row.addView(copy);
+        LinearLayout trailing = new LinearLayout(this); trailing.setGravity(Gravity.CENTER_VERTICAL);
+        trailing.addView(statementAmount(item.amount, INK, ""));
+        ImageView chevron = tintedIcon(R.drawable.ic_chevron_forward, MUTED); chevron.setTag("statement_chevron");
+        chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams chevronParams = new LinearLayout.LayoutParams(dp(18), dp(18)); chevronParams.setMarginStart(dp(4));
+        trailing.addView(chevron, chevronParams); row.addView(trailing);
         row.setOnClickListener(v -> {
             if (item.bucket == MoneyFlow.Bucket.INFLOW) {
                 openStatement(MoneyFlow.Bucket.INFLOW.name(), false, item.ids);

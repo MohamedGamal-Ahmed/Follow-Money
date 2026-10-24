@@ -127,6 +127,19 @@ final class UnifiedUiTest {
                             "Tab label on one line, never split inside a word: " + name);
                 }
                 ok(labels == 4, "Four labelled tabs");
+                View chip = root().findViewWithTag("statement_period");
+                ok(chip.getHeight() >= Math.round(UiTheme.TOUCH * density), "Period chip keeps 48dp touch target");
+                android.graphics.drawable.LayerDrawable chipPill = (android.graphics.drawable.LayerDrawable)chip.getBackground();
+                chipPill.setBounds(0, 0, chip.getWidth(), chip.getHeight());
+                ok(Math.abs(chipPill.getDrawable(0).getBounds().height() - Math.round(34 * density)) <= 1, "Period chip drawn 34dp tall");
+                ViewGroup unlinked = root().findViewWithTag("statement_unlinked");
+                ok(unlinked.getParent() == root().findViewWithTag("home_statement"), "Unlinked transfer is a row of the statement card");
+                ok(unlinked.hasOnClickListeners() && unlinked.getHeight() >= Math.round(UiTheme.TOUCH * density), "Unlinked row stays clickable with 48dp target");
+                for (int i = 0; i < unlinked.getChildCount(); i++) if (unlinked.getChildAt(i) instanceof android.widget.TextView) {
+                    android.widget.TextView text = (android.widget.TextView)unlinked.getChildAt(i);
+                    ok((text.getPaintFlags() & android.graphics.Paint.UNDERLINE_TEXT_FLAG) == 0, "Unlinked row text not underlined");
+                    ok(text.getCurrentTextColor() != (Integer)get("CORAL"), "Unlinked row text is not red");
+                }
             });
             screen("10-home-closed");
             main(() -> root().findViewWithTag("statement_out").performClick());
@@ -134,6 +147,7 @@ final class UnifiedUiTest {
                 ok((Integer)get("homeStatementOpen") == 2, "Outflow opened");
                 ok(root().findViewWithTag("statement_component:مشتريات ورسوم") != null, "Outflow components visible");
                 ok(root().findViewWithTag("statement_component:راتب") == null, "Income stays closed"); homeAmounts(root());
+                componentRows(root(), fontScale);
                 android.view.accessibility.AccessibilityNodeInfo info = root().findViewWithTag("statement_out").createAccessibilityNodeInfo();
                 ok(info.getActionList().contains(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_COLLAPSE), "TalkBack expanded action");
             });
@@ -143,6 +157,8 @@ final class UnifiedUiTest {
                 ok((Integer)get("homeStatementOpen") == 1, "Income opened");
                 ok(root().findViewWithTag("statement_component:مشتريات ورسوم") == null, "Opening income closed outflow");
                 ok(root().findViewWithTag("statement_component:راتب") != null, "Salary visible"); homeAmounts(root());
+                componentRows(root(), fontScale);
+                ok(stripText(root().findViewWithTag("statement_component:تحويلات وصلتك")).contains("تحويل واحد"), "Transfer count in Arabic singular");
             });
             screen("10-home-in");
             // Component drill-down matches statement contributions, including an English bank name.
@@ -238,6 +254,22 @@ final class UnifiedUiTest {
             try { if (activity != null) main(() -> activity.finish()); } catch (Throwable ignored) {}
             runner.finish(status, result);
         }
+    }
+    /** Each sub-row: name, then detail and share bar on one line (until a large font wraps it), and the app chevron. */
+    private void componentRows(View view, float fontScale) {
+        if (view.getTag() instanceof String && ((String)view.getTag()).startsWith("statement_component:")) {
+            ViewGroup row = (ViewGroup)view;
+            ok(row.findViewWithTag("statement_chevron") instanceof android.widget.ImageView, "Sub-row uses the app chevron icon");
+            ok(!stripText(row).contains("›") && !stripText(row).contains("‹"), "No text chevron glyph");
+            ViewGroup copy = (ViewGroup)row.getChildAt(0);
+            ok(copy.getChildCount() == 2, "Sub-row has two lines: " + view.getTag());
+            View second = row.findViewWithTag("statement_component_detail");
+            if (second != null && fontScale <= 1f) {
+                View detail = ((ViewGroup)second).getChildAt(0), shares = ((ViewGroup)second).getChildAt(1);
+                ok(detail.getTop() < shares.getBottom() && shares.getTop() < detail.getBottom(), "Detail and share bar on one line: " + view.getTag());
+            }
+        }
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup)view).getChildCount(); i++) componentRows(((ViewGroup)view).getChildAt(i), fontScale);
     }
     private String stripText(View view) {
         if (view instanceof android.widget.TextView) return ((android.widget.TextView)view).getText().toString();

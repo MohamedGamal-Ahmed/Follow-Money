@@ -7,8 +7,13 @@ import android.view.ViewGroup;
 /** Two natural-width groups: leading copy and trailing value/actions. Overflow moves the latter below. */
 final class WrapRow extends ViewGroup {
     private final int gap;
+    private final boolean hug;
     private boolean stacked;
-    WrapRow(Context context) { super(context); gap = Math.round(8 * getResources().getDisplayMetrics().density); }
+    WrapRow(Context context) { this(context, false); }
+    /** With {@code hug}, a wrap-content row is only as wide as its groups, so the second sits right after the first. */
+    WrapRow(Context context, boolean hug) {
+        super(context); this.hug = hug; gap = Math.round(8 * getResources().getDisplayMetrics().density);
+    }
     @Override protected LayoutParams generateDefaultLayoutParams() { return new LayoutParams(-2, -2); }
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
         int width = MeasureSpec.getSize(widthSpec), available = Math.max(0, width - getPaddingLeft() - getPaddingRight());
@@ -19,7 +24,9 @@ final class WrapRow extends ViewGroup {
         stacked = first.getMeasuredWidth() + last.getMeasuredWidth() + gap > available;
         int height = stacked ? first.getMeasuredHeight() + gap + last.getMeasuredHeight()
                 : Math.max(first.getMeasuredHeight(), last.getMeasuredHeight());
-        setMeasuredDimension(resolveSize(width, widthSpec), resolveSize(Math.max(getSuggestedMinimumHeight(),
+        int natural = (stacked ? Math.max(first.getMeasuredWidth(), last.getMeasuredWidth())
+                : first.getMeasuredWidth() + gap + last.getMeasuredWidth()) + getPaddingLeft() + getPaddingRight();
+        setMeasuredDimension(resolveSize(hug ? natural : width, widthSpec), resolveSize(Math.max(getSuggestedMinimumHeight(),
                 height + getPaddingTop() + getPaddingBottom()), heightSpec));
     }
     @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
