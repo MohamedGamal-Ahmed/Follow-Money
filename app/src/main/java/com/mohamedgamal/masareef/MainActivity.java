@@ -3104,7 +3104,14 @@ public final class MainActivity extends Activity {
         scroll.addView(page);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         boolean fullScreen = introVisible || selectedTab >= 10 && selectedTab <= 12 || selectedTab == 14;
-        if (!fullScreen) root.addView(bottomNavigation());
+        if (!fullScreen) {
+            LinearLayout nav = bottomNavigation(); root.addView(nav);
+            if (selectedTab == 0) nav.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
+                // Keep the last home row clear of the navigation, raised add action and system insets.
+                int clearance = nav.getHeight() + root.getPaddingBottom() + dp(16);
+                if (page.getPaddingBottom() != clearance) page.setPadding(dp(16), dp(14), dp(16), clearance);
+            });
+        }
         setContentView(root);
         SystemUi.apply(this,root);
         if(introVisible) introScreen();
@@ -6717,7 +6724,8 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams iconSize = new LinearLayout.LayoutParams(dp(56), dp(32));
             iconSize.bottomMargin = dp(4); item.addView(icon, iconSize); item.addView(caption);
             item.setContentDescription(labels[i]+(active?"، الصفحة الحالية":""));
-            LinearLayout.LayoutParams destinationParams=new LinearLayout.LayoutParams(0,dp(60),1);
+            item.setMinimumHeight(dp(60));
+            LinearLayout.LayoutParams destinationParams=new LinearLayout.LayoutParams(0,-2,1);
             destinationParams.setMargins(dp(3),0,dp(3),0);nav.addView(item,destinationParams);
             item.setOnClickListener(v -> {
                 if (tab == 4) insightsSection="";
