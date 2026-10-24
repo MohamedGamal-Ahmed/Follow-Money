@@ -3991,17 +3991,14 @@ public final class MainActivity extends Activity {
         TextView merchantName = label(UiKit.displayName(item.merchant), 14, INK, true);
         merchantName.setSingleLine(true); merchantName.setEllipsize(android.text.TextUtils.TruncateAt.END);
         copy.addView(merchantName);
-        LinearLayout meta = new LinearLayout(this); meta.setGravity(Gravity.CENTER_VERTICAL);
+        // Chips and the time are whole items: one that does not fit moves to the next line, none is split mid-word.
+        FlowRow meta = new FlowRow(this); meta.setTag("transaction_meta");
         String categoryName = "income".equals(item.kind) ? "دخل" : "transfer".equals(item.kind) ? "تحويلات" : item.category;
         meta.addView(categoryPill(categoryName));
-        if(item.needsReview) meta.addView(label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?" · تحويل محتاج ربط":" · للمراجعة",11,CORAL,true));
-        if (UiKit.isInstaPay(item.merchant)) {
-            LinearLayout.LayoutParams ipaParams = new LinearLayout.LayoutParams(-2, -2); ipaParams.setMarginStart(dp(4));
-            meta.addView(instaPayPill(), ipaParams);
-        }
-        String time = transactionTimeLabel(item,false);
-        LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(-2, -2); timeParams.setMarginStart(dp(6));
-        meta.addView(label(time, 11, MUTED, false), timeParams);
+        if(item.needsReview) meta.addView(oneLine(label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?"تحويل محتاج ربط":"للمراجعة",11,CORAL,true)));
+        if (UiKit.isInstaPay(item.merchant)) meta.addView(instaPayPill());
+        TextView time = oneLine(label(isolate(transactionTimeLabel(item,false)), 11, MUTED, false)); time.setTag("transaction_time");
+        meta.addView(time);
         copy.addView(meta);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(12));
         line.addView(copy, copyParams);
@@ -6508,16 +6505,22 @@ public final class MainActivity extends Activity {
     private TextView instaPayPill() {
         TextView pill = label("إنستاباي", 11, dark ? 0xffe0d4ff : 0xff5b21b6, false);
         pill.setPadding(dp(8), dp(1), dp(8), dp(1));
-        pill.setBackground(rounded(dark ? 0x4d7c3aed : 0xffede4ff, 99));
-        return pill;
+        pill.setBackground(rounded(dark ? 0x4d7c3aed : 0xffede4ff, 99)); pill.setTag("transaction_chip");
+        return oneLine(pill);
     }
 
     private TextView categoryPill(String category) {
         int[] style = categoryStyle(category);
         TextView pill = label(category, 11, style[1], false);
         pill.setPadding(dp(8), dp(1), dp(8), dp(1));
-        pill.setBackground(rounded(style[0], 99));
-        return pill;
+        pill.setBackground(rounded(style[0], 99)); pill.setTag("transaction_chip");
+        return oneLine(pill);
+    }
+
+    /** A chip or time is one unit: a single line, ellipsized only when it is wider than the whole row. */
+    private TextView oneLine(TextView view) {
+        view.setSingleLine(true); view.setMaxLines(1); view.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        return view;
     }
 
     private int categoryColor(String category) {

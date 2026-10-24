@@ -43,8 +43,14 @@ final class ClassificationLagTest {
         main(()->{android.content.res.Configuration config=new android.content.res.Configuration(activity.getResources().getConfiguration());config.fontScale=scale;activity.getResources().updateConfiguration(config,activity.getResources().getDisplayMetrics());
             set("bulkMode",false);invoke("resetTransactionFilters",new Class<?>[0]);set("selectedTab",6);invoke("render",new Class<?>[0]);});
         main(()->{android.widget.ScrollView scroll=(android.widget.ScrollView)get("pageScroll");scroll.scrollTo(0,scroll.getChildAt(0).getHeight());});
-        main(()->check(findMore(activity.getWindow().getDecorView())!=null,"Older operations action shown at font scale "+scale));screen(name);
+        main(()->check(findMore(activity.getWindow().getDecorView())!=null,"Older operations action shown at font scale "+scale));
+        main(()->{int[] bad={0};int seen=TransactionRowChecks.verify(activity.findViewById(android.R.id.content),(value,reason)->{if(!value&&bad[0]++<5)log("FAIL "+reason);});
+            check(seen>=20&&bad[0]==0,"Every row chip and time on one line inside the screen at "+scale+": "+seen+" checked");
+            android.widget.Button more=findMore(activity.getWindow().getDecorView());check(more.getLayout()!=null&&noWordSplit(more.getLayout(),more.getText()),"Older action wraps only between words at "+scale);});
+        screen(name);
     }
+    /** Every line break falls on a space, so no word is split. */
+    private static boolean noWordSplit(android.text.Layout layout,CharSequence text){for(int i=0;i<layout.getLineCount()-1;i++){int end=layout.getLineEnd(i);if(end<=0||end>=text.length()||!Character.isWhitespace(text.charAt(end-1))&&!Character.isWhitespace(text.charAt(end)))return false;}return true;}
     private long capture(String sender,String body,long time){CaptureResult result=db.captureSms(sender,body,time);if(result.transaction==null)throw new AssertionError("Fixture rejected: "+body+" / "+result.reason);return result.transaction.id;}
     private void state(String stage,long...ids){for(long id:ids)try(Cursor c=db.getReadableDatabase().rawQuery("SELECT id,category,kind,needs_review,user_edited,unique_key,(SELECT COUNT(*) FROM transactions d WHERE d.amount_minor=t.amount_minor AND ABS(d.occurred_at-t.occurred_at)<120000) FROM transactions t WHERE id=?",new String[]{""+id})){if(c.moveToFirst())log(stage+" id="+id+" category="+c.getString(1)+" kind="+c.getString(2)+" review="+c.getInt(3)+" edited="+c.getInt(4)+" key="+c.getString(5)+" sameAmountTime="+c.getInt(6));}}
     private long scalar(String query){try(Cursor c=db.getReadableDatabase().rawQuery(query,null)){c.moveToFirst();return c.getLong(0);}}
@@ -135,7 +141,8 @@ final class ClassificationLagTest {
             check(db.transactionById(survivor).needsReview,"Abbreviated-merge survivor keeps its own flag");
             check(db.repairAll().reviewsRestored==0&&!db.transactionById(edited).needsReview&&db.transactionById(pending).needsReview,"Second repair run changes nothing");
             check(ExpenseDb.REPAIR_VERSION==5,"Repair version 5 re-runs once on 0.4.2 phones");
-            olderScreen(1f,"21-transactions-older-1.0");olderScreen(2f,"22-transactions-older-2.0");olderScreen(1f,"23-transactions-restored");
+            check(db.addManualEntry(System.currentTimeMillis()-30000,90444,"EGP","International Trading Company Limited Cairo@instapay","بقالة",null,"expense",null,null),"Long InstaPay row saved");
+            olderScreen(1f,"21-transactions-older-1.0");olderScreen(2f,"22-transactions-older-2.0");olderScreen(1.3f,"23-transactions-1.3");olderScreen(1f,"24-transactions-restored");
             status=failures==0?-1:0;
         }catch(Throwable error){failures++;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));log(trace.toString());}
         finally{try{if(activity!=null)main(activity::finish);if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){failures++;log(error.toString());}result.putString("stream",report+"Classification/lag checks passed: "+(checks-failures)+"; failed: "+failures+"\n");runner.finish(failures==0?status:0,result);}

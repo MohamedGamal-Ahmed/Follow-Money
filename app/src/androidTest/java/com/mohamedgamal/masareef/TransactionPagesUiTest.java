@@ -166,6 +166,11 @@ final class TransactionPagesUiTest {
             main(()->invoke("editTransactionDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(id)));
             main(()->ok(root().findViewWithTag("transaction_from").getContentDescription().toString().contains("مؤرشف"),"Existing archived source remains named and selectable"));
             submit();ok(db.transactionById(id).paymentSourceId==from,"Edit preserves an existing archived source");
+            // A long English name with an InstaPay chip and a review note: chips and time wrap whole, never mid-word.
+            ok(db.addManualEntry(System.currentTimeMillis()-60000,90333,"EGP","International Trading Company Limited Cairo@instapay","بقالة",to,"expense",null,null),"Long InstaPay row saved");
+            db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{db.latestInserted().id});
+            main(()->{invoke("resetTransactionFilters",new Class<?>[0]);set("transactionSearch","");set("transactionPeriod",null);set("bulkMode",false);set("selectedTab",6);invoke("render",new Class<?>[0]);});
+            main(()->ok(TransactionRowChecks.verify(root(),this::ok)>=4,"Transaction row chips and times checked"));screen("07-rows");
             result.putString("stream","Transaction pages checks passed: "+checks+"; failed: 0; dark="+dark+"; fontScale="+scale+"\nCaptures: "+captures+"\n");
         }catch(Throwable error){status=0;try{screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Transaction pages FAILED: "+trace);}
         finally{try{if(activity!=null)main(()->activity.finish());if(db!=null){db.clearAllData();db.close();}}catch(Exception e){status=0;result.putString("stream",result.getString("stream","")+e);}runner.finish(status,result);}

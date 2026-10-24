@@ -63,7 +63,7 @@ allprojects { p ->
         [IO.File]::WriteAllText((Join-Path $reportDir "$mode.log"), ($result -join "`n"), (New-Object Text.UTF8Encoding $false))
         if ($instrumentExit -ne 0 -or ($result -join "`n") -notmatch '(Unified UI|Selection UI|Transaction pages|Source linking|Home statement|Classification/lag) checks passed: [1-9][0-9]*; failed: 0') { throw "Unified UI failed: $mode" }
         if ($mode -eq 'classification_lag') {
-            $pull = 'import sys,subprocess;from pathlib import Path;a,d,p,o=sys.argv[1:];dest=Path(o)/"screens";dest.mkdir(exist_ok=True);names=["20-acknowledge-page","21-transactions-older-1.0","22-transactions-older-2.0"];[(dest/(n+".png")).write_bytes(subprocess.check_output([a,"-s",d,"exec-out","run-as",p,"cat","cache/classification-lag/"+n+".png"])) for n in names]'
+            $pull = 'import sys,subprocess;from pathlib import Path;a,d,p,o=sys.argv[1:];dest=Path(o)/"screens";dest.mkdir(exist_ok=True);names=["20-acknowledge-page","21-transactions-older-1.0","22-transactions-older-2.0","23-transactions-1.3"];[(dest/(n+".png")).write_bytes(subprocess.check_output([a,"-s",d,"exec-out","run-as",p,"cat","cache/classification-lag/"+n+".png"])) for n in names]'
             & python -c $pull $adb $Device $appId $reportDir
             if ($LASTEXITCODE -ne 0) { throw 'Could not collect classification captures' }
         }
