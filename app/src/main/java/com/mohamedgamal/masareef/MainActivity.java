@@ -208,11 +208,7 @@ public final class MainActivity extends Activity {
         ui = new UiComponents(this, uiTheme, REGULAR);
         formPages = new UiPages(this, uiTheme, REGULAR, this::render);
         if (state != null) formPages.restore(state.getBundle("form_pages"), this::restoreFormPage);
-        getWindow().setStatusBarColor(BACKGROUND);
-        getWindow().setNavigationBarColor(SURFACE);
-        int systemBars = dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-        if (!dark && Build.VERSION.SDK_INT >= 27) systemBars |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
-        getWindow().getDecorView().setSystemUiVisibility(systemBars);
+        SystemUi.appearance(getWindow(), dark, BACKGROUND, SURFACE);
         db = AppResources.database(this);
         loadWhatsNew(readAsset("whats-new.txt"));
         updates = new InAppUpdate(this, () -> postUi(() -> { if (selectedTab == 0 && canRedrawNow()) render(); }));
@@ -4224,7 +4220,7 @@ public final class MainActivity extends Activity {
     private void showJourneyWindow(android.app.Dialog sheet,LinearLayout content,int height){
         sheet.setContentView(content);sheet.setCanceledOnTouchOutside(true);android.view.Window window=sheet.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         window.setGravity(Gravity.BOTTOM);window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);window.setDimAmount(0.35f);window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        window.setNavigationBarColor(SURFACE);window.getDecorView().setPadding(0,0,0,0);sheet.show();window.setLayout(-1,Math.min(height,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f)));SystemUi.apply(window,content);
+        SystemUi.appearance(window,dark,BACKGROUND,SURFACE);window.getDecorView().setPadding(0,0,0,0);sheet.show();window.setLayout(-1,Math.min(height,Math.round(getResources().getDisplayMetrics().heightPixels*0.80f)));SystemUi.apply(window,content);
     }
     private LinearLayout journeyAmountCard(LinearLayout parent,String title,String value,String caption){
         LinearLayout box=card(parent);box.setBackground(outlined(ACCENT_PALE,BORDER,18));box.addView(label(title,13,MUTED,false));TextView amount=label(value,28,INK,true);amount.setTextDirection(View.TEXT_DIRECTION_LTR);box.addView(amount);if(caption!=null)box.addView(label(caption,12,MUTED,false));return box;
