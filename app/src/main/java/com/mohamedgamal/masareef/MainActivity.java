@@ -86,6 +86,8 @@ public final class MainActivity extends Activity {
     /** Largest categories shown on the home card before the «باقي التصنيفات» row. */
     /** The list was opened from the home statement: rows paid from the cash wallet stay out, as in the statement. */
     private boolean transactionStatementList;
+    private int homeStatementOpen; // Activity lifetime only: 0 closed, 1 income, 2 outflow.
+    private long[] transactionStatementIds;
     /** Source id → kind, read once per render for the statement's internal/cash rules on list rows. */
     private Map<Long, String> sourceKindCache;
     private String transactionBucketFilter = "";
@@ -244,6 +246,7 @@ public final class MainActivity extends Activity {
             transactionExcludeTransfers=state.getBoolean("exclude_transfers",false);
             transactionBucketFilter=state.getString("bucket_filter","");
             transactionStatementList=state.getBoolean("statement_list",false);
+            transactionStatementIds=state.getLongArray("statement_ids");
             try{insightsRange=MoneyFlow.Range.valueOf(state.getString("insights_range","MONTH"));}catch(IllegalArgumentException ignored){insightsRange=MoneyFlow.Range.MONTH;}
             if(selectedTab==12)selectedTab=2; // Unsaved existing editor forms do not restore empty details.
             if(selectedTab==10&&selectedTransaction==null){selectedTab=transactionReturnTab;transactionJourney.clear();}
@@ -371,7 +374,7 @@ public final class MainActivity extends Activity {
         if(transactionSourceFilter!=null)out.putLong("source_filter",transactionSourceFilter);
         if(transactionPeriod!=null){out.putString("period_from",transactionPeriod[0].toString());out.putString("period_to",transactionPeriod[1].toString());}
         out.putBoolean("exclude_transfers",transactionExcludeTransfers);
-        out.putString("bucket_filter",transactionBucketFilter);out.putBoolean("statement_list",transactionStatementList);out.putString("insights_range",insightsRange.name());
+        out.putLongArray("statement_ids",transactionStatementIds);out.putString("bucket_filter",transactionBucketFilter);out.putBoolean("statement_list",transactionStatementList);out.putString("insights_range",insightsRange.name());
         long[] ids=new long[bulkSelected.size()];int i=0;for(long id:bulkSelected)ids[i++]=id;out.putLongArray("bulk_ids",ids);
     }
 
@@ -3116,7 +3119,7 @@ public final class MainActivity extends Activity {
     private String pageContextKey() {
         if(selectedTab==10)return "detail:"+(selectedTransaction==null?-1:selectedTransaction.id);
         if(selectedTab==6)return "list:"+selectedMonth+":"+transactionSearch+":"+transactionKindFilter+":"+transactionCategoryFilter+":"+
-                transactionCurrencyFilter+":"+transactionSourceFilter+":"+transactionBucketFilter+":"+transactionExcludeTransfers+":"+
+                transactionCurrencyFilter+":"+transactionSourceFilter+":"+transactionBucketFilter+":"+java.util.Arrays.toString(transactionStatementIds)+":"+transactionExcludeTransfers+":"+
                 (transactionPeriod==null?"":transactionPeriod[0]+"/"+transactionPeriod[1]);
         if(selectedTab==2)return "commitments:"+commitmentFilter+":"+commitmentMonth;
         if(selectedTab==4||selectedTab==3||selectedTab==13)return "analytics:"+insightsSection+":"+insightsRange+":"+selectedMonth;
@@ -3241,137 +3244,148 @@ public final class MainActivity extends Activity {
         return MoneyFlow.statementPeriod(salaryDay("EGP"), DailySummary.monthlySalary(this, "EGP"), "EGP", zone, LocalDate.now(), (from, to) -> db.flowItems(from, to, zone));
     }
 
-    /**
-     * The month statement (owner's decision, 20 October): «يوم القبض دخلك X · خرج منك حتى الآن Y · باقي Z».
-     * One MoneyFlow.statement call feeds the three numbers and the component lines, so every line opens exactly
-     * the rows that add up to it (same period, EGP, same bucket). Own-account moves and card repayments to the
-     * user's own cards are internal; a purchase paid from cash is detail only, counted when the cash was withdrawn.
-     */
+    /** One authoritative statement, with mutually exclusive details and natural-width amounts. */
     private void homeStatementCard() {
         LocalDate[] period = statementPeriod();
-        MoneyFlow.Statement s = MoneyFlow.statement(db.flowItems(period[0], period[1], ZoneId.systemDefault()), period, ZoneId.systemDefault(), "EGP");
+        ZoneId zone = ZoneId.systemDefault();
+        List<MoneyFlow.Item> items = db.flowItems(period[0], period[1], zone);
+        MoneyFlow.Statement s = MoneyFlow.statement(items, period, zone, "EGP");
         DateTimeFormatter dayMonth = DateTimeFormatter.ofPattern("d MMMM", new Locale("ar"));
-        final int softInk = 0xffb9d3c8, softGold = 0xfff0c987, softSky = 0xffa9d6ff, track = 0x2effffff;
-        LinearLayout hero = new LinearLayout(this);
-        hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(dp(18), dp(14), dp(18), dp(14));
-        hero.setBackground(rounded(BRAND, 26));
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
-        hp.topMargin = dp(16); page.addView(hero, hp);
-        LinearLayout heading = new LinearLayout(this); heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.addView(label(salaryDay("EGP") > 0 ? "كشف الفترة من يوم القبض" : "كشف الشهر", 13, softInk, false), new LinearLayout.LayoutParams(0, -2, 1));
-        heading.addView(label(period[0].format(dayMonth) + " – اليوم", 12, softInk, false));
-        hero.addView(heading);
+        WrapRow heading = new WrapRow(this);
+        heading.addView(label("كشف الفترة", 18, INK, true));
+        LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
+        TextView periodChip = label(isolate(period[0].format(dayMonth)) + " – اليوم ⌄", 11, INK, false);
+        periodChip.setPadding(dp(8), dp(4), dp(8), dp(4)); periodChip.setMinHeight(dp(UiTheme.TOUCH));
+        periodChip.setGravity(Gravity.CENTER); periodChip.setBackground(rounded(ACCENT_PALE, 99));
+        periodChip.setContentDescription("الفترة من " + period[0].format(dayMonth) + " لليوم");
+        // Home keeps its salary-aligned period. The chip explains it; custom ranges remain on the statement page.
+        periodChip.setOnClickListener(v -> statementInfo(s)); tools.addView(periodChip);
+        TextView info = label("ⓘ", 20, MUTED, false); info.setGravity(Gravity.CENTER);
+        info.setContentDescription("معلومات كشف الفترة"); info.setOnClickListener(v -> statementInfo(s));
+        tools.addView(info, new LinearLayout.LayoutParams(dp(UiTheme.TOUCH), -2));
+        info.setMinHeight(dp(UiTheme.TOUCH)); heading.addView(tools);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2); hp.topMargin = dp(12); page.addView(heading, hp);
 
-        // One figure carries the card: what is left of the period's income, large, over a slim bar for the share that
-        // has gone out (full and coral when more went out than came in). No fixed circle, so large fonts never crowd it.
-        boolean over = s.remaining < 0;
-        float share = s.income > 0 ? (float) ((double) s.out / s.income) : (s.out > 0 ? 1f : 0f);
-        String hint = s.income <= 0 ? (s.out > 0 ? "مفيش دخل مسجل" : "لسه مفيش حركة") : over ? "خرج أكتر من الدخل" : "اتصرف " + Math.round(share * 100) + "% من الدخل";
-        TextView caption = label("باقي من دخل الفترة", 13, softInk, false);
-        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-1, -2); captionParams.topMargin = dp(18);
-        hero.addView(caption, captionParams);
-        TextView remaining = label((over ? "−" : "") + money(Math.abs(s.remaining), "EGP"), 34, over ? softGold : Color.WHITE, true);
-        remaining.setTextDirection(View.TEXT_DIRECTION_LTR); remaining.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
-        remaining.setSingleLine(true); remaining.setFontFeatureSettings("tnum");
-        remaining.setAutoSizeTextTypeUniformWithConfiguration(22, 34, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
-        hero.addView(remaining, new LinearLayout.LayoutParams(-1, -2));
-
-        LinearLayout bar = new LinearLayout(this); bar.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        bar.setBackground(rounded(track, 99)); bar.setClipToOutline(true);
-        float filled = Math.min(1f, share);
-        View fill = new View(this); fill.setBackground(rounded(over ? softGold : LIME, 99));
-        bar.addView(fill, new LinearLayout.LayoutParams(0, -1, filled));
-        bar.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 1f - filled));
-        bar.setContentDescription(hint);
-        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(-1, dp(6)); barParams.topMargin = dp(12);
-        hero.addView(bar, barParams);
-        TextView hintView = label(hint, 12, over ? softGold : softInk, false);
-        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2); hintParams.topMargin = dp(6);
-        hero.addView(hintView, hintParams);
-
-        // Three columns beneath: دخل, خرج, صرف يومي, divided by hairlines. Each opens exactly the rows that add up to it.
-        LinearLayout stats = new LinearLayout(this); stats.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        String incomeDate = s.salaryWhen > 0 ? "يوم " + Instant.ofEpochMilli(s.salaryWhen).atZone(ZoneId.systemDefault()).toLocalDate().format(dayMonth) : "الفترة";
-        View[] columns = {
-                statementStat(LIME, "دخل", (s.income > 0 ? "+" : "") + money(s.income, "EGP"), incomeDate, () -> openStatement(MoneyFlow.Bucket.INFLOW.name(), false)),
-                statementStat(softGold, "خرج", (s.out > 0 ? "−" : "") + money(s.out, "EGP"), s.outCount + " عملية", () -> openStatement(MoneyFlow.OUT_FILTER, false)),
-                statementStat(softSky, "صرف يومي", money(s.living, "EGP"), "من خرج", () -> openStatement(MoneyFlow.Bucket.LIVING.name(), false))};
-        for (int i = 0; i < columns.length; i++) {
-            if (i > 0) {
-                View rule = new View(this); rule.setBackgroundColor(track);
-                LinearLayout.LayoutParams ruleParams = new LinearLayout.LayoutParams(dp(1), -1); ruleParams.setMargins(dp(10), dp(6), dp(10), dp(6));
-                stats.addView(rule, ruleParams);
+        LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
+        box.setTag("home_statement"); box.setBackground(outlined(SURFACE, BORDER, 22)); box.setClipToOutline(true);
+        page.addView(box, new LinearLayout.LayoutParams(-1, -2));
+        TextView verdict = label(StatementRows.verdict(s.income, s.out), 13, s.out > s.income ? 0xfff0c987 : 0xffd9ebe3, true);
+        verdict.setBackgroundColor(BRAND); verdict.setPadding(dp(14), dp(9), dp(14), dp(9));
+        box.addView(verdict, new LinearLayout.LayoutParams(-1, -2));
+        statementTotal(box, "فلوس دخلت", "↓", s.income, INCOME, 1);
+        if (homeStatementOpen == 1) {
+            statementCaption(box, "النسب من إجمالي الداخل");
+            for (StatementRows.Row row : StatementRows.in(s, items, zone)) {
+                String detail = "راتب".equals(row.name) && s.salaryWhen > 0
+                        ? "يوم " + isolate(Instant.ofEpochMilli(s.salaryWhen).atZone(zone).toLocalDate().format(dayMonth)) : row.detail;
+                statementComponent(box, row, detail, s.income, INCOME);
             }
-            stats.addView(columns[i], new LinearLayout.LayoutParams(0, -2, 1));
         }
-        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, -2); bodyParams.topMargin = dp(18);
-        hero.addView(stats, bodyParams);
-
-        if (s.transfersIn > 0) {
-            TextView split = label("راتب " + money(s.salary, "EGP") + " · تحويلات وصلتك " + money(s.transfersIn, "EGP"), 11, softInk, false);
-            split.setTextDirection(View.TEXT_DIRECTION_RTL); split.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams splitParams = new LinearLayout.LayoutParams(-1, -2); splitParams.topMargin = dp(8);
-            hero.addView(split, splitParams);
+        divider(box);
+        statementTotal(box, "فلوس خرجت", "↑", s.out, ORANGE, 2);
+        if (homeStatementOpen == 2) {
+            statementCaption(box, "النسب من إجمالي الخارج");
+            for (StatementRows.Row row : StatementRows.out(s)) statementComponent(box, row, row.detail, s.out, ACCENT);
         }
-        TextView foot = label("التحويل بين حساباتك وسداد كروتك مش داخلين؛ الكاش محسوب لما اتسحب", 11, 0xff8fb0a3, false);
-        foot.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams footParams = new LinearLayout.LayoutParams(-1, -2); footParams.topMargin = dp(s.transfersIn > 0 ? 2 : 8);
-        hero.addView(foot, footParams);
-        hero.setOnClickListener(v -> openStatement(MoneyFlow.OUT_FILTER, false));
-
-        boolean any = s.cashSpending > 0 || s.internal > 0 || s.unlinkedTransfer > 0;
-        for (MoneyFlow.Bucket bucket : MoneyFlow.STATEMENT_OUT_BUCKETS) if (s.component(bucket) > 0) any = true;
-        if (!any) return;
-        section("راح فين؟", null, null);
-        LinearLayout box = card(); box.addView(label("نفس الفترة · EGP · كل سطر يفتح عملياته ومجموعها يساوي رقمه", 12, MUTED, false));
-        for (MoneyFlow.Bucket bucket : MoneyFlow.STATEMENT_OUT_BUCKETS) {
-            long amount = s.component(bucket);
-            if (amount <= 0) continue;
-            LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setPadding(0, dp(10), 0, dp(6));
-            int icon = bucket == MoneyFlow.Bucket.CASH_WITHDRAWAL ? R.drawable.ic_cat_atm : bucket == MoneyFlow.Bucket.OPEN_TRANSFER ? R.drawable.ic_cat_transfer : R.drawable.ic_cat_other;
-            row.addView(tintedIcon(icon, bucketColor(bucket)), new LinearLayout.LayoutParams(dp(22), dp(22)));
-            TextView title = label(MoneyFlow.label(bucket), 14, INK, true);
-            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, -2, 1); tp.setMarginStart(dp(10)); row.addView(title, tp);
-            TextView amountView = label(money(amount, "EGP"), 13, INK, true); amountView.setTextDirection(View.TEXT_DIRECTION_LTR); row.addView(amountView);
-            row.addView(tintedIcon(R.drawable.ic_chevron_forward, MUTED), new LinearLayout.LayoutParams(dp(18), dp(18)));
-            final MoneyFlow.Bucket target = bucket;
-            row.setOnClickListener(v -> openStatement(target.name(), target == MoneyFlow.Bucket.OPEN_TRANSFER));
-            box.addView(row);
-        }
+        WrapRow difference = statementRow("الفرق", "مش رصيد حسابك", "=", s.remaining, dark ? 0xfff0c987 : 0xff8a5a00, false);
+        difference.setTag("statement_difference"); difference.setBackgroundColor(dark ? 0xff393221 : 0xfffcf2db);
+        // All contributing income and outflow rows; the statement page explains their signed difference.
+        difference.setOnClickListener(v -> openStatement("", false, StatementRows.contributors(s, items, zone))); box.addView(difference, new LinearLayout.LayoutParams(-1, -2));
         if (s.unlinkedTransfer > 0) {
-            TextView warning = label("تحويل غير مربوط بقيمة " + money(s.unlinkedTransfer, "EGP") + " قد يكون بين حساباتك — اربطه", 12, CORAL, true);
-            warning.setPadding(0, dp(8), 0, dp(4));
-            final long id = s.unlinkedTransferId;
-            warning.setOnClickListener(v -> { ExpenseDb.Transaction tx = db.transactionById(id); if (tx != null) reconcileTransferDialog(tx); });
-            box.addView(warning);
+            TextView warning = label("تحويل غير مربوط بقيمة " + isolate(money(s.unlinkedTransfer, "EGP")) + " قد يكون بين حساباتك — اربطه", 12, CORAL, true);
+            warning.setMinHeight(dp(UiTheme.TOUCH)); warning.setPadding(0, dp(8), 0, dp(4));
+            warning.setTag("statement_unlinked");
+            warning.setOnClickListener(v -> { ExpenseDb.Transaction tx = db.transactionById(s.unlinkedTransferId); if (tx != null) reconcileTransferDialog(tx); });
+            page.addView(warning);
         }
-        if (s.cashSpending > 0) box.addView(label("مصروفات من الكاش " + money(s.cashSpending, "EGP") + " · محسوبة وقت السحب، مش مضافة لـ«خرج»", 11, MUTED, false));
-        if (s.internal > 0) box.addView(label("بين حساباتك وسداد كروتك " + money(s.internal, "EGP") + " · مش دخل ولا خرج", 11, MUTED, false));
     }
 
-    /** One stat column under the hero figure: a dot and name, the amount, then a quiet detail line, nothing wrapping. */
-    private LinearLayout statementStat(int tint, String name, String amount, String detail, Runnable action) {
-        final int softInk = 0xffb9d3c8;
-        LinearLayout column = new LinearLayout(this); column.setOrientation(LinearLayout.VERTICAL);
-        column.setMinimumHeight(dp(48)); column.setPadding(0, dp(2), 0, dp(2));
-        TextView title = label("● " + name, 12, softInk, false); title.setSingleLine(true);
-        android.text.SpannableString dot = new android.text.SpannableString(title.getText());
-        dot.setSpan(new android.text.style.ForegroundColorSpan(tint), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        title.setText(dot);
-        column.addView(title, new LinearLayout.LayoutParams(-1, -2));
-        TextView value = label(amount, 15, tint == LIME ? LIME : Color.WHITE, true);
-        value.setTextDirection(View.TEXT_DIRECTION_LTR); value.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
-        value.setSingleLine(true); value.setFontFeatureSettings("tnum");
-        value.setAutoSizeTextTypeUniformWithConfiguration(11, 15, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
-        LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(-1, -2); valueParams.topMargin = dp(4);
-        column.addView(value, valueParams);
-        TextView note = label(detail, 11, softInk, false); note.setSingleLine(true);
-        note.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        column.addView(note, new LinearLayout.LayoutParams(-1, -2));
-        column.setContentDescription(name + " " + amount + "، " + detail);
-        column.setOnClickListener(v -> action.run());
-        return column;
+    private static String isolate(String text) { return "\u2068" + text + "\u2069"; }
+
+    private void statementInfo(MoneyFlow.Statement s) {
+        String text = "الفرق هو الداخل ناقص الخارج في نفس الفترة؛ مش رصيد حسابك.\n" +
+                "التحويل بين حساباتك وسداد كروتك مش داخلين؛ الكاش محسوب لما اتسحب";
+        if (s.cashSpending > 0) text += "\nمصروفات من الكاش " + isolate(money(s.cashSpending, "EGP")) + " · محسوبة وقت السحب";
+        if (s.internal > 0) text += "\nبين حساباتك وسداد كروتك " + isolate(money(s.internal, "EGP")) + " · مش دخل ولا خرج";
+        new ChoiceDialogBuilder().setTitle("كشف الفترة").setMessage(text).setPositiveButton("تمام", null).show();
+    }
+
+    private void statementCaption(LinearLayout box, String text) {
+        TextView caption = label(text, 11, MUTED, false); caption.setPadding(dp(14), dp(4), dp(14), 0); box.addView(caption);
+    }
+
+    private void statementTotal(LinearLayout box, String name, String badge, long amount, int tint, int section) {
+        WrapRow row = statementRow(name, "", badge, amount, tint, true);
+        row.setTag(section == 1 ? "statement_income" : "statement_out");
+        boolean expanded = homeStatementOpen == section;
+        row.setContentDescription(name + "، " + money(amount, "EGP") + "، " + (expanded ? "مفتوح" : "مقفول"));
+        row.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName("android.widget.Button");
+                info.addAction(expanded ? android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_COLLAPSE
+                        : android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND);
+                if (Build.VERSION.SDK_INT >= 30) info.setStateDescription(expanded ? "مفتوح" : "مقفول");
+            }
+            @Override public boolean performAccessibilityAction(View host, int action, Bundle args) {
+                if (action == android.view.accessibility.AccessibilityNodeInfo.ACTION_EXPAND || action == android.view.accessibility.AccessibilityNodeInfo.ACTION_COLLAPSE)
+                    return host.performClick();
+                return super.performAccessibilityAction(host, action, args);
+            }
+        });
+        row.setOnClickListener(v -> { homeStatementOpen = expanded ? 0 : section; render(); });
+        box.addView(row, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private WrapRow statementRow(String name, String detail, String badge, long amount, int tint, boolean disclosure) {
+        WrapRow row = new WrapRow(this); row.setPadding(dp(12), dp(7), dp(12), dp(7)); row.setMinimumHeight(dp(UiTheme.TOUCH));
+        LinearLayout leading = new LinearLayout(this); leading.setGravity(Gravity.CENTER_VERTICAL);
+        if (!badge.isEmpty()) {
+            TextView icon = label(badge, 17, tint, true); icon.setGravity(Gravity.CENTER); icon.setBackground(rounded(ACCENT_PALE, 99));
+            leading.addView(icon, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        }
+        LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(label(name, 13, INK, true));
+        if (!detail.isEmpty()) copy.addView(label(detail, 10, MUTED, false));
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2); cp.setMarginStart(dp(8)); leading.addView(copy, cp);
+        row.addView(leading);
+        TextView value = statementAmount(amount, tint, disclosure ? "  ⌄" : ""); row.addView(value);
+        return row;
+    }
+
+    private TextView statementAmount(long amount, int tint, String suffix) {
+        String number = (amount < 0 ? "−" : "") + String.format(Locale.US, "%,.2f", java.math.BigDecimal.valueOf(amount).abs().movePointLeft(2));
+        String text = "\u2066" + number + " ج.م" + suffix + "\u2069";
+        android.text.SpannableString span = new android.text.SpannableString(text);
+        int currency = text.indexOf("ج.م");
+        span.setSpan(new android.text.style.RelativeSizeSpan(0.65f), currency, currency + 3, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        TextView value = label("", 16, tint, true); value.setText(span); value.setTag("statement_amount");
+        value.setTextDirection(View.TEXT_DIRECTION_LTR); value.setFontFeatureSettings("tnum");
+        // No singleLine, ellipsize, autosizing or fixed height: the enclosing row moves the whole amount below.
+        return value;
+    }
+
+    private void statementComponent(LinearLayout box, StatementRows.Row item, String detail, long total, int tint) {
+        WrapRow row = new WrapRow(this); row.setPadding(dp(14), dp(6), dp(14), dp(6)); row.setMinimumHeight(dp(UiTheme.TOUCH));
+        row.setTag("statement_component:" + item.name);
+        LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(label(item.name, 12, INK, true));
+        if (!detail.isEmpty()) copy.addView(label(detail, 10, MUTED, false));
+        LinearLayout shares = new LinearLayout(this); shares.setGravity(Gravity.CENTER_VERTICAL);
+        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(10000); bar.setProgress((int)Math.round(StatementRows.share(item.amount, total) * 10000));
+        bar.setProgressTintList(ColorStateList.valueOf(tint)); bar.setProgressBackgroundTintList(ColorStateList.valueOf(BORDER));
+        bar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        shares.addView(bar, new LinearLayout.LayoutParams(dp(90), dp(5)));
+        TextView percent = label(StatementRows.percent(item.amount, total), 10, MUTED, false);
+        percent.setPadding(dp(5), 0, 0, 0); shares.addView(percent); copy.addView(shares); row.addView(copy);
+        row.addView(statementAmount(item.amount, INK, "  ‹"));
+        row.setOnClickListener(v -> {
+            if (item.bucket == MoneyFlow.Bucket.INFLOW) {
+                openStatement(MoneyFlow.Bucket.INFLOW.name(), false, item.ids);
+            } else openStatement(item.bucket.name(), item.bucket == MoneyFlow.Bucket.OPEN_TRANSFER);
+        });
+        box.addView(row, new LinearLayout.LayoutParams(-1, -2));
     }
 
     private void openInsights(String section,LocalDate month) {
@@ -3509,6 +3523,12 @@ public final class MainActivity extends Activity {
             bulkMode=!bulkMode;bulkSelected.clear();render();
         }),new LinearLayout.LayoutParams(dp(44),dp(44)));
         page.addView(bar);
+        if (transactionStatementList && transactionBucketFilter.isEmpty() && transactionStatementIds != null) {
+            ZoneId zone = ZoneId.systemDefault();
+            MoneyFlow.Statement statement = MoneyFlow.statement(db.flowItems(transactionPeriod[0], transactionPeriod[1], zone), transactionPeriod, zone, "EGP");
+            page.addView(label("الفرق · " + isolate(money(statement.remaining, "EGP")), 18, INK, true));
+            page.addView(label("مش رصيد حسابك · الداخل ناقص الخارج في الفترة دي", 12, MUTED, false));
+        }
         bulkChecks.clear();bulkCount=null;bulkApply=null;
         if(bulkMode) {
             LinearLayout tools=card();bulkCount=label("المحدد: "+bulkSelected.size(),14,INK,true);tools.addView(bulkCount);
@@ -3636,7 +3656,7 @@ public final class MainActivity extends Activity {
                 }
                 if(entry.event!=null)captureEventRow(group,entry.event);
                 else{
-                    net.add(tx.currency,tx.kind,tx.category,ExpenseDb.effectiveAmount(tx,dayOffsets));
+                    net.add(tx.currency,tx.kind,tx.category,transactionStatementList ? tx.amountMinor : ExpenseDb.effectiveAmount(tx,dayOffsets));
                     if("expense".equals(tx.kind))visible.add(tx.id);
                     transactionRow(group, tx, candidates.contains(tx.id));
                 }
@@ -3782,7 +3802,7 @@ public final class MainActivity extends Activity {
     /** Clears the list filters but keeps the chosen period and the search text. */
     private void clearTransactionFilters() {
         transactionCategoryFilter = ""; transactionSourceFilter = null; transactionKindFilter = ""; transactionBucketFilter = "";
-        transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionStatementList = false;
+        transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionStatementList = false; transactionStatementIds = null;
     }
 
     /** The period chip: pick a month, pick a day-to-day range, or go back to the month view. */
@@ -3792,7 +3812,7 @@ public final class MainActivity extends Activity {
         labels.add("فترة من يوم لـ يوم"); actions.add(this::chooseTransactionPeriod);
         if (transactionPeriod != null) {
             labels.add("رجوع لعرض " + selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", new Locale("ar"))));
-            actions.add(() -> { transactionPeriod = null; transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionStatementList = false; render(); });
+            actions.add(() -> { transactionPeriod = null; transactionCurrencyFilter = ""; transactionExcludeTransfers = false; transactionStatementList = false; transactionStatementIds = null; render(); });
         }
         new ChoiceDialogBuilder().setTitle("الفترة").setItems(labels.toArray(new String[0]), (dialog, which) -> actions.get(which).run())
                 .setNegativeButton("إلغاء", null).show();
@@ -4071,7 +4091,8 @@ public final class MainActivity extends Activity {
                    NEEDS_ATTENTION_FILTER.equals(transactionCategoryFilter)&&("expense".equals(tx.kind)&&MoneyFlow.UNCATEGORIZED.equals(tx.category)||tx.needsReview))
                 &&(!transactionExcludeTransfers||!isSentTransfer(tx))
                 &&MoneyFlow.matchesFilter(transactionBucketFilter,bucketOf(tx))
-                &&(!transactionStatementList||!ExpenseDb.paidFromCash(tx,sourceKinds()))
+                &&(!transactionStatementList || !MoneyFlow.isStatementOut(bucketOf(tx)) || bucketOf(tx)==MoneyFlow.Bucket.CASH_WITHDRAWAL || !ExpenseDb.paidFromCash(tx,sourceKinds()))
+                &&(transactionStatementIds==null || java.util.Arrays.stream(transactionStatementIds).anyMatch(id -> id==tx.id))
                 &&(transactionCurrencyFilter.isEmpty()||transactionCurrencyFilter.equals(tx.currency))
                 &&(transactionSourceFilter==null||transactionSourceFilter.equals(tx.paymentSourceId)||transactionSourceFilter.equals(tx.destinationSourceId))
                 &&(text.isEmpty()||(tx.merchant+" "+tx.category+" "+money(tx.amountMinor,tx.currency)).toLowerCase(Locale.ROOT).contains(text));
@@ -4080,7 +4101,7 @@ public final class MainActivity extends Activity {
         // Canceled attempts are audit history, not active expenses awaiting classification.
         if ("غير مصنف".equals(transactionCategoryFilter)||NEEDS_ATTENTION_FILTER.equals(transactionCategoryFilter)) return false;
         // The list behind the home number holds only the rows that add up to it; no cancelled attempts beside them.
-        if (!MoneyFlow.listsCaptureHistory(transactionBucketFilter)) return false;
+        if (transactionStatementList || !MoneyFlow.listsCaptureHistory(transactionBucketFilter)) return false;
         if(event.original!=null){
             String query=text.replace("ملغاة", "").trim();return matchesTransactionFilters(event.original,query);
         }
@@ -7549,7 +7570,12 @@ public final class MainActivity extends Activity {
 
     /** Opens exactly the rows behind a home statement number: same period (pay day → today), EGP, and bucket filter. */
     private void openStatement(String bucketFilter, boolean review) {
+        openStatement(bucketFilter, review, null);
+    }
+
+    private void openStatement(String bucketFilter, boolean review, long[] ids) {
         resetTransactionFilters();
+        transactionStatementIds = ids;
         transactionBucketFilter = bucketFilter;
         transactionPeriod = statementPeriod();
         transactionCurrencyFilter = "EGP";
@@ -7561,7 +7587,7 @@ public final class MainActivity extends Activity {
     }
 
     private void resetTransactionFilters() {
-        transactionsReturnDialog="";transactionsPointsCurrency="";transactionStatementList=false;
+        transactionsReturnDialog="";transactionsPointsCurrency="";transactionStatementList=false;transactionStatementIds=null;
         transactionBucketFilter="";transactionCategoryFilter="";transactionKindFilter="";transactionCurrencyFilter="";
         transactionSourceFilter=null;transactionPeriod=null;transactionExcludeTransfers=false;transactionSearch="";searchOpen=false;
         bulkMode=false;bulkSelected.clear();transactionsBackTab=0;
