@@ -55,8 +55,7 @@ public final class SmsImportActivity extends Activity {
         uiTheme=new UiTheme(this,dark);
         BRAND=uiTheme.brand;LIME=uiTheme.lime;INK=uiTheme.ink;MUTED=uiTheme.muted;
         background=uiTheme.background;surface=uiTheme.surface;accent=uiTheme.accent;border=uiTheme.border;
-        getWindow().setStatusBarColor(background);getWindow().setNavigationBarColor(background);
-        getWindow().getDecorView().setSystemUiVisibility(dark?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        SystemUi.appearance(getWindow(),dark,background,background);
         try {font=new Typeface.Builder(getAssets(),"fonts/ReadexPro.ttf").build();}
         catch(RuntimeException e) {font=Typeface.DEFAULT;}
         ui=new UiComponents(this,uiTheme,font);
@@ -265,7 +264,7 @@ public final class SmsImportActivity extends Activity {
         TextView heading=text(title,20);heading.setTypeface(font,Typeface.BOLD);content.addView(heading);
         ScrollView scroll=new ScrollView(this);scroll.addView(body);content.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         Button close=button(action,()->{dialog.dismiss();if(accept!=null)accept.run();});primary(close);content.addView(close);
-        dialog.setContentView(content);android.view.Window window=dialog.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));window.setGravity(Gravity.BOTTOM);window.setNavigationBarColor(surface);dialog.show();window.setLayout(-1,Math.round(getResources().getDisplayMetrics().heightPixels*.75f));SystemUi.apply(this,content);
+        dialog.setContentView(content);android.view.Window window=dialog.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));window.setGravity(Gravity.BOTTOM);SystemUi.appearance(window,dark,background,surface);dialog.show();window.setLayout(-1,Math.round(getResources().getDisplayMetrics().heightPixels*.75f));SystemUi.apply(this,content);
     }
     private void updateSelection(){
         int n=0;for(SmsPreview r:session.items)if(r.selected)n++;

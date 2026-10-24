@@ -102,8 +102,20 @@ final class StatementUiTest {
             if((Boolean)matches.invoke(activity,tx,""))total+=ExpenseDb.effectiveAmount(tx,offsets);
         return total;
     }
+    private void tagged(String tag) {
+        runner.runOnMainSync(() -> {
+            View found=activity.findViewById(android.R.id.content).findViewWithTag(tag);
+            if(found==null)throw new AssertionError("Missing tag: "+tag);found.performClick();
+        });idle();
+    }
+    private void expandOut() {
+        runner.runOnMainSync(() -> {try {
+            Field open=MainActivity.class.getDeclaredField("homeStatementOpen");open.setAccessible(true);open.setInt(activity,2);
+            Method render=MainActivity.class.getDeclaredMethod("render");render.setAccessible(true);render.invoke(activity);
+        }catch(Exception error){throw new RuntimeException(error);}});idle();
+    }
     private void openAndCompare(String rowLabel,String expectedFilter,long expected,LocalDate[] period)throws Exception{
-        show(0);click(rowLabel);
+        show(0);expandOut();tagged("statement_component:"+rowLabel);
         ok(expectedFilter.equals(get("transactionBucketFilter")),"Row «"+rowLabel+"» did not open its bucket filter");
         LocalDate[] opened=(LocalDate[])get("transactionPeriod");
         ok(opened!=null&&opened[0].equals(period[0])&&opened[1].equals(period[1]),"Row «"+rowLabel+"» did not open the statement period");
@@ -140,25 +152,22 @@ final class StatementUiTest {
             activity=(MainActivity)runner.startActivitySync(new android.content.Intent(target,MainActivity.class)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));idle();show(0);
             List<String> home=pageText();
-            ok(shows(home,"+"+MainActivity.money(3000000,"EGP")),"Income line missing");
-            ok(shows(home,"−"+MainActivity.money(650000,"EGP")),"خرج line missing or wrong");
-            ok(shows(home,MainActivity.money(2350000,"EGP")),"باقي line missing or wrong");
-            ok(shows(home,"باقي من دخل الفترة"),"Remaining is not named «باقي من دخل الفترة»");
-            ok(shows(home,"7 عملية"),"Seven rows make up «خرج»: five card purchases, the direct spend and the withdrawal");
-            ok(shows(home,"صرف يومي")&&shows(home,MainActivity.money(600000,"EGP")),"Daily spending component missing");
-            ok(shows(home,"سحب نقدي")&&shows(home,MainActivity.money(50000,"EGP")),"Cash withdrawal component missing");
-            // No «خرج» line for the linked transfer or the card repayments (both internal), and no card with another period.
-            ok(!shows(home,MoneyFlow.label(MoneyFlow.Bucket.OPEN_TRANSFER))&&!shows(home,"آخر 7 أيام")&&!shows(home,"أين تنفق")&&!shows(home,"حركات غير داخلة"),"A transfer line or an old-period card is still on the home screen");
-            ok(shows(home,"بين حساباتك وسداد كروتك "+MainActivity.money(3400000,"EGP")),"Internal moves are shown as detail, outside the three numbers");
-            ok(shows(home,"مصروفات من الكاش "+MainActivity.money(20000,"EGP")),"Cash purchase detail missing");
+            ok(shows(home,MainActivity.money(3000000,"EGP")),"Income total missing");
+            ok(shows(home,MainActivity.money(650000,"EGP")),"Outflow total missing");
+            ok(shows(home,MainActivity.money(2350000,"EGP")),"Difference total missing");
+            ok(shows(home,"الفرق")&&shows(home,"مش رصيد حسابك"),"Difference must not imply an account balance");
+            ok(!shows(home,"مصروفات من الكاش")&&!shows(home,"بين حساباتك وسداد كروتك"),"Supporting explanations belong in the info sheet");
             ok(!shows(home,"تحويل غير مربوط"),"Linked transfer must not warn");
             screen("01-statement-linked");
             openAndCompare(MoneyFlow.label(MoneyFlow.Bucket.LIVING),"LIVING",600000,period);
-            openAndCompare(MoneyFlow.label(MoneyFlow.Bucket.CASH_WITHDRAWAL),"CASH_WITHDRAWAL",50000,period);
-            show(0);click("خرج · 7 عملية");
-            ok(MoneyFlow.OUT_FILTER.equals(get("transactionBucketFilter")),"Hero did not open the «خرج» list");
-            ok(listedTotal(period)==650000,"Rows behind «خرج» do not add up to it");
-            screen("02-out-list");
+            openAndCompare("كاش اتسحب","CASH_WITHDRAWAL",50000,period);
+            show(0);expandOut();
+            ok(shows(pageText(),"النسب من إجمالي الخارج"),"Outflow accordion missing");
+            runner.runOnMainSync(() -> {try {
+                Method open=MainActivity.class.getDeclaredMethod("openStatement",String.class,boolean.class);open.setAccessible(true);open.invoke(activity,MoneyFlow.OUT_FILTER,false);
+            }catch(Exception error){throw new RuntimeException(error);}});idle();
+            ok(MoneyFlow.OUT_FILTER.equals(get("transactionBucketFilter")),"Outflow drill-down filter");
+            ok(listedTotal(period)==650000,"Outflow drill-down sum");screen("02-out-list");
             // Same scenario without the transfer linked: the debit is a transfer to a person, the deposit a second inflow.
             runner.runOnMainSync(activity::finish);activity=null;idle();
             db.clearAllData();ok(db.transactionCount()==0,"Reset failed");
@@ -169,11 +178,12 @@ final class StatementUiTest {
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));idle();show(0);
             home=pageText();
             ok(shows(home,"تحويل غير مربوط بقيمة "+MainActivity.money(2700000,"EGP")),"Unlinked transfer warning missing");
-            ok(shows(home,"−"+MainActivity.money(3350000,"EGP")),"خرج must include the unlinked amount, never silently");
-            ok(shows(home,"راتب "+MainActivity.money(3000000,"EGP"))&&shows(home,"تحويلات وصلتك "+MainActivity.money(2700000,"EGP")),"Income split salary / transfers in missing");
+            ok(shows(home,MainActivity.money(3350000,"EGP")),"Outflow includes unlinked transfer");
+            tagged("statement_income");
+            home=pageText();ok(shows(home,"راتب")&&shows(home,"تحويلات وصلتك")&&shows(home,MainActivity.money(2700000,"EGP")),"Income accordion split missing");
             screen("03-statement-unlinked");
-            openAndCompare(MoneyFlow.label(MoneyFlow.Bucket.OPEN_TRANSFER),"OPEN_TRANSFER",2700000,period);
-            show(0);click("تحويل غير مربوط بقيمة "+MainActivity.money(2700000,"EGP")+" قد يكون بين حساباتك — اربطه");
+            openAndCompare("تحويلات لناس","OPEN_TRANSFER",2700000,period);
+            show(0);tagged("statement_unlinked");
             AccessibilityNodeInfo tree=root();
             ok(tree!=null&&!tree.findAccessibilityNodeInfosByText("مطابقة تحويل بين حساباتك").isEmpty(),"Warning did not open the matching dialog");
             screen("04-link-dialog");

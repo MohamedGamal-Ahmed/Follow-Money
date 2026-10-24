@@ -1,5 +1,5 @@
 param([string]$Device = 'emulator-5556', [switch]$SkipBuild,
-    [string[]]$Modes = @('source_link_light','source_link_dark','source_link_max','transactions_light','transactions_dark','transactions_max','unified_light','unified_dark','unified_max','menus_max'))
+    [string[]]$Modes = @('source_link_light','source_link_dark','source_link_max','transactions_light','transactions_dark','transactions_max','unified_light','unified_dark','unified_max','menus_max','home_light','home_dark','home_light_large','home_dark_large','home_light_max','home_dark_max'))
 $ErrorActionPreference = 'Stop'
 $windowsHost = $env:OS -eq 'Windows_NT'
 $suffix = if ($windowsHost) { '.exe' } else { '' }
@@ -13,6 +13,8 @@ if (-not (Test-Path $adb)) { throw 'Set ANDROID_HOME to an Android SDK with plat
 $appId = 'com.mohamedgamal.masareef.cardreview.journeyqa'
 Push-Location (Split-Path $PSScriptRoot -Parent)
 $originalScale = $null
+$originalSize = $null
+$originalDensity = $null
 try {
     if (-not $SkipBuild) {
         New-Item -ItemType Directory -Force '.tmp' | Out-Null
@@ -35,16 +37,41 @@ allprojects { p ->
     }
     $originalScale = (& $adb -s $Device shell settings get system font_scale).Trim()
     if ($LASTEXITCODE -ne 0 -or $originalScale -notmatch '^(null|[0-9]+(?:\.[0-9]+)?)$') { throw 'Could not capture emulator font scale' }
+    $originalSize = (& $adb -s $Device shell wm size) -join "`n"
+    $originalDensity = (& $adb -s $Device shell wm density) -join "`n"
     foreach ($mode in $Modes) {
-        $scale = if ($mode.EndsWith('_max')) { '2.0' } else { '1.0' }
+        if ($mode.StartsWith('home_')) {
+            & $adb -s $Device shell wm size 360x800
+            & $adb -s $Device shell wm density 160
+            if ($LASTEXITCODE -ne 0) { throw 'Could not set home acceptance viewport' }
+        }
+        $scale = if ($mode.EndsWith('_max')) { '2.0' } elseif ($mode.EndsWith('_large')) { '1.3' } else { '1.0' }
         & $adb -s $Device shell settings put system font_scale $scale
         if ($LASTEXITCODE -ne 0) { throw 'Could not set font scale' }
         & $adb -s $Device shell am force-stop $appId
         $result = & $adb -s $Device shell am instrument -w -e feature_audit $mode "$appId.test/com.mohamedgamal.masareef.ReconciliationTest"
+        $instrumentExit = $LASTEXITCODE
         $result
-        if ($LASTEXITCODE -ne 0 -or ($result -join "`n") -notmatch '(Unified UI|Selection UI|Transaction pages|Source linking) checks passed: [1-9][0-9]*; failed: 0') { throw "Unified UI failed: $mode" }
+        $reportDir = Join-Path (Get-Location) '.tmp/home-statement-0.4.3'
+        New-Item -ItemType Directory -Force $reportDir | Out-Null
+        [IO.File]::WriteAllText((Join-Path $reportDir "$mode.log"), ($result -join "`n"), (New-Object Text.UTF8Encoding $false))
+        if ($instrumentExit -ne 0 -or ($result -join "`n") -notmatch '(Unified UI|Selection UI|Transaction pages|Source linking|Home statement) checks passed: [1-9][0-9]*; failed: 0') { throw "Unified UI failed: $mode" }
+        if ($mode.StartsWith('home_')) {
+            # Python preserves PNG bytes on Windows PowerShell 5.1 as well as PowerShell 7.
+            $pull = 'import sys,subprocess;from pathlib import Path;a,d,p,m,o=sys.argv[1:];folder=m[5:].replace("_","-");dest=Path(o)/m;dest.mkdir(exist_ok=True);names=["10-home-closed","10-home-out","10-home-in","11-update-offer","11-update-downloading","11-update-restart"];[(dest/(n+".png")).write_bytes(subprocess.check_output([a,"-s",d,"exec-out","run-as",p,"cat","cache/home-"+folder+"/"+n+".png"])) for n in names]'
+            & python -c $pull $adb $Device $appId $mode $reportDir
+            if ($LASTEXITCODE -ne 0) { throw "Could not collect home captures: $mode" }
+        }
     }
 } finally {
+    if ($null -ne $originalSize) {
+        $size = if ($originalSize -match 'Override size: ([0-9]+x[0-9]+)') { $Matches[1] } else { 'reset' }
+        & $adb -s $Device shell wm size $size
+    }
+    if ($null -ne $originalDensity) {
+        $density = if ($originalDensity -match 'Override density: ([0-9]+)') { $Matches[1] } else { 'reset' }
+        & $adb -s $Device shell wm density $density
+    }
     if ($null -ne $originalScale) {
         if ($originalScale -eq 'null') { & $adb -s $Device shell settings delete system font_scale }
         else { & $adb -s $Device shell settings put system font_scale $originalScale }

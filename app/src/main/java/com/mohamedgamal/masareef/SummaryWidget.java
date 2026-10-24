@@ -86,7 +86,7 @@ public class SummaryWidget extends AppWidgetProvider {
                 if(large||isWideSmall(context,manager,id)) {
                     views.setTextViewText(R.id.widget_week_label,"خرج من "+period[0].format(DateTimeFormatter.ofPattern("d MMMM",new Locale("ar"))));
                     views.setTextViewText(R.id.widget_week,hidden?"••••":MainActivity.money(statement==null?0:statement.out,currency));
-                    views.setTextViewText(R.id.widget_month_label,"باقي من دخل الفترة");
+                    views.setTextViewText(R.id.widget_month_label,"الفرق");
                     long left=statement==null?0:statement.remaining;
                     views.setTextViewText(R.id.widget_month,hidden?"••••":(left<0?"−":"")+MainActivity.money(Math.abs(left),currency));
                 }

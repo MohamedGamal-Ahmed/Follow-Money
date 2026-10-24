@@ -17,6 +17,18 @@ public final class AuditStructureTest {
     public static void main(String[] args) throws IOException {
         String main = read("app/src/main/java/com/mohamedgamal/masareef/MainActivity.java");
         classificationWriters();
+        int homeStart = main.indexOf("private void homeStatementCard()");
+        int homeEnd = main.indexOf("private void openInsights(", homeStart);
+        check(!main.substring(homeStart, homeEnd).contains("setAutoSize"), "Home statement must never shrink system fonts");
+        check(main.contains("in_app_update_card"), "Update strip keeps its stable tag");
+        check(!main.contains("attachBaseContext") && !main.contains(".fontScale="), "App must follow system font scale");
+        try (java.util.stream.Stream<Path> paths = Files.walk(Path.of("app/src/main"))) {
+            for (Path path : (Iterable<Path>) paths.filter(Files::isRegularFile)
+                    .filter(p -> p.toString().endsWith(".java") || p.toString().endsWith(".xml") || p.toString().endsWith(".txt"))::iterator) {
+                String content = Files.readString(path, StandardCharsets.UTF_8);
+                check(!content.contains("صرف يومي") && !content.contains("باقي من دخل الفترة"), "Old statement names remain: " + path);
+            }
+        }
         String daily = read("app/src/main/java/com/mohamedgamal/masareef/DailyRefreshReceiver.java");
         check(!body(main, "private void render()").contains("normalizeEarlyPayments"),
                 "render() must not normalize (it writes to the ledger)");
