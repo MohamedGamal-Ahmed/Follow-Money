@@ -31,6 +31,24 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     static final String DATABASE_NAME = "masareef.db";
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
     static final int SCHEMA_VERSION = 26;
+    private long readRevision=-1;
+    private final java.util.Map<String,Object> readCache=new java.util.HashMap<>();
+
+    /** Bounded revision cache. Uncommitted reads bypass it; an external commit invalidates every entry. */
+    @SuppressWarnings("unchecked")
+    <T> T cachedRead(String key,java.util.function.Supplier<T> read) {
+        if(getReadableDatabase().inTransaction())return read.get();
+        long revision=changes();
+        synchronized(readCache){
+            if(readRevision!=revision){readCache.clear();readRevision=revision;}
+            if(readCache.containsKey(key))return (T)readCache.get(key);
+        }
+        T result=read.get();
+        if(changes()==revision)synchronized(readCache){
+            if(readRevision==revision){if(readCache.size()>=24)readCache.clear();readCache.put(key,result);}
+        }
+        return result;
+    }
 
     public ExpenseDb(Context context) {
         super(context, DATABASE_NAME, null, SCHEMA_VERSION);
@@ -589,7 +607,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     ContentValues precision=new ContentValues();precision.put("time_precision",event.precision);
                     // A new-pipeline REVIEW (or a return with no expense to link) waits for the user; its reason is on the observation.
                     if (decided != null && decided.review) precision.put("needs_review",1);
-                    writable.update("transactions",precision,"id=?",new String[]{Long.toString(existing)});
+                    writable.update("transactions",precision,"id=? AND user_edited=0",new String[]{Long.toString(existing)});
                     // A return of an earlier charge is an expense offset: an income linked to that expense.
                     if (decided != null && decided.offsetOfTransactionId != null && "income".equals(kind)) linkReimbursement(existing, decided.offsetOfTransactionId);
                 }
@@ -694,7 +712,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                     if (!c.isNull(6) && c.getLong(6)==account && c.isNull(7)) values.putNull("payment_source_id");
                 } else if (c.isNull(6)) values.put("payment_source_id",account);
             }
-            if (values.size()>0) getWritableDatabase().update("transactions",values,"id=?",new String[]{Long.toString(id)});
+            if (values.size()>0) getWritableDatabase().update("transactions",values,"id=? AND user_edited=0",new String[]{Long.toString(id)});
         }
     }
 
@@ -811,7 +829,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if (kept.destinationSourceId==null && removed.destinationSourceId!=null) values.put("destination_source_id",removed.destinationSourceId);
             if ("transfer".equals(removed.kind)) { values.put("kind","transfer");values.put("category","تحويلات"); }
             if(keptParent==null&&removedParent!=null)values.put("fee_parent_id",removedParent);
-            if (values.size()>0) sql.update("transactions",values,"id=?",new String[]{Long.toString(keep)});
+            if (values.size()>0) sql.update("transactions",values,"id=? AND user_edited=0",new String[]{Long.toString(keep)});
             if(removedLink!=null) {
                 if(keptLink!=null)sql.delete("reimbursements","income_id=?",new String[]{Long.toString(remove)});
                 else sql.execSQL("UPDATE reimbursements SET income_id=? WHERE income_id=?",new Object[]{keep,remove});
@@ -837,7 +855,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     private void markMergeReview(long first,long second) {
-        getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id IN (?,?)",new Object[]{first,second});
+        getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id IN (?,?) AND user_edited=0 AND needs_review=0",new Object[]{first,second});
     }
 
     /** A full SMS may have been captured once as a prefix. Suggest, never merge without confirmation. */
@@ -863,12 +881,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         return matches;
     }
+    static final String ABBREVIATED_COPY_REASON="user confirmed abbreviated/full SMS of one purchase";
     public void confirmAbbreviatedSmsCopy(long completeId,long partialId) {
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
             boolean found=false;for(Transaction candidate:abbreviatedSmsCopies(completeId))if(candidate.id==partialId)found=true;
             if(!found)throw new IllegalArgumentException("Source copy is not a matching prefix");
-            if(!mergeEntries(completeId,partialId,"user confirmed abbreviated/full SMS of one purchase"))
+            if(!mergeEntries(completeId,partialId,ABBREVIATED_COPY_REASON))
                 throw new IllegalArgumentException("Related records conflict; review before merging");
             ContentValues kept=new ContentValues();kept.put("user_edited",1);sql.update("transactions",kept,"id=?",new String[]{Long.toString(completeId)});
             sql.setTransactionSuccessful();
@@ -1269,6 +1288,10 @@ public final class ExpenseDb extends SQLiteOpenHelper {
      * credit card flagged internal, and a purchase from the cash wallet flagged as already counted. Read-only.
      */
     public List<MoneyFlow.Item> flowItems(LocalDate from, LocalDate to, ZoneId zone) {
+        return new ArrayList<>(cachedRead("flow:"+from+":"+to+":"+zone,()->readFlowItems(from,to,zone)));
+    }
+
+    private List<MoneyFlow.Item> readFlowItems(LocalDate from,LocalDate to,ZoneId zone) {
         List<MoneyFlow.Item> items=new ArrayList<>();
         java.util.Map<Long,Long> offsets=reimbursementOffsets();
         java.util.Map<Long,String> kinds=sourceKinds();
@@ -1606,7 +1629,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 String category=rule==null?MerchantClassifier.category(c.getString(1)):rule.category;
                 if(category==null || category.equals(current) || !spendingCategory(category)) continue;
                 ContentValues values=new ContentValues();values.put("category",category);
-                changed+=sql.update("transactions",values,"id=?",new String[]{Long.toString(c.getLong(0))});
+                changed+=sql.update("transactions",values,"id=? AND user_edited=0",new String[]{Long.toString(c.getLong(0))});
             }
             sql.setTransactionSuccessful();return changed;
         } finally {sql.endTransaction();}
@@ -1779,14 +1802,16 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public Transaction transactionById(long id) { return transactionRows.transactionById(id); }
 
-    public List<Transaction> transactionsForMonth(LocalDate month) { return transactionRows.transactionsForMonth(month); }
+    public List<Transaction> transactionsForMonth(LocalDate month) {
+        return new ArrayList<>(cachedRead("month:"+month+":"+ZoneId.systemDefault(),()->transactionRows.transactionsForMonth(month)));
+    }
 
     public List<Transaction> transactionsBetween(LocalDate startDate, LocalDate endExclusive) {
-        return transactionRows.transactionsBetween(startDate,endExclusive);
+        return transactionsBetween(startDate,endExclusive,ZoneId.systemDefault());
     }
 
     public List<Transaction> transactionsBetween(LocalDate startDate, LocalDate endExclusive,ZoneId zone) {
-        return transactionRows.transactionsBetween(startDate,endExclusive,zone);
+        return new ArrayList<>(cachedRead("range:"+startDate+":"+endExclusive+":"+zone,()->transactionRows.transactionsBetween(startDate,endExclusive,zone)));
     }
 
     public List<String> months() {
@@ -1836,23 +1861,43 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public void updateCategory(long id, String category) {
-        if(new CardSettlements(this).isSettlement(id))return;
-        ContentValues values = new ContentValues();
-        values.put("category", category);
-        getWritableDatabase().update("transactions", values, "id=?", new String[]{Long.toString(id)});
+        updateCategories(java.util.Collections.singletonList(id),category);
     }
 
     /** Bulk categorization preserves amounts/accounts and survives subsequent SMS rereads. */
     public int updateCategories(List<Long> ids, String category) {
+        return classifyReviewed(ids,category).categorized;
+    }
+
+    static final class ClassificationResult {
+        int categorized,reviewed,unchanged;
+        String message(){return StatementRows.classified(categorized,reviewed,unchanged);}
+    }
+
+    /** Review non-expenses without relabelling income or an internal/card movement as spending. */
+    ClassificationResult classifyReviewed(List<Long> ids,String category) {
         if(category==null || category.isBlank())throw new IllegalArgumentException("Empty category");
-        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();int changed=0;
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();ClassificationResult result=new ClassificationResult();
         try {
             ContentValues values=new ContentValues();values.put("category",category);
             values.put("user_edited",1);values.put("needs_review",0);
-            for(Long id:new java.util.LinkedHashSet<>(ids))
-                if(!new CardSettlements(this).related(id))changed+=sql.update("transactions",values,"id=? AND kind='expense'",new String[]{Long.toString(id)});
-            sql.setTransactionSuccessful();return changed;
+            for(Long id:new java.util.LinkedHashSet<>(ids)) {
+                Transaction tx=id==null?null:transactionById(id);
+                if(tx==null){result.unchanged++;continue;}
+                if("expense".equals(tx.kind)&&!new CardSettlements(this).related(id)) {
+                    int changed=sql.update("transactions",values,"id=? AND kind='expense' AND (category<>? OR needs_review<>0 OR user_edited<>1)",new String[]{Long.toString(id),category});
+                    if(changed>0)result.categorized+=changed;else result.unchanged++;
+                } else if(tx.needsReview) result.reviewed+=confirmReview(id);
+                else result.unchanged++;
+            }
+            sql.setTransactionSuccessful();return result;
         } finally {sql.endTransaction();}
+    }
+
+    /** Explicit acknowledgement keeps every financial field and relationship unchanged. */
+    int confirmReview(long id) {
+        ContentValues values=new ContentValues();values.put("needs_review",0);values.put("user_edited",1);
+        return getWritableDatabase().update("transactions",values,"id=? AND needs_review=1",new String[]{Long.toString(id)});
     }
 
     public long putCommitmentFromTransaction(long transactionId,String merchant,long amount,String currency,LocalDate due,String kind) {
@@ -1901,7 +1946,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     public void mergeSources(long keepId, long removeId) { accounts.mergeSources(keepId,removeId); }
 
-    public List<PaymentSource> paymentSources() { return accounts.paymentSources(); }
+    public List<PaymentSource> paymentSources() { return new ArrayList<>(cachedRead("sources",accounts::paymentSources)); }
 
     public PaymentSource paymentSource(long id) { return accounts.paymentSource(id); }
 
@@ -2205,7 +2250,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     // ---- Reimbursements: money that came back for something bought on someone else's behalf ----
 
     /** What each linked row should be reduced by: the purchase by what came back, the incoming payment by the part it repaid. */
-    public java.util.Map<Long,Long> reimbursementOffsets() { return reimbursements.reimbursementOffsets(); }
+    public java.util.Map<Long,Long> reimbursementOffsets() { return new java.util.HashMap<>(cachedRead("offsets",reimbursements::reimbursementOffsets)); }
 
     /** The amount a row contributes to spending/inflow after reimbursements; never negative. */
     public static long effectiveAmount(Transaction tx,java.util.Map<Long,Long> offsets) {
@@ -2257,18 +2302,24 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     // ---- Data repair: promotions, double captures, own transfers (see RepairRules) ----
 
-    /** Bump when a new rule must re-run once over all existing data. */
-    public static final int REPAIR_VERSION = 3;
+    /**
+     * Bump when a new rule must re-run once over all existing data.
+     * 4 (0.4.2): an InstaPay handle now matches the bank SMS naming the same person, so earlier double incomes merge.
+     * 5 (0.4.3): 0.4.2 re-flagged rows the user had already reviewed; clearReviewedFlags gives them back.
+     */
+    public static final int REPAIR_VERSION = 5;
 
     public static final class RepairReport {
         boolean failed;
         private final java.util.Map<Long,Long> mergedRows=new java.util.HashMap<>();
         long follow(long id){while(mergedRows.containsKey(id))id=mergedRows.get(id);return id;}
         public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures, trailingSigns;
+        /** Rows the user had reviewed that 0.4.2 flagged again; only needs_review went back to 0 (0.4.3). */
+        public int reviewsRestored;
         /** Automatic rows that had no source and got one from their saved message (owner acceptance, 0.4.0). */
         public int sourcesInferred;
         public long movedMinor, feesMinor;
-        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns + sourcesInferred > 0; }
+        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns + sourcesInferred + reviewsRestored > 0; }
         /** Rows this repair moved into an archive, counted for the import contract that reports them. */
         int mergedRowCount() { return mergedRows.size(); }
     }
@@ -2303,6 +2354,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             report.trailingSigns=repairTrailingSigns();
             report.recategorized=recategorizeWithCurrentRules();
             report.sourcesInferred=inferMissingSources();
+            report.reviewsRestored=clearReviewedFlags();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
             log.put("promotions",report.promotions);log.put("duplicates",report.duplicates);log.put("own_transfers",report.ownTransfers);
@@ -2311,6 +2363,36 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             sql.setTransactionSuccessful();
         } finally {sql.endTransaction();}
         return report;
+    }
+
+    /**
+     * 0.4.2's markMergeReview/canReconcile set needs_review=1 on rows the user had edited. Since 0.4.3 every automatic
+     * flag requires user_edited=0, so an edited row that is still flagged comes from that bug. Only needs_review changes:
+     * no category, kind, amount or link. Excluded: the row kept by a user-confirmed abbreviated SMS merge, because that
+     * confirmation marks it edited without reviewing a flag the row may have had for its own reason.
+     */
+    int clearReviewedFlags() {
+        java.util.Set<Long> kept=new java.util.HashSet<>();
+        SQLiteDatabase sql=getWritableDatabase();
+        try (Cursor c=sql.rawQuery("SELECT payload FROM transaction_archive WHERE reason=?",new String[]{ABBREVIATED_COPY_REASON})) {
+            while (c.moveToNext()) {
+                String key;
+                try { key=new org.json.JSONObject(c.getString(0)).optString("unique_key",""); }
+                catch (org.json.JSONException unreadable) { continue; }
+                if (key.isEmpty()) continue;
+                try (Cursor owner=sql.rawQuery("SELECT transaction_id FROM capture_evidence WHERE unique_key=?",new String[]{key})) {
+                    while (owner.moveToNext()) kept.add(owner.getLong(0));
+                }
+            }
+        }
+        int restored=0;
+        List<Long> flagged=new ArrayList<>();
+        try (Cursor c=sql.rawQuery("SELECT id FROM transactions WHERE user_edited=1 AND needs_review=1",null)) {
+            while (c.moveToNext()) if (!kept.contains(c.getLong(0))) flagged.add(c.getLong(0));
+        }
+        ContentValues values=new ContentValues();values.put("needs_review",0);
+        for (long id:flagged) restored+=sql.update("transactions",values,"id=? AND user_edited=1 AND needs_review=1",new String[]{Long.toString(id)});
+        return restored;
     }
 
     /**
@@ -2401,7 +2483,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if (!(debit.amountMinor==own.principal+own.fee || debit.amountMinor==own.principal && existingFee==own.fee)) return false;
         if (own.fee>0 && existingFee==0 && !feeRowAvailable(own.outId,own.fromAccount)) {
             // A matched same-value UPDATE would advance the durable revision on every repair pass.
-            getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=? AND needs_review=0",new Object[]{own.outId});
+            getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=? AND user_edited=0 AND needs_review=0",new Object[]{own.outId});
             return false;
         }
         return true;
@@ -2436,7 +2518,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 String category=rule==null?ExpenseParser.category(name):rule.category;
                 if (MoneyFlow.UNCATEGORIZED.equals(category)) continue;
                 ContentValues values=new ContentValues();values.put("category",category);
-                changed+=getWritableDatabase().update("transactions",values,"id=?",new String[]{Long.toString(c.getLong(0))});
+                changed+=getWritableDatabase().update("transactions",values,"id=? AND user_edited=0",new String[]{Long.toString(c.getLong(0))});
             }
         }
         return changed;
@@ -2569,7 +2651,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             ContentValues values=new ContentValues();values.put("last_paid_date",last.toString());values.put("due_day",m.typicalDay);
             getWritableDatabase().update("recurring",values,"id=?",new String[]{Long.toString(id)});
             ContentValues category=new ContentValues();category.put("category",kindCategory(kind));
-            getWritableDatabase().update("transactions",category,"merchant=? AND kind='expense' AND category=?",new String[]{m.merchant,MoneyFlow.UNCATEGORIZED});
+            getWritableDatabase().update("transactions",category,"merchant=? AND kind='expense' AND category=? AND user_edited=0",new String[]{m.merchant,MoneyFlow.UNCATEGORIZED});
         }
         dismissRepeatingMerchant(m);
         return id;
@@ -2655,7 +2737,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         values.put("handle", key);
         getWritableDatabase().insertWithOnConflict("own_handles", null, values, SQLiteDatabase.CONFLICT_IGNORE);
         try (Cursor cursor = getReadableDatabase().rawQuery(
-                "SELECT id FROM transactions WHERE LOWER(TRIM(merchant))=? AND kind IN ('expense','income')", new String[]{key})) {
+                "SELECT id FROM transactions WHERE LOWER(TRIM(merchant))=? AND kind IN ('expense','income') AND user_edited=0", new String[]{key})) {
             while (cursor.moveToNext()) markAsTransfer(cursor.getLong(0));
         }
     }
@@ -2675,6 +2757,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             ContentValues values = new ContentValues();
             values.put("kind", "transfer");
             values.put("category", "تحويلات");
+            values.put("user_edited",1);values.put("needs_review",0);
             if ("income".equals(kind)) {
                 // Money arriving: the account it landed in is the destination, not the source.
                 if (cursor.isNull(1)) values.putNull("destination_source_id");

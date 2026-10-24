@@ -20,7 +20,7 @@ allprojects { p ->
         p.afterEvaluate { p.android.buildTypes.debug.applicationIdSuffix = '.whatsNewQa' }
     }
 }
-'@ | Set-Content '.tmp/whats-new/init.gradle' -Encoding utf8
+'@ | ForEach-Object { [IO.File]::WriteAllText("$PWD/.tmp/whats-new/init.gradle", $_, (New-Object Text.UTF8Encoding $false)) }
     & ./gradlew.bat --offline -I .tmp/whats-new/init.gradle assembleDebug assembleDebugAndroidTest
     if ($LASTEXITCODE -ne 0) { throw "What's new QA build failed" }
     $metadata = Get-Content 'app/build/outputs/apk/debug/output-metadata.json' -Raw | ConvertFrom-Json

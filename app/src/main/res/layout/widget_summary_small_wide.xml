@@ -26,6 +26,7 @@
             <TextView android:id="@+id/widget_month" android:layout_width="match_parent" android:layout_height="19dp"
                 android:text="@string/widget_preview_month_amount" android:textSize="13sp" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="9sp" android:autoSizeMaxTextSize="13sp" android:autoSizeStepGranularity="1sp"
                 android:textColor="#FFFFFF" android:singleLine="true" android:ellipsize="end" />
+            <TextView android:id="@+id/widget_month_hint" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_difference_hint" android:textSize="9sp" android:textColor="#B9D3C8" />
         </LinearLayout>
     </LinearLayout>
     <ProgressBar android:id="@+id/widget_progress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="4dp"

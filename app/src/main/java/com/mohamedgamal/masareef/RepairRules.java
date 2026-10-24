@@ -43,6 +43,9 @@ final class RepairRules {
 
     static boolean isNotification(String source) { return source != null && source.startsWith("إشعار"); }
 
+    /** Merging two copies of one payment: keep the first unless it is the app notification and the other is the bank's message. */
+    static boolean keepFirst(String first, String other) { return !isNotification(first) || isNotification(other); }
+
     /** Bank fee allowed between what left one account and what reached the other: 0.5% or 5.00, whichever is larger. */
     static long maxFee(long amountMinor) { return Math.max(amountMinor / 200, 500); }
 
@@ -113,7 +116,21 @@ final class RepairRules {
     static boolean compatibleMerchants(String a, String b) {
         if (a == null || b == null || ExpenseParser.genericMerchant(a) || ExpenseParser.genericMerchant(b)) return true;
         if (a.trim().equalsIgnoreCase(b.trim())) return true;
-        return a.contains("*") || b.contains("*");
+        return a.contains("*") || b.contains("*") || handleOfName(a, b) || handleOfName(b, a);
+    }
+
+    /**
+     * An InstaPay handle against the name a bank SMS shows for the same person: one name word of 4+ Latin letters
+     * appears inside the handle ("hebatallah.aladly@instapay" / "HEBATALLAH SAMIR ALADLY"). A handle unrelated to the
+     * name stays apart; the amount, direction, window and one-candidate rules still apply on top.
+     */
+    static boolean handleOfName(String handle, String name) {
+        int at = handle.indexOf('@');
+        if (at <= 0 || name.contains("@")) return false;
+        String local = handle.substring(0, at).toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z]", "");
+        for (String word : name.toLowerCase(java.util.Locale.ROOT).split("[^a-z]+"))
+            if (word.length() >= 4 && local.contains(word)) return true;
+        return false;
     }
 
     // ---- Money moved between two of the user's own accounts ----

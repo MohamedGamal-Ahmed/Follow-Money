@@ -20,7 +20,7 @@ final class UiSheets {
         Window window = dialog.getWindow();
         window.setGravity(Gravity.BOTTOM);
         window.setBackgroundDrawable(new UiComponents(activity, theme, font).shape(theme.surface, 0, UiTheme.SHEET_RADIUS));
-        window.setNavigationBarColor(theme.surface);
+        SystemUi.appearance(window, theme.dark, theme.background, theme.surface);
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         View opener = activity.getCurrentFocus();
         View decor = window.getDecorView();

@@ -179,7 +179,7 @@ final class PipelineDecider {
             if (income == null || expense == null || !"income".equals(income.kind) || !"expense".equals(expense.kind) || !income.currency.equals(expense.currency)
                     || MoneyFlow.isCashWithdrawal(expense.kind, expense.category) || expense.amountMinor - db.reimbursedOf(charge) <= 0) return;
             db.linkReimbursement(transactionId, charge);
-            if (d.unlinkedOffset) sql.execSQL("UPDATE transactions SET needs_review=? WHERE id=?",
+            if (d.unlinkedOffset) sql.execSQL("UPDATE transactions SET needs_review=? WHERE id=? AND user_edited=0",
                     new Object[]{"REVIEW".equals(row.observation.decision) ? 1 : 0, transactionId});
         } catch (RuntimeException | LinkageError unreadable) {
             // The return stays as written, waiting for the user to link it.

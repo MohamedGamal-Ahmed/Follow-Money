@@ -60,8 +60,10 @@ final class SupportAidsUiTest {
         runner.runOnMainSync(()->{try{set(main,"transactionBucketFilter","");set(main,"bulkMode",false);set(main,"selectedTab",6);call(main,"render");}
             catch(Exception error){throw new RuntimeException(error);}});
         for(int i=0;i<12;i++){android.os.SystemClock.sleep(150);idle();}
-        java.util.regex.Matcher count=java.util.regex.Pattern.compile("\\[(\\d+) تحويل لناس غرضها مش محدد").matcher(dump());
-        return count.find()?Integer.parseInt(count.group(1)):0;
+        // The banner counts with StatementRows.transfers: «تحويل واحد», «تحويلين», «3 تحويلات», «11 تحويل».
+        java.util.regex.Matcher count=java.util.regex.Pattern.compile("\\[(تحويل واحد|تحويلين|(\\d+) تحويلا?ت?) لناس غرضها مش محدد").matcher(dump());
+        if(!count.find())return 0;
+        return "تحويل واحد".equals(count.group(1))?1:"تحويلين".equals(count.group(1))?2:Integer.parseInt(count.group(2));
     }
     /** Clicks the action inside the same card as the anchor text (several cards can carry the same action). */
     private void clickIn(String anchor,String action){

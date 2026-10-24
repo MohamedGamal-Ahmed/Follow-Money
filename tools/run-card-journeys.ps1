@@ -17,7 +17,7 @@ allprojects { p ->
         p.afterEvaluate { p.android.buildTypes.debug.applicationIdSuffix = '.cardreview.journeyqa' }
     }
 }
-'@ | Set-Content '.tmp/card-journeys.init.gradle' -Encoding utf8
+'@ | ForEach-Object { [IO.File]::WriteAllText("$PWD/.tmp/card-journeys.init.gradle", $_, (New-Object Text.UTF8Encoding $false)) }
     & ./gradlew.bat --offline -I .tmp/card-journeys.init.gradle assembleDebug assembleDebugAndroidTest
     if ($LASTEXITCODE -ne 0) { throw 'QA APK build failed' }
     $metadata = Get-Content 'app/build/outputs/apk/debug/output-metadata.json' -Raw | ConvertFrom-Json

@@ -32,8 +32,8 @@ android {
         applicationId 'com.mohamedgamal.masareef'
         minSdk 26
         targetSdk 36
-        versionCode 11
-        versionName '0.4.1'
+        versionCode 13
+        versionName '0.4.3'
         manifestPlaceholders = [appLabel: 'Follow Money']
         testInstrumentationRunner 'com.mohamedgamal.masareef.ReconciliationTest'
     }
@@ -104,4 +104,10 @@ android {
         }
     }
 
+}
+
+dependencies {
+    // Google Play's flexible in-app update (owner, 24 Oct 2026). Talks to the Play Store app on the phone; the
+    // manifest still removes INTERNET and tools/check-release.py fails a release that would ask for it.
+    implementation 'com.google.android.play:app-update:2.1.0'
 }

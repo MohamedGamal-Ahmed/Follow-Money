@@ -16,6 +16,19 @@ public final class AuditStructureTest {
 
     public static void main(String[] args) throws IOException {
         String main = read("app/src/main/java/com/mohamedgamal/masareef/MainActivity.java");
+        classificationWriters();
+        int homeStart = main.indexOf("private void homeStatementCard()");
+        int homeEnd = main.indexOf("private void openInsights(", homeStart);
+        check(!main.substring(homeStart, homeEnd).contains("setAutoSize"), "Home statement must never shrink system fonts");
+        check(main.contains("in_app_update_card"), "Update strip keeps its stable tag");
+        check(!main.contains("attachBaseContext") && !main.contains(".fontScale="), "App must follow system font scale");
+        try (java.util.stream.Stream<Path> paths = Files.walk(Path.of("app/src/main"))) {
+            for (Path path : (Iterable<Path>) paths.filter(Files::isRegularFile)
+                    .filter(p -> p.toString().endsWith(".java") || p.toString().endsWith(".xml") || p.toString().endsWith(".txt"))::iterator) {
+                String content = Files.readString(path, StandardCharsets.UTF_8);
+                check(!content.contains("صرف يومي") && !content.contains("باقي من دخل الفترة"), "Old statement names remain: " + path);
+            }
+        }
         String daily = read("app/src/main/java/com/mohamedgamal/masareef/DailyRefreshReceiver.java");
         check(!body(main, "private void render()").contains("normalizeEarlyPayments"),
                 "render() must not normalize (it writes to the ledger)");
@@ -113,11 +126,48 @@ public final class AuditStructureTest {
                         "Native dropdown rows must not bypass the app theme: " + source);
             }
         }
+        // 0.4.1 regression (tester, 24 Oct 2026): a labelled field placed in a horizontal row lost its width to its own caption.
+        String components = read("app/src/main/java/com/mohamedgamal/masareef/UiComponents.java");
+        check(body(components, "EditText field(String title, LinearLayout parent)").contains("LinearLayout.HORIZONTAL"),
+                "A labelled field in a horizontal row must get its own column");
+        check(!java.util.regex.Pattern.compile("input\\([^;]*\\);\\s*\\(\\(LinearLayout\\.LayoutParams\\)\\s*\\w+\\.getLayoutParams\\(\\)\\)\\.(?:width|weight)").matcher(main).find(),
+                "A labelled field's own layout params are inside its column; size the column, not the input");
         System.out.println("Source structure checks passed: " + checked);
     }
 
     private static String read(String path) throws IOException {
         return new String(Files.readAllBytes(Path.of(path)), StandardCharsets.UTF_8);
+    }
+
+    /** Enumerate SQL writes, not a fixed list of vulnerable methods: a new automatic writer must be guarded too. */
+    private static void classificationWriters() throws IOException {
+        try(java.util.stream.Stream<Path> files=Files.list(Path.of("app/src/main/java/com/mohamedgamal/masareef"))) {
+        for(Path path:(Iterable<Path>)files.filter(p->p.toString().endsWith(".java"))::iterator) {
+            String file=path.getFileName().toString().replace(".java","");
+            String source=read(path.toString());
+            java.util.regex.Matcher methods=java.util.regex.Pattern.compile("(?m)^    (?:public |private |protected |static |final |synchronized )*(?:[\\w<>.,?\\[\\]]+ )+(\\w+)\\([^;{]*\\)\\s*\\{").matcher(source);
+            while(methods.find()) {
+                String name=methods.group(1),method=body(source,methods.group().substring(0,methods.group().lastIndexOf('{')).trim());
+                // Explicit user decisions set user_edited=1, including card/own-transfer confirmations.
+                boolean explicit=java.util.Set.of("TransactionRepository.update","ExpenseDb.classifyReviewed","ExpenseDb.confirmReview","ExpenseDb.reconcileOwnTransfer","ExpenseDb.reconcileIncome","ExpenseDb.confirmRepeatingTransfer","ExpenseDb.markAsTransfer","CardSettlements.confirm").contains(file+"."+name);
+                java.util.regex.Matcher writes=java.util.regex.Pattern.compile("(?:\\.update\\(\\s*\"transactions\"|execSQL\\(\"UPDATE transactions)[^;]+;",java.util.regex.Pattern.DOTALL).matcher(method);
+                while(writes.find()) {
+                    String write=writes.group();boolean classification=write.contains("needs_review")||write.contains("category");
+                    java.util.regex.Matcher values=java.util.regex.Pattern.compile("\\.update\\(\\s*\"transactions\"\\s*,\\s*(\\w+)").matcher(write);
+                    if(values.find()) classification=java.util.regex.Pattern.compile("\\b"+values.group(1)+"\\.put\\(\\s*\"(?:category|needs_review)\"").matcher(method).find();
+                    if(!classification)continue;
+                    // REPAIR_VERSION 5 gives back a review the user already made: it may only clear needs_review on edited rows.
+                    if("ExpenseDb.clearReviewedFlags".equals(file+"."+name)) {
+                        check(!java.util.regex.Pattern.compile("\\.put\\(\\s*\"(?:category|kind|amount_minor)\"").matcher(method).find()
+                                && method.contains("put(\"needs_review\",0)") && !method.contains("put(\"needs_review\",1)") && write.contains("user_edited=1 AND needs_review=1"),
+                                "ExpenseDb.clearReviewedFlags may only clear needs_review on rows the user edited: "+write);
+                        continue;
+                    }
+                    check(explicit?method.contains("\"user_edited\",1")||method.contains("\"user_edited\", 1"):write.contains("user_edited=0"),file+"."+name+" classification/review writer needs an explicit decision or WHERE user_edited=0: "+write);
+                }
+            }
+        }
+        }
     }
 
     /** Body of the named method, matched by brace depth while skipping comments and literals. */

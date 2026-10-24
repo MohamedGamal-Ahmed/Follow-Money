@@ -37,6 +37,16 @@ public final class RepairRulesTest {
         rows.add(new RepairRules.Row(11, at("2026-10-11T12:00:01"), at("2026-10-11T12:00:01"), 10000, "EGP", "expense", "تسوق", "إشعار: HSBC", "expense", null, null, false, "SHOP TWO"));
         check(RepairRules.crossChannelDuplicates(rows).isEmpty(), "different named merchants never merge");
         check(RepairRules.compatibleMerchants("تحويل لحظي", "hebatallah@instapay") && RepairRules.compatibleMerchants("شخص ا*****", "x@instapay"), "channel vs handle");
+        // Tester, 24 Oct 2026: InstaPay "hebatallah.aladly@instapay" +1,000 and the Banque Misr SMS naming the account
+        // holder "HEBATALLAH SAMIR ALADLY" +1,000 a minute apart were kept as two incomes. The handle is the person's name.
+        rows.clear();
+        rows.add(new RepairRules.Row(20, at("2026-10-23T18:27:00"), at("2026-10-23T18:27:00"), 100000, "EGP", "income", "دخل", "SMS", "income", 6L, null, false, "HEBATALLAH SAMIR ALADLY"));
+        rows.add(new RepairRules.Row(21, at("2026-10-23T18:28:00"), at("2026-10-23T18:28:00"), 100000, "EGP", "income", "دخل", "إشعار: InstaPay", "income", null, null, false, "hebatallah.aladly@instapay"));
+        duplicates = RepairRules.crossChannelDuplicates(rows);
+        check(duplicates.size() == 1 && duplicates.get(0).keepId == 20 && duplicates.get(0).removeId == 21, "InstaPay handle merged into the bank SMS naming the same person");
+        check(RepairRules.compatibleMerchants("ahmedhamdyac@instapay", "AHMED HAMDY ABDELRAHMAN") && RepairRules.compatibleMerchants("mo.gamalhsbc@instapay", "MOHAMED GAMAL ABDELAZIZ"), "handle built from the name");
+        check(RepairRules.keepFirst("SMS", "إشعار: InstaPay") && !RepairRules.keepFirst("إشعار: InstaPay", "SMS") && RepairRules.keepFirst("إشعار: InstaPay", "إشعار: Telda"), "a manual merge keeps the bank message");
+        check(!RepairRules.compatibleMerchants("friend@instapay", "HEBATALLAH SAMIR ALADLY") && !RepairRules.compatibleMerchants("pay123@instapay", "SEOUDI MARKET"), "unrelated handle and name stay apart");
         // Different direction never merges.
         rows.clear();
         rows.add(row(1, "2026-10-11T20:23:00", 120000, "expense", "تحويلات", "SMS", "expense", 6L, null));

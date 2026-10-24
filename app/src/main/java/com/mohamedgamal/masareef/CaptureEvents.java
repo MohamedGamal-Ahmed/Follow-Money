@@ -58,6 +58,9 @@ final class CaptureEvents {
     Event byId(long id){try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" WHERE e.id=?",new String[]{Long.toString(id)})){return c.moveToFirst()?new Event(c):null;}}
     /** Filter on the archived operation date, including cancellations received in a later month. */
     List<Event> timelineBetween(long start,long end){
+        return new ArrayList<>(db.cachedRead("events:"+start+":"+end,()->readTimeline(start,end)));
+    }
+    private List<Event> readTimeline(long start,long end){
         List<Event> rows=new ArrayList<>();
         try(Cursor c=db.getReadableDatabase().rawQuery(HISTORY+" WHERE e.display_at>=? AND e.display_at<? ORDER BY e.display_at DESC,e.id DESC",new String[]{Long.toString(start),Long.toString(end)})){
             while(c.moveToNext())rows.add(new Event(c));

@@ -105,7 +105,7 @@ final class MoneyFlow {
 
     static String label(Bucket bucket) {
         switch (bucket) {
-            case LIVING: return "صرف يومي";
+            case LIVING: return "مشتريات ورسوم";
             case COMMITMENT: return "أقساط والتزامات";
             case OPEN_TRANSFER: return "تحويلات غرضها مش محدد";
             case INFLOW: return "فلوس دخلت";

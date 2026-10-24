@@ -8,7 +8,8 @@ final class BrandCatalog {
         Entry(String id,boolean bank,String[] aliases){this(id,bank,false,aliases);}
         /** wholeName: the alias may only match the complete name, never a longer merchant descriptor. */
         Entry(String id,boolean bank,boolean wholeName,String[] aliases){
-            this.id=id;this.bank=bank;this.wholeName=wholeName;this.aliases=aliases;}
+            this.id=id;this.bank=bank;this.wholeName=wholeName;this.aliases=new String[aliases.length];
+            for(int i=0;i<aliases.length;i++)this.aliases[i]=normalize(aliases[i]);}
     }
     private static final Entry[] ENTRIES={
         new Entry("bank_misr",true,new String[]{"BM","BM-Online","Bank Misr","بنك مصر","Banque Misr","BM Online"}),
@@ -92,8 +93,7 @@ final class BrandCatalog {
     }
     private static String match(String name,boolean bank) {
         if(name==null)return null;String value=normalize(name);
-        for(Entry e:ENTRIES)if(e.bank==bank)for(String raw:e.aliases) {
-            String alias=normalize(raw);
+        for(Entry e:ENTRIES)if(e.bank==bank)for(String alias:e.aliases) {
             if(value.equals(alias))return e.id;
             // Only strong aliases can accept branch/service suffixes. Short codes and card networks require the whole name.
             if(!e.wholeName&&alias.length()>=4&&value.startsWith(alias+" "))return e.id;

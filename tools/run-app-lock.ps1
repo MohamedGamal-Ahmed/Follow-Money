@@ -22,7 +22,7 @@ try {
             android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 </manifest>
-'@ | Set-Content '.tmp/app-lock/qa-manifest.xml' -Encoding utf8
+'@ | ForEach-Object { [IO.File]::WriteAllText("$PWD/.tmp/app-lock/qa-manifest.xml", $_, (New-Object Text.UTF8Encoding $false)) }
     @'
 allprojects { p ->
     p.plugins.withId('com.android.application') {
@@ -32,7 +32,7 @@ allprojects { p ->
         }
     }
 }
-'@ | Set-Content '.tmp/app-lock/init.gradle' -Encoding utf8
+'@ | ForEach-Object { [IO.File]::WriteAllText("$PWD/.tmp/app-lock/init.gradle", $_, (New-Object Text.UTF8Encoding $false)) }
     & ./gradlew.bat --offline -I .tmp/app-lock/init.gradle assembleDebug assembleDebugAndroidTest
     if ($LASTEXITCODE -ne 0) { throw 'App-lock QA APK build failed' }
     $metadata = Get-Content 'app/build/outputs/apk/debug/output-metadata.json' -Raw | ConvertFrom-Json

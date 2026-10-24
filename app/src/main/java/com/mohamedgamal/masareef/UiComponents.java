@@ -53,6 +53,13 @@ final class UiComponents {
     }
 
     EditText field(String title, LinearLayout parent) {
+        // A full-width caption inside a horizontal row takes the whole row and pushes the input (and any
+        // sibling such as a currency picker) off screen. A row gets one column per field instead.
+        if (parent.getOrientation() == LinearLayout.HORIZONTAL) {
+            LinearLayout column = new LinearLayout(context); column.setOrientation(LinearLayout.VERTICAL);
+            parent.addView(column, new LinearLayout.LayoutParams(0, -2, 1));
+            parent = column;
+        }
         TextView caption = label(title, UiTheme.CAPTION, theme.muted);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2); cp.topMargin = dp(10);
         parent.addView(caption, cp);
