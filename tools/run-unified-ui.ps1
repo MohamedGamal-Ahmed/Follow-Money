@@ -1,5 +1,5 @@
 param([string]$Device = 'emulator-5556', [switch]$SkipBuild,
-    [string[]]$Modes = @('source_link_light','source_link_dark','source_link_max','transactions_light','transactions_dark','transactions_max','unified_light','unified_dark','unified_max','menus_max','home_light','home_dark','home_light_large','home_dark_large','home_light_max','home_dark_max'))
+    [string[]]$Modes = @('source_link_light','source_link_dark','source_link_max','transactions_light','transactions_dark','transactions_max','unified_light','unified_dark','unified_max','menus_max','home_light','home_dark','home_light_large','home_dark_large','home_light_max','home_dark_max','classification_lag'))
 $ErrorActionPreference = 'Stop'
 $windowsHost = $env:OS -eq 'Windows_NT'
 $suffix = if ($windowsHost) { '.exe' } else { '' }
@@ -44,6 +44,12 @@ allprojects { p ->
             & $adb -s $Device shell wm size 360x800
             & $adb -s $Device shell wm density 160
             if ($LASTEXITCODE -ne 0) { throw 'Could not set home acceptance viewport' }
+        } elseif ($mode -eq 'classification_lag') {
+            $size = if ($originalSize -match 'Override size: ([0-9]+x[0-9]+)') { $Matches[1] } else { 'reset' }
+            $density = if ($originalDensity -match 'Override density: ([0-9]+)') { $Matches[1] } else { 'reset' }
+            & $adb -s $Device shell wm size $size
+            & $adb -s $Device shell wm density $density
+            if ($LASTEXITCODE -ne 0) { throw 'Could not restore performance-test viewport' }
         }
         $scale = if ($mode.EndsWith('_max')) { '2.0' } elseif ($mode.EndsWith('_large')) { '1.3' } else { '1.0' }
         & $adb -s $Device shell settings put system font_scale $scale
@@ -52,10 +58,10 @@ allprojects { p ->
         $result = & $adb -s $Device shell am instrument -w -e feature_audit $mode "$appId.test/com.mohamedgamal.masareef.ReconciliationTest"
         $instrumentExit = $LASTEXITCODE
         $result
-        $reportDir = Join-Path (Get-Location) '.tmp/home-statement-0.4.3'
+        $reportDir = Join-Path (Get-Location) $(if($mode -eq 'classification_lag'){'.tmp/classification-lag'}else{'.tmp/home-statement-0.4.3'})
         New-Item -ItemType Directory -Force $reportDir | Out-Null
         [IO.File]::WriteAllText((Join-Path $reportDir "$mode.log"), ($result -join "`n"), (New-Object Text.UTF8Encoding $false))
-        if ($instrumentExit -ne 0 -or ($result -join "`n") -notmatch '(Unified UI|Selection UI|Transaction pages|Source linking|Home statement) checks passed: [1-9][0-9]*; failed: 0') { throw "Unified UI failed: $mode" }
+        if ($instrumentExit -ne 0 -or ($result -join "`n") -notmatch '(Unified UI|Selection UI|Transaction pages|Source linking|Home statement|Classification/lag) checks passed: [1-9][0-9]*; failed: 0') { throw "Unified UI failed: $mode" }
         if ($mode.StartsWith('home_')) {
             # Python preserves PNG bytes on Windows PowerShell 5.1 as well as PowerShell 7.
             $pull = 'import sys,subprocess;from pathlib import Path;a,d,p,m,o=sys.argv[1:];folder=m[5:].replace("_","-");dest=Path(o)/m;dest.mkdir(exist_ok=True);names=["10-home-closed","10-home-out","10-home-in","11-update-offer","11-update-downloading","11-update-restart"];[(dest/(n+".png")).write_bytes(subprocess.check_output([a,"-s",d,"exec-out","run-as",p,"cat","cache/home-"+folder+"/"+n+".png"])) for n in names]'

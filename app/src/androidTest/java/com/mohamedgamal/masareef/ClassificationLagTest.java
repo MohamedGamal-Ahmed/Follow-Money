@@ -47,7 +47,13 @@ final class ClassificationLagTest {
         at=SystemClock.elapsedRealtime();db.reimbursementOffsets();log("TIMING reimbursementOffsets="+(SystemClock.elapsedRealtime()-at));
         at=SystemClock.elapsedRealtime();db.recurringCandidateTransactions();log("TIMING recurringCandidates="+(SystemClock.elapsedRealtime()-at));
         at=SystemClock.elapsedRealtime();new CaptureEvents(db).timelineBetween(start.atStartOfDay(zone).toInstant().toEpochMilli(),end.atStartOfDay(zone).toInstant().toEpochMilli());log("TIMING CaptureEvents.timelineBetween="+(SystemClock.elapsedRealtime()-at));
-        for(int i=0;i<4;i++)for(int target:new int[]{0,6}){final long[] ms={0};main(()->{set("selectedTab",target);long before=SystemClock.elapsedRealtime();invoke("render",new Class<?>[0]);ms[0]=SystemClock.elapsedRealtime()-before;});log("TIMING render tab="+target+" sample="+i+" ms="+ms[0]);}
+        for(int i=0;i<4;i++)for(int target:new int[]{0,6}){
+            final long[] ms={0,0};CountDownLatch drawn=new CountDownLatch(1);
+            main(()->{set("selectedTab",target);long before=SystemClock.elapsedRealtime();invoke("render",new Class<?>[0]);ms[0]=SystemClock.elapsedRealtime()-before;
+                View root=activity.findViewById(android.R.id.content);root.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener(){public boolean onPreDraw(){root.getViewTreeObserver().removeOnPreDrawListener(this);ms[1]=SystemClock.elapsedRealtime()-before;drawn.countDown();return true;}});root.invalidate();});
+            if(!drawn.await(5,TimeUnit.SECONDS))throw new AssertionError("Tab did not draw");
+            log("TIMING render tab="+target+" sample="+i+" ms="+ms[0]+" preDrawMs="+ms[1]);
+        }
         for(String method:new String[]{"homeScreen","transactionsScreen","homeSourceCards"})main(()->{((ViewGroup)get("page")).removeAllViews();long before=SystemClock.elapsedRealtime();invoke(method,new Class<?>[0]);log("TIMING "+method+"="+(SystemClock.elapsedRealtime()-before));});
         main(()->{long before=SystemClock.elapsedRealtime();invoke("transactionTimeline",new Class<?>[]{List.class},db.transactionsForMonth(start));log("TIMING transactionTimeline="+(SystemClock.elapsedRealtime()-before));});
     }
@@ -75,6 +81,8 @@ final class ClassificationLagTest {
             Method marker=ExpenseDb.class.getDeclaredMethod("markMergeReview",long.class,long.class);marker.setAccessible(true);marker.invoke(db,single,bulk);state("automatic-conflict-marker",single,bulk);check(!db.transactionById(single).needsReview&&!db.transactionById(bulk).needsReview,"Automatic conflict marker respects explicit user review");
             tab(0);tab(6);main(()->{runner.callActivityOnPause(activity);runner.callActivityOnResume(activity);});drain();capture("BANK","Card purchase EGP 905.55 at QA NEW SMS",now+4000);SmsReceiver.notifyDataChanged(target);drain();state("navigate-resume-new-sms",single,bulk,income,transfer);
             check("صحة".equals(db.transactionById(single).category),"Single category survives navigation/resume/SMS");check("بقالة".equals(db.transactionById(bulk).category),"Bulk category survives navigation/resume/SMS");log("attention-after="+attention());
+            long replayCount=db.transactionCount();db.captureSms("BANK","Card purchase EGP 901.11 at QA SINGLE",now);db.captureSms("InstaPay","You have sent EGP 903.33 to qa.friend@instapay",now+2000);
+            check(db.transactionCount()==replayCount&&"صحة".equals(db.transactionById(single).category)&&"بقالة".equals(db.transactionById(transfer).category)&&!db.transactionById(single).needsReview,"Rereading original SMS preserves explicit choices without duplicates");state("original-sms-replay",single,transfer);
             // Revision cache observes a different helper, protects rollback, and does not expose mutable cached lists.
             LocalDate month=LocalDate.now().withDayOfMonth(1);int initial=db.transactionsForMonth(month).size();
             db.transactionsForMonth(month).clear();check(db.transactionsForMonth(month).size()==initial,"Cached list cannot be corrupted by callers");
@@ -91,10 +99,14 @@ final class ClassificationLagTest {
             check("transfer".equals(db.transactionById(debit).kind)&&db.transferFee(debit)==50,"Imported own-account debit retains principal and separate fee");state("own-transfer-with-fee",debit);
             long repayment=capture("QA Bank","Transfer of EGP 4,000.00 from your account ****5678 to credit card ****1234",now+7000);
             tab(6);main(()->check(!(Boolean)invoke("isSentTransfer",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(repayment)),"Own-card repayment is excluded from both open-transfer banner and filter"));
+            long person=capture("BANK","You sent EGP 907.77 to QA PERSON",now+8000),foreign=capture("BANK","You sent USD 908.88 to QA FOREIGN",now+9000);
+            main(()->{invoke("resetTransactionFilters",new Class<?>[0]);set("bulkMode",false);set("transactionKindFilter","income");set("transactionCategoryFilter","صحة");set("transactionCurrencyFilter","USD");set("transactionSourceFilter",from);set("transactionSearch","stale search");invoke("render",new Class<?>[0]);});click("حدد");
+            main(()->{@SuppressWarnings("unchecked") Map<Long,CheckBox> boxes=(Map<Long,CheckBox>)get("bulkChecks");check(boxes.containsKey(person)&&!boxes.containsKey(foreign)&&!boxes.containsKey(repayment),"Transfer banner clears stale filters and lists exactly its EGP person transfers");});
             main(()->invoke("resetTransactionFilters",new Class<?>[0]));tab(6);click("عرض الكل");main(()->{int matches=0;for(ExpenseDb.Transaction tx:db.transactionsForMonth(month))if((Boolean)invoke("matchesTransactionFilters",new Class<?>[]{ExpenseDb.Transaction.class,String.class},tx,""))matches++;check(matches==attention(),"Attention banner count equals its list predicate");});
             main(()->{invoke("resetTransactionFilters",new Class<?>[0]);set("selectedTab",6);invoke("render",new Class<?>[0]);});drain();Object rendered=get("pageScroll");main(()->invoke("refreshLedger",new Class<?>[]{boolean.class},true));drain();check(rendered==get("pageScroll"),"Unchanged refresh does not render a second time");
             main(()->{set("bulkMode",true);invoke("render",new Class<?>[0]);});click("اختيار النتائج كلها");main(()->{check(((Set<?>)get("bulkSelected")).size()>((Map<?,?>)get("bulkChecks")).size(),"Select all includes matches beyond rendered page");check(((Map<?,?>)get("bulkChecks")).size()<=12,"Initial list creation is bounded");});click("إلغاء التحديد");
             android.widget.Button more=findMore(activity.getWindow().getDecorView());if(more==null)throw new AssertionError("Missing older operations action");main(more::performClick);main(()->check(((Map<?,?>)get("bulkChecks")).size()==24,"Older rows load without losing logical filters"));
+            main(()->{set("bulkMode",false);invoke("resetTransactionFilters",new Class<?>[0]);});log("TIMING with bank/card sources and review fixtures");timings();
             status=failures==0?-1:0;
         }catch(Throwable error){failures++;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));log(trace.toString());}
         finally{try{if(activity!=null)main(activity::finish);if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){failures++;log(error.toString());}result.putString("stream",report+"Classification/lag checks passed: "+(checks-failures)+"; failed: "+failures+"\n");runner.finish(failures==0?status:0,result);}

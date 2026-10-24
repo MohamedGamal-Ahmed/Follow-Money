@@ -3660,7 +3660,11 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, -2, 1); textParams.setMarginStart(dp(10));
             banner.addView(label(openTransfers + " تحويل لناس غرضها مش محدد · " + money(openAmount, "EGP"), 13, ORANGE, false), textParams);
             banner.addView(label("حدد", 13, ORANGE, true));
-            banner.setOnClickListener(v -> { transactionBucketFilter = MoneyFlow.Bucket.OPEN_TRANSFER.name(); bulkMode = true; bulkSelected.clear(); render(); });
+            banner.setOnClickListener(v -> {
+                transactionCategoryFilter="";transactionKindFilter="";transactionCurrencyFilter="EGP";transactionSourceFilter=null;
+                transactionStatementList=false;transactionStatementIds=null;transactionExcludeTransfers=false;transactionSearch="";searchOpen=false;
+                transactionBucketFilter = MoneyFlow.Bucket.OPEN_TRANSFER.name(); bulkMode = true; bulkSelected.clear(); render();
+            });
             LinearLayout.LayoutParams bannerParams = new LinearLayout.LayoutParams(-1, -2); bannerParams.topMargin = dp(8);
             page.addView(banner, bannerParams);
         }
