@@ -36,6 +36,15 @@ final class ClassificationLagTest {
     private void click(String value){main(()->{View found=text(activity.getWindow().getDecorView(),value);if(found==null)throw new AssertionError("Missing action "+value);while(!found.hasOnClickListeners()&&found.getParent() instanceof View)found=(View)found.getParent();if(!found.performClick())throw new AssertionError("Action did not click "+value);});}
     private void choice(String value)throws Exception{runner.getUiAutomation().waitForIdle(100,3000);for(android.view.accessibility.AccessibilityNodeInfo n:runner.getUiAutomation().getRootInActiveWindow().findAccessibilityNodeInfosByText(value)){if(n.getText()!=null&&value.contentEquals(n.getText()))for(;n!=null;n=n.getParent())if(n.isClickable()&&n.performAction(16)){runner.waitForIdleSync();return;}}throw new AssertionError("Missing choice "+value);}
     private void drain()throws Exception{for(int i=0;i<4;i++){CountDownLatch done=new CountDownLatch(1);CaptureQueue.submit(done::countDown);if(!done.await(30,TimeUnit.SECONDS))throw new AssertionError("Worker stalled");runner.waitForIdleSync();}}
+    private java.io.File captures;
+    private void screen(String name)throws Exception{runner.waitForIdleSync();runner.getUiAutomation().waitForIdle(500,5000);android.graphics.Bitmap bitmap=runner.getUiAutomation().takeScreenshot();if(bitmap==null)throw new AssertionError("No screenshot");try(java.io.FileOutputStream out=new java.io.FileOutputStream(new java.io.File(captures,name+".png"))){bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}finally{bitmap.recycle();}}
+    /** The transactions list scrolled to its end, where «عرض عمليات أقدم» waits, at the given font scale. */
+    private void olderScreen(float scale,String name)throws Exception{
+        main(()->{android.content.res.Configuration config=new android.content.res.Configuration(activity.getResources().getConfiguration());config.fontScale=scale;activity.getResources().updateConfiguration(config,activity.getResources().getDisplayMetrics());
+            set("bulkMode",false);invoke("resetTransactionFilters",new Class<?>[0]);set("selectedTab",6);invoke("render",new Class<?>[0]);});
+        main(()->{android.widget.ScrollView scroll=(android.widget.ScrollView)get("pageScroll");scroll.scrollTo(0,scroll.getChildAt(0).getHeight());});
+        main(()->check(findMore(activity.getWindow().getDecorView())!=null,"Older operations action shown at font scale "+scale));screen(name);
+    }
     private long capture(String sender,String body,long time){CaptureResult result=db.captureSms(sender,body,time);if(result.transaction==null)throw new AssertionError("Fixture rejected: "+body+" / "+result.reason);return result.transaction.id;}
     private void state(String stage,long...ids){for(long id:ids)try(Cursor c=db.getReadableDatabase().rawQuery("SELECT id,category,kind,needs_review,user_edited,unique_key,(SELECT COUNT(*) FROM transactions d WHERE d.amount_minor=t.amount_minor AND ABS(d.occurred_at-t.occurred_at)<120000) FROM transactions t WHERE id=?",new String[]{""+id})){if(c.moveToFirst())log(stage+" id="+id+" category="+c.getString(1)+" kind="+c.getString(2)+" review="+c.getInt(3)+" edited="+c.getInt(4)+" key="+c.getString(5)+" sameAmountTime="+c.getInt(6));}}
     private long scalar(String query){try(Cursor c=db.getReadableDatabase().rawQuery(query,null)){c.moveToFirst();return c.getLong(0);}}
@@ -69,6 +78,7 @@ final class ClassificationLagTest {
             long transfer=capture("InstaPay","You have sent EGP 903.33 to qa.friend@instapay",now+2000);
             long income=capture("BANK","Refund EGP 904.44 from QA RETURN",now+3000);
             state("seed",single,bulk,transfer,income);check(db.transactionById(income).needsReview,"Unlinked captured refund needs review");
+            captures=new java.io.File(target.getCacheDir(),"classification-lag");captures.mkdirs();
             activity=(MainActivity)runner.startActivitySync(new android.content.Intent(target,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));drain();timings();
             tab(6);int before=attention();
             main(()->{set("selectedTab",10);set("selectedTransaction",db.transactionById(single));set("transactionReturnTab",6);invoke("render",new Class<?>[0]);invoke("editTransactionDialog",new Class<?>[]{ExpenseDb.Transaction.class},db.transactionById(single));});
@@ -92,7 +102,7 @@ final class ClassificationLagTest {
             check(db.transactionsForMonth(month).stream().anyMatch(t->t.id==single&&"مقاهي".equals(t.category)),"Rolled-back rows never enter cache");
             ExpenseDb.ClassificationResult noop=db.classifyReviewed(Arrays.asList(bulk,bulk,999999L),"بقالة");check(noop.categorized==0&&noop.reviewed==0&&noop.unchanged==2,"Bulk reports unchanged/missing rows honestly and deduplicates IDs");
             long reviewed=capture("BANK","Refund EGP 906.66 from QA ACKNOWLEDGE",now+5000);ExpenseDb.Transaction original=db.transactionById(reviewed);
-            main(()->{set("selectedTab",10);set("selectedTransaction",original);invoke("render",new Class<?>[0]);});click("تمام، دي صح");drain();
+            main(()->{set("selectedTab",10);set("selectedTransaction",original);invoke("render",new Class<?>[0]);});screen("20-acknowledge-page");click("تمام، دي صح");drain();
             ExpenseDb.Transaction acknowledged=db.transactionById(reviewed);check(!acknowledged.needsReview&&original.category.equals(acknowledged.category)&&original.kind.equals(acknowledged.kind)&&original.amountMinor==acknowledged.amountMinor,"Acknowledgement clears review without changing financial fields");state("acknowledged",reviewed);
             long from=db.addPaymentSource("QA Bank","حساب","5678"),to=db.addPaymentSource("QA OTHER","حساب","2222"),card=db.addPaymentSource("QA Bank Card","بطاقة ائتمان","1234");
             long debit=capture("BANK","You sent EGP 100.50 to QA OWN ACCOUNT",now+6000);db.reconcileOwnTransfer(debit,10000,50,from,to,Collections.emptyList());
@@ -125,6 +135,7 @@ final class ClassificationLagTest {
             check(db.transactionById(survivor).needsReview,"Abbreviated-merge survivor keeps its own flag");
             check(db.repairAll().reviewsRestored==0&&!db.transactionById(edited).needsReview&&db.transactionById(pending).needsReview,"Second repair run changes nothing");
             check(ExpenseDb.REPAIR_VERSION==5,"Repair version 5 re-runs once on 0.4.2 phones");
+            olderScreen(1f,"21-transactions-older-1.0");olderScreen(2f,"22-transactions-older-2.0");olderScreen(1f,"23-transactions-restored");
             status=failures==0?-1:0;
         }catch(Throwable error){failures++;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));log(trace.toString());}
         finally{try{if(activity!=null)main(activity::finish);if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){failures++;log(error.toString());}result.putString("stream",report+"Classification/lag checks passed: "+(checks-failures)+"; failed: "+failures+"\n");runner.finish(failures==0?status:0,result);}
