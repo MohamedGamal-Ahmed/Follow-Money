@@ -156,6 +156,13 @@ public final class AuditStructureTest {
                     java.util.regex.Matcher values=java.util.regex.Pattern.compile("\\.update\\(\\s*\"transactions\"\\s*,\\s*(\\w+)").matcher(write);
                     if(values.find()) classification=java.util.regex.Pattern.compile("\\b"+values.group(1)+"\\.put\\(\\s*\"(?:category|needs_review)\"").matcher(method).find();
                     if(!classification)continue;
+                    // REPAIR_VERSION 5 gives back a review the user already made: it may only clear needs_review on edited rows.
+                    if("ExpenseDb.clearReviewedFlags".equals(file+"."+name)) {
+                        check(!java.util.regex.Pattern.compile("\\.put\\(\\s*\"(?:category|kind|amount_minor)\"").matcher(method).find()
+                                && method.contains("put(\"needs_review\",0)") && !method.contains("put(\"needs_review\",1)") && write.contains("user_edited=1 AND needs_review=1"),
+                                "ExpenseDb.clearReviewedFlags may only clear needs_review on rows the user edited: "+write);
+                        continue;
+                    }
                     check(explicit?method.contains("\"user_edited\",1")||method.contains("\"user_edited\", 1"):write.contains("user_edited=0"),file+"."+name+" classification/review writer needs an explicit decision or WHERE user_edited=0: "+write);
                 }
             }
