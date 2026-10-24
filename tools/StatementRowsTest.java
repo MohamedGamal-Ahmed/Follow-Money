@@ -59,6 +59,21 @@ public final class StatementRowsTest {
         check(StatementRows.out(big).size() == 1 && StatementRows.out(big).get(0).amount == 123456789, "Single large amount unchanged");
         check(s.unlinkedTransfer > 0, "Unlinked transfer warning input retained");
         check("أقل من 1%".equals(StatementRows.percent(1, Long.MAX_VALUE)), "Large totals do not overflow percent comparison");
+        check("تحويل واحد".equals(StatementRows.transfers(1)), "One transfer");
+        check("تحويلين".equals(StatementRows.transfers(2)), "Dual transfers");
+        check("3 تحويلات".equals(StatementRows.transfers(3)) && "10 تحويلات".equals(StatementRows.transfers(10)), "3–10 plural");
+        check("11 تحويل".equals(StatementRows.transfers(11)) && "100 تحويل".equals(StatementRows.transfers(100)), "11+ singular");
+        check("0 تحويل".equals(StatementRows.transfers(0)), "Zero never reads as plural");
+        check("تحويل واحد".equals(in.get(0).detail), "Transfer component detail uses the counted noun");
+        check("عملية واحدة".equals(StatementRows.operations(1)) && "عمليتين".equals(StatementRows.operations(2))
+                && "5 عمليات".equals(StatementRows.operations(5)) && "12 عملية".equals(StatementRows.operations(12)), "Operation counts");
+        check("اتصنفت 3 عمليات، واتعلّمت إن عملية واحدة اتراجعت".equals(StatementRows.classified(3, 1, 0)), "Toast keeps non-zero parts only");
+        check("اتصنفت عمليتين، واتعلّمت إن 3 عمليات اتراجعوا، وواحدة ما اتغيرتش".equals(StatementRows.classified(2, 3, 1)), "Toast with all parts");
+        check("اتصنفت عملية واحدة".equals(StatementRows.classified(1, 0, 0)), "Toast with one part");
+        check("عمليتين ما اتغيروش".equals(StatementRows.classified(0, 0, 2)), "Only unchanged rows");
+        check("اتصنفت 11 عملية، واتنين ما اتغيروش".equals(StatementRows.classified(11, 0, 2)), "Unchanged pair");
+        check("مفيش عمليات اتغيرت".equals(StatementRows.classified(0, 0, 0)), "Nothing happened");
+        check(!StatementRows.classified(4, 0, 0).contains("0"), "No zero counts in the toast");
         System.out.println("Statement rows checks passed: " + checks);
     }
 }

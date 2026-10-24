@@ -37,7 +37,7 @@ final class StatementRows {
     }
     static List<Row> income(long income, long salary, long transfers, long[] salaryIds, long[] transferIds) {
         List<Row> rows = new ArrayList<>();
-        if (transfers > 0) rows.add(new Row("تحويلات وصلتك", transferIds.length + " تحويلات", transfers, MoneyFlow.Bucket.INFLOW, transferIds));
+        if (transfers > 0) rows.add(new Row("تحويلات وصلتك", transfers(transferIds.length), transfers, MoneyFlow.Bucket.INFLOW, transferIds));
         if (salary > 0) rows.add(new Row("راتب", "", salary, MoneyFlow.Bucket.INFLOW, salaryIds));
         long other = Math.subtractExact(Math.subtractExact(income, salary), transfers);
         if (other > 0) rows.add(new Row("دخل تاني", "", other, MoneyFlow.Bucket.INFLOW, new long[0]));
@@ -49,6 +49,27 @@ final class StatementRows {
         return items.stream().filter(i -> s.currency.equals(i.currency) && i.when >= start && i.when < end
                 && (i.bucket == MoneyFlow.Bucket.INFLOW || MoneyFlow.isStatementOut(i.bucket)
                 && (!i.fromCash || i.bucket == MoneyFlow.Bucket.CASH_WITHDRAWAL))).mapToLong(i -> i.id).toArray();
+    }
+    /** Arabic counted noun: «تحويل واحد», «تحويلين», «3 تحويلات» (3–10), «11 تحويل» (11+). */
+    static String count(long n, String one, String two, String few, String many) {
+        if (n == 1) return one;
+        if (n == 2) return two;
+        return n + " " + (n >= 3 && n <= 10 ? few : many);
+    }
+    static String transfers(long n) { return count(n, "تحويل واحد", "تحويلين", "تحويلات", "تحويل"); }
+    static String operations(long n) { return count(n, "عملية واحدة", "عمليتين", "عمليات", "عملية"); }
+
+    /** The bulk classification toast in plain words, built only from the parts that are not zero. */
+    static String classified(int categorized, int reviewed, int unchanged) {
+        List<String> parts = new ArrayList<>();
+        if (categorized > 0) parts.add("اتصنفت " + operations(categorized));
+        if (reviewed > 0) parts.add("اتعلّمت إن " + operations(reviewed) + (reviewed == 1 ? " اتراجعت" : " اتراجعوا"));
+        if (unchanged > 0) parts.add(parts.isEmpty() ? operations(unchanged) + (unchanged == 1 ? " ما اتغيرتش" : " ما اتغيروش")
+                : unchanged == 1 ? "واحدة ما اتغيرتش" : unchanged == 2 ? "اتنين ما اتغيروش" : unchanged + " ما اتغيروش");
+        if (parts.isEmpty()) return "مفيش عمليات اتغيرت";
+        StringBuilder text = new StringBuilder(parts.get(0));
+        for (int i = 1; i < parts.size(); i++) text.append("، و").append(parts.get(i));
+        return text.toString();
     }
     static double share(long amount, long total) { return total <= 0 ? 0 : (double) amount / total; }
     static String percent(long amount, long total) {

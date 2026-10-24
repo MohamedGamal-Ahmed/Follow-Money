@@ -3665,7 +3665,7 @@ public final class MainActivity extends Activity {
             banner.setBackground(rounded(dark ? 0x40c25e0b : 0xfffff1e3, 16));
             banner.addView(tintedIcon(R.drawable.ic_cat_transfer, ORANGE), new LinearLayout.LayoutParams(dp(20), dp(20)));
             LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, -2, 1); textParams.setMarginStart(dp(10));
-            banner.addView(label(openTransfers + " تحويل لناس غرضها مش محدد · " + money(openAmount, "EGP"), 13, ORANGE, false), textParams);
+            banner.addView(label(StatementRows.transfers(openTransfers) + " لناس غرضها مش محدد · " + money(openAmount, "EGP"), 13, ORANGE, false), textParams);
             banner.addView(label("حدد", 13, ORANGE, true));
             banner.setOnClickListener(v -> {
                 transactionCategoryFilter="";transactionKindFilter="";transactionCurrencyFilter="EGP";transactionSourceFilter=null;
@@ -7075,7 +7075,7 @@ public final class MainActivity extends Activity {
         switch (bucket) {
             case LIVING: return n + " عملية: شراء ورسوم";
             case COMMITMENT: return n + " دفعة: أقساط وفواتير واشتراكات";
-            case OPEN_TRANSFER: return n == 0 ? "كل التحويلات متحدد غرضها" : n + " تحويل لناس · حدد غرضها";
+            case OPEN_TRANSFER: return n == 0 ? "كل التحويلات متحدد غرضها" : StatementRows.transfers(n) + " لناس · حدد غرضها";
             case INFLOW: return n + " عملية · مش شرط تكون دخل مكتسب";
             case CASH_WITHDRAWAL: return n + " سحب من الحساب · مش مصروف";
             default: return n + " حركة · مش محسوبة صرف ولا دخل";
@@ -7514,7 +7514,7 @@ public final class MainActivity extends Activity {
         section("محتاج مراجعة", null, null);
         for (int i = 0; i < Math.min(3, repeating.size()); i++) repeatingCard(repeating.get(i));
         if (open > 0)
-            tipCard("⇄", open + " تحويل لناس غرضها مش محدد", "إجمالي " + money(s.of(MoneyFlow.Bucket.OPEN_TRANSFER), "EGP") +
+            tipCard("⇄", StatementRows.transfers(open) + " لناس غرضها مش محدد", "إجمالي " + money(s.of(MoneyFlow.Bucket.OPEN_TRANSFER), "EGP") +
                     ". حدد غرضها (أكل، إيجار، عائلة...) علشان تتحسب في مكانها الصح.", "حدد الغرض",
                     () -> openBucket(MoneyFlow.Bucket.OPEN_TRANSFER, "", true));
         if (s.uncategorized > 0)

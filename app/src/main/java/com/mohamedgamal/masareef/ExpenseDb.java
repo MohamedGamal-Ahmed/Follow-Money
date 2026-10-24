@@ -1870,7 +1870,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
 
     static final class ClassificationResult {
         int categorized,reviewed,unchanged;
-        String message(){return "اتصنف "+categorized+" · اتراجع "+reviewed+" من غير تغيير النوع · ما اتغيرش "+unchanged;}
+        String message(){return StatementRows.classified(categorized,reviewed,unchanged);}
     }
 
     /** Review non-expenses without relabelling income or an internal/card movement as spending. */
