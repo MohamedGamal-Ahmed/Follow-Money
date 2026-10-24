@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -8,6 +9,8 @@
     </queries>
     <permission android:name="${applicationId}.INTERNAL_BROADCAST" android:protectionLevel="signature" />
     <uses-permission android:name="${applicationId}.INTERNAL_BROADCAST" />
+    <!-- Local-only promise: no library may add network access (the Play update library talks to the Play Store app). -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />

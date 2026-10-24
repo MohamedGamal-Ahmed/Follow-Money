@@ -146,6 +146,7 @@ public final class MainActivity extends Activity {
     private ExpenseDb db;
     private AppLock appLock;
     private WhatsNew.Section whatsNew;
+    private InAppUpdate updates;
     private boolean initialActionsPending, initialDirect, initialFresh, pendingIntentActions;
     private Intent deferredIncomingIntent;
     private LinearLayout page;
@@ -211,6 +212,7 @@ public final class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(systemBars);
         db = AppResources.database(this);
         loadWhatsNew(readAsset("whats-new.txt"));
+        updates = new InAppUpdate(this, () -> postUi(() -> { if (selectedTab == 0 && canRedrawNow()) render(); }));
         if (state == null) AppResources.read(() -> LocalBackup.removeLeftovers(this));
         boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
@@ -296,6 +298,7 @@ public final class MainActivity extends Activity {
         super.onResume();
         if (appLock.guard()) return;
         if (db != null) {render();refreshLedger(true);MonthlySummaryReceiver.refresh(this);}
+        if (updates != null) updates.refresh();
         if (db != null && !introVisible && hasNotificationAccess()) {
             PaymentNotificationListener.refreshSelectedSources(this);
             SharedPreferences settings = getSharedPreferences("notification_settings", MODE_PRIVATE);
@@ -324,6 +327,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         appLock.dispose();
+        if (updates != null) updates.dispose();
         super.onDestroy();
     }
 
@@ -1674,6 +1678,34 @@ public final class MainActivity extends Activity {
             TextView more = label("كل التفاصيل", 13, ACCENT, true); more.setPadding(0, dp(8), dp(24), 0);
             more.setOnClickListener(v -> whatsNewDialog());
             actions.addView(more);
+        }
+        box.addView(actions);
+    }
+
+    /** Google Play's flexible update: offer, quiet download, then the restart. Nothing shows outside a Play install. */
+    private void updateCard() {
+        UpdatePrompt.Card state = updates == null ? UpdatePrompt.Card.NONE : updates.card();
+        if (state == UpdatePrompt.Card.NONE) return;
+        LinearLayout box = card();
+        box.setTag("in_app_update_card");
+        String title = state == UpdatePrompt.Card.OFFER ? "فيه نسخة جديدة من Follow Money"
+                : state == UpdatePrompt.Card.DOWNLOADING ? "التحديث بيتحمّل…" : "التحديث جاهز";
+        String body = state == UpdatePrompt.Card.OFFER ? "بيتحمّل في الخلفية وإنت شغال عادي، وهنقولك لما يبقى جاهز."
+                : state == UpdatePrompt.Card.DOWNLOADING ? "كمّل شغلك عادي؛ هنقولك لما يخلص."
+                : "اضغط «إعادة التشغيل» علشان يتركب. بياناتك زي ما هي.";
+        box.addView(label(title, 15, INK, true));
+        box.addView(label(body, 12, MUTED, false));
+        if (state == UpdatePrompt.Card.DOWNLOADING) return;
+        LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
+        TextView primary = label(state == UpdatePrompt.Card.OFFER ? "تحديث" : "إعادة التشغيل", 13, ACCENT, true);
+        primary.setPadding(0, dp(8), 0, 0); primary.setMinHeight(dp(UiTheme.TOUCH)); primary.setGravity(Gravity.CENTER_VERTICAL);
+        primary.setOnClickListener(v -> { if (state == UpdatePrompt.Card.OFFER) updates.start(); else updates.complete(); });
+        actions.addView(primary);
+        if (state == UpdatePrompt.Card.OFFER) {
+            TextView later = label("بعدين", 13, MUTED, true);
+            later.setPadding(dp(24), dp(8), 0, 0); later.setMinHeight(dp(UiTheme.TOUCH)); later.setGravity(Gravity.CENTER_VERTICAL);
+            later.setOnClickListener(v -> updates.later());
+            actions.addView(later);
         }
         box.addView(actions);
     }
@@ -3169,6 +3201,7 @@ public final class MainActivity extends Activity {
         page.addView(top);
 
         whatsNewCard();
+        updateCard();
         monthlyReadyCard();
         // MVP home: one number, one period, one definition. The daily budget and points keep their data, dialogs,
         // widgets and settings entry («الميزانية اليومية والراتب», «ميزانياتك»); only their home card is off.
