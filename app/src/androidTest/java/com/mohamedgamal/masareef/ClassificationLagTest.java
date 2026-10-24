@@ -107,6 +107,24 @@ final class ClassificationLagTest {
             main(()->{set("bulkMode",true);invoke("render",new Class<?>[0]);});click("اختيار النتائج كلها");main(()->{check(((Set<?>)get("bulkSelected")).size()>((Map<?,?>)get("bulkChecks")).size(),"Select all includes matches beyond rendered page");check(((Map<?,?>)get("bulkChecks")).size()<=12,"Initial list creation is bounded");});click("إلغاء التحديد");
             android.widget.Button more=findMore(activity.getWindow().getDecorView());if(more==null)throw new AssertionError("Missing older operations action");main(more::performClick);main(()->check(((Map<?,?>)get("bulkChecks")).size()==24,"Older rows load without losing logical filters"));
             main(()->{set("bulkMode",false);invoke("resetTransactionFilters",new Class<?>[0]);});log("TIMING with bank/card sources and review fixtures");timings();
+            // REPAIR_VERSION 5: an edited row that 0.4.2 flagged again gets its review back; nothing else moves.
+            long edited=capture("BANK","Card purchase EGP 911.11 at QA REPAIR EDITED",now+10000),pending=capture("BANK","Refund EGP 912.12 from QA REPAIR PENDING",now+11000);
+            long survivor=capture("BANK","Card purchase EGP 913.13 at QA REPAIR SURVIVOR",now+12000);
+            db.updateCategories(Arrays.asList(edited,survivor),"صحة");
+            // The 0.4.2 state cannot be produced by current code (that is the fix), so it is written as the old marker did.
+            db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id IN (?,?)",new Object[]{edited,survivor});
+            String survivorKey;try(Cursor c=db.getReadableDatabase().rawQuery("SELECT unique_key FROM capture_evidence WHERE transaction_id=? LIMIT 1",new String[]{""+survivor})){check(c.moveToFirst(),"Survivor has evidence");survivorKey=c.getString(0);}
+            android.content.ContentValues archived=new android.content.ContentValues();archived.put("original_id",999998L);archived.put("reason",ExpenseDb.ABBREVIATED_COPY_REASON);
+            archived.put("archived_at",System.currentTimeMillis());archived.put("payload",new org.json.JSONObject().put("unique_key",survivorKey).toString());
+            db.getWritableDatabase().insert("transaction_archive",null,archived);
+            ExpenseDb.Transaction editedBefore=db.transactionById(edited);check(editedBefore.needsReview&&db.transactionById(pending).needsReview&&db.transactionById(survivor).needsReview,"Repair fixtures flagged");
+            ExpenseDb.RepairReport repaired=db.repairAll();ExpenseDb.Transaction editedAfter=db.transactionById(edited);state("repair-v5",edited,pending,survivor);
+            check(repaired.reviewsRestored==1&&!editedAfter.needsReview,"Edited row flagged by 0.4.2 is cleared: "+repaired.reviewsRestored);
+            check(editedBefore.category.equals(editedAfter.category)&&editedBefore.kind.equals(editedAfter.kind)&&editedBefore.amountMinor==editedAfter.amountMinor&&"صحة".equals(editedAfter.category),"Repair touches only needs_review");
+            check(db.transactionById(pending).needsReview,"Unedited flagged row stays flagged");
+            check(db.transactionById(survivor).needsReview,"Abbreviated-merge survivor keeps its own flag");
+            check(db.repairAll().reviewsRestored==0&&!db.transactionById(edited).needsReview&&db.transactionById(pending).needsReview,"Second repair run changes nothing");
+            check(ExpenseDb.REPAIR_VERSION==5,"Repair version 5 re-runs once on 0.4.2 phones");
             status=failures==0?-1:0;
         }catch(Throwable error){failures++;java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));log(trace.toString());}
         finally{try{if(activity!=null)main(activity::finish);if(db!=null){db.clearAllData();db.close();}}catch(Throwable error){failures++;log(error.toString());}result.putString("stream",report+"Classification/lag checks passed: "+(checks-failures)+"; failed: "+failures+"\n");runner.finish(failures==0?status:0,result);}

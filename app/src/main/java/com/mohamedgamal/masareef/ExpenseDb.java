@@ -881,12 +881,13 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         return matches;
     }
+    static final String ABBREVIATED_COPY_REASON="user confirmed abbreviated/full SMS of one purchase";
     public void confirmAbbreviatedSmsCopy(long completeId,long partialId) {
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
             boolean found=false;for(Transaction candidate:abbreviatedSmsCopies(completeId))if(candidate.id==partialId)found=true;
             if(!found)throw new IllegalArgumentException("Source copy is not a matching prefix");
-            if(!mergeEntries(completeId,partialId,"user confirmed abbreviated/full SMS of one purchase"))
+            if(!mergeEntries(completeId,partialId,ABBREVIATED_COPY_REASON))
                 throw new IllegalArgumentException("Related records conflict; review before merging");
             ContentValues kept=new ContentValues();kept.put("user_edited",1);sql.update("transactions",kept,"id=?",new String[]{Long.toString(completeId)});
             sql.setTransactionSuccessful();
@@ -2304,18 +2305,21 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     /**
      * Bump when a new rule must re-run once over all existing data.
      * 4 (0.4.2): an InstaPay handle now matches the bank SMS naming the same person, so earlier double incomes merge.
+     * 5 (0.4.3): 0.4.2 re-flagged rows the user had already reviewed; clearReviewedFlags gives them back.
      */
-    public static final int REPAIR_VERSION = 4;
+    public static final int REPAIR_VERSION = 5;
 
     public static final class RepairReport {
         boolean failed;
         private final java.util.Map<Long,Long> mergedRows=new java.util.HashMap<>();
         long follow(long id){while(mergedRows.containsKey(id))id=mergedRows.get(id);return id;}
         public int promotions, duplicates, ownTransfers, commitments, recategorized, evidenceFailures, trailingSigns;
+        /** Rows the user had reviewed that 0.4.2 flagged again; only needs_review went back to 0 (0.4.3). */
+        public int reviewsRestored;
         /** Automatic rows that had no source and got one from their saved message (owner acceptance, 0.4.0). */
         public int sourcesInferred;
         public long movedMinor, feesMinor;
-        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns + sourcesInferred > 0; }
+        public boolean changed() { return promotions + duplicates + ownTransfers + commitments + recategorized + trailingSigns + sourcesInferred + reviewsRestored > 0; }
         /** Rows this repair moved into an archive, counted for the import contract that reports them. */
         int mergedRowCount() { return mergedRows.size(); }
     }
@@ -2350,6 +2354,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             report.trailingSigns=repairTrailingSigns();
             report.recategorized=recategorizeWithCurrentRules();
             report.sourcesInferred=inferMissingSources();
+            report.reviewsRestored=clearReviewedFlags();
             repairWindow(Long.MIN_VALUE/2,Long.MAX_VALUE/2,report);
             ContentValues log=new ContentValues();log.put("ran_at",System.currentTimeMillis());log.put("version",REPAIR_VERSION);
             log.put("promotions",report.promotions);log.put("duplicates",report.duplicates);log.put("own_transfers",report.ownTransfers);
@@ -2358,6 +2363,36 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             sql.setTransactionSuccessful();
         } finally {sql.endTransaction();}
         return report;
+    }
+
+    /**
+     * 0.4.2's markMergeReview/canReconcile set needs_review=1 on rows the user had edited. Since 0.4.3 every automatic
+     * flag requires user_edited=0, so an edited row that is still flagged comes from that bug. Only needs_review changes:
+     * no category, kind, amount or link. Excluded: the row kept by a user-confirmed abbreviated SMS merge, because that
+     * confirmation marks it edited without reviewing a flag the row may have had for its own reason.
+     */
+    int clearReviewedFlags() {
+        java.util.Set<Long> kept=new java.util.HashSet<>();
+        SQLiteDatabase sql=getWritableDatabase();
+        try (Cursor c=sql.rawQuery("SELECT payload FROM transaction_archive WHERE reason=?",new String[]{ABBREVIATED_COPY_REASON})) {
+            while (c.moveToNext()) {
+                String key;
+                try { key=new org.json.JSONObject(c.getString(0)).optString("unique_key",""); }
+                catch (org.json.JSONException unreadable) { continue; }
+                if (key.isEmpty()) continue;
+                try (Cursor owner=sql.rawQuery("SELECT transaction_id FROM capture_evidence WHERE unique_key=?",new String[]{key})) {
+                    while (owner.moveToNext()) kept.add(owner.getLong(0));
+                }
+            }
+        }
+        int restored=0;
+        List<Long> flagged=new ArrayList<>();
+        try (Cursor c=sql.rawQuery("SELECT id FROM transactions WHERE user_edited=1 AND needs_review=1",null)) {
+            while (c.moveToNext()) if (!kept.contains(c.getLong(0))) flagged.add(c.getLong(0));
+        }
+        ContentValues values=new ContentValues();values.put("needs_review",0);
+        for (long id:flagged) restored+=sql.update("transactions",values,"id=? AND user_edited=1 AND needs_review=1",new String[]{Long.toString(id)});
+        return restored;
     }
 
     /**

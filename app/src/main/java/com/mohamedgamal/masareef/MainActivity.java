@@ -7954,6 +7954,8 @@ public final class MainActivity extends Activity {
                 if (!report.changed()) { if (manual) toast("البيانات سليمة، مفيش حاجة تتصلح"); return; }
                 if (introVisible) return;
                 StringBuilder text = new StringBuilder();
+                if (report.reviewsRestored > 0) text.append("• رجّعنا ").append(StatementRows.operations(report.reviewsRestored))
+                        .append(" كنت راجعتها وكانت رجعت تطلب مراجعة.\n");
                 if (report.recategorized > 0) text.append("• ").append(report.recategorized)
                         .append(" عملية كانت غير مصنفة واتعرف تصنيفها (زي اشتراك ChatGPT).\n");
                 if (report.sourcesInferred > 0) text.append("• ").append(report.sourcesInferred)
