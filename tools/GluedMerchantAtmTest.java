@@ -51,9 +51,10 @@ public final class GluedMerchantAtmTest {
         String[] spaced = decide("شكرًا لاستخدامكم بطاقة بنك مصر ***1111 تم خصم مبلغ EGP 60.00 في كارفور بتاريخ 20/10/2026");
         same(spaced[1], "Carrefour", "Spaced Arabic merchant");
 
-        // Al Baraka ATM: terminal + acquirer code, no ATM wording.
+        // Another bank's ATM named only by codes, no ATM wording: cash, recorded without review (owner report, 26 Oct 2026).
         String[] baraka = decide("شكرًا لاستخدامك بطاقة بنك مصر *2222 ، تم الآن خصم EGP 500.00 على BRKN0123         BRKA يوم 24/10/2026 " +
                 "الرصيد المتاح EGP 900.00 لمزيد من المعلومات ، تفضل بزيارة الرابط التالي  https://bnkmsr.com/online");
+        same(baraka[0], "AUTO", "ATM codes need no merchant review");
         same(baraka[5], "cash_withdrawal", "Al Baraka terminal is an ATM");
         same(baraka[1], "سحب نقدي", "ATM name");
         same(baraka[2], "سحب نقدي", "ATM category");
@@ -65,9 +66,16 @@ public final class GluedMerchantAtmTest {
         String[] nbe = decide("تم خصم EGP 300.00 من 3333 عندNBE ATM 0042 يوم19/10/26الساعة14:54المتاح700.00 EGP للمزيد أتصل ب 19623");
         same(nbe[2], "سحب نقدي", "NBE ATM");
 
-        // A merchant whose own name carries digits and a word is not an ATM unless the acquirer code is a known ATM one.
+        // The rule is the shape, not a bank list: any terminal id + short code(s) with a round EGP amount.
+        String[] other = decide("شكرًا لاستخدامك بطاقة بنك مصر *2222 ، تم الآن خصم EGP 1000.00 على QNBA0456 QNBA CAI يوم 24/10/2026 الرصيد المتاح EGP 900.00");
+        same(other[0], "AUTO", "Other bank ATM decision");
+        same(other[5], "cash_withdrawal", "Other bank ATM codes");
+        // Not round, or not EGP: a coded merchant stays a purchase.
         String[] shop = decide(card("EGP 40", "SHOP0123 CAIRO", "20/10/2026"));
-        check(!"cash_withdrawal".equals(shop[5]), "Unknown code pair is not cash");
+        check(!"cash_withdrawal".equals(shop[5]), "Coded merchant with an odd amount is not cash");
+        same(shop[1], "SHOP0123 CAIRO", "Coded merchant keeps its name");
+        String[] usd = decide(card("USD 100", "SHOP0123 NYC", "20/10/2026"));
+        check(!"cash_withdrawal".equals(usd[5]), "A USD charge is not an Egyptian ATM");
 
         System.out.println("Glued merchant and ATM terminal checks passed: " + checks);
     }

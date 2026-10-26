@@ -294,12 +294,14 @@ final class ParsingPolicy {
     /** A fee charged for a withdrawal: with a fee principal, a bank fee rather than cash. */
     static final String WITHDRAWAL_FEE = "\\bwithdrawal fees?\\b|(?<!\\p{L})(?:رسوم|عموله) (?:ال)?سحب";
     /**
-     * An ATM named only by its terminal code and the acquiring bank's code, with no ATM wording ("على BRKN0123 BRKA":
-     * an Al Baraka machine charged on a Banque Misr card). Add an acquirer code here once a real message confirms it.
+     * An ATM named only by codes, with no ATM wording: a terminal id (letters then digits) and one or two short bank or
+     * location codes ("على BRKN0123 BRKA", another bank's machine on a Banque Misr card). Shape, not a list of banks
+     * (owner, 26 Oct 2026). Applies only with a round EGP amount (ATM_ROUND_MINOR), so a coded shop charge stays a purchase.
      */
-    static final String ATM_ACQUIRERS = "brka";
-    static final String ATM_TERMINAL = "(?<![\\p{L}\\d])[a-z]{2,5}[\\d#*x]{3,}\\s+(?:" + ATM_ACQUIRERS + ")(?![\\p{L}\\d])";
-    static final String MOVEMENT_CASH ="\\batm\\d*\\b|صراف|سحب نقدي|\\bcash withdrawal\\b|(?<!\\p{L})ماكينه|(?<!\\p{L})اله (?:رقم|صراف)|" + ATM_TERMINAL;
+    static final String ATM_TERMINAL_SHAPE = "[a-z]{2,6}[\\d#*x]{3,}(?:\\s+[a-z]{2,5}){1,2}";
+    /** ATMs pay out notes: a withdrawal is a whole multiple of 50 EGP. */
+    static final long ATM_ROUND_MINOR = 5000;
+    static final String MOVEMENT_CASH ="\\batm\\d*\\b|صراف|سحب نقدي|\\bcash withdrawal\\b|(?<!\\p{L})ماكينه|(?<!\\p{L})اله (?:رقم|صراف)";
     static final String MOVEMENT_SALARY = "\\bsalary\\b|\\bpayroll\\b|(?<!\\p{L})(?:راتب|مرتب)";
     static final String MOVEMENT_REMITTANCE = "\\btt payment\\b|\\bremittance\\b|\\bswift\\b|حواله (?:خارجيه|دوليه|وارده من الخارج)";
     static final String MOVEMENT_INSTANT = "\\bipn\\b|instapay|انستا ?باي|(?:ال)?تحويل (?:ال)?لحظي|شبكه (?:ال)?مدفوعات (?:ال)?لحظي[هة]?|instant payment network";
@@ -330,7 +332,7 @@ final class ParsingPolicy {
     static final String MERCHANT_GENERIC = "^(?:خلال|عبر|(?:know|learn|find out|read|see) more|unsubscribe|opt.?out|(?:more|further) (?:details|info(?:rmation)?)|(?:ال)?حساب|حسابك|حسابكم|(?:ال)?بطاقه|بطاقتك|بطاقتكم|(?:ال)?كارت|(?:ال)?محفظه|محفظتك|رقم|ماكينه|الفرع|فرع|(?:ال)?معلومات|account|card|wallet|your|the|you|branch)(?!\\p{L})";
     static final int MERCHANT_MAX_CHARS = 40;
     /** A bare ATM/cash-machine phrase is a place, not a merchant ("another bank's ATM"); a named terminal ("NBE ATM546") stays. */
-    static final String MERCHANT_ATM_PHRASE = "(?<![\\p{L}\\d])(?:atm|ماكينه|الصراف)(?![\\p{L}\\d])|" + ATM_TERMINAL;
+    static final String MERCHANT_ATM_PHRASE = "(?<![\\p{L}\\d])(?:atm|ماكينه|الصراف)(?![\\p{L}\\d])";
     /** Possibly between the user's own accounts: card/prepaid funding, wallet top-up, paying one's own card dues. */
     static final String INTERNAL_TRANSFER = "(?:الي|to) (?:كارت|بطاقه|credit card|prepaid)|تم\\s+شحن\\s+(?:ال)?محفظ|top.?up (?:your )?wallet|" +
             "سداد (?:مستحقات |مديونيه )?(?:ال)?(?:بطاقه|بطاقتك|بطاقتكم|كارت)|\\bcard (?:bill |balance )?(?:payment|repayment) (?:received|made|of)\\b|" +
