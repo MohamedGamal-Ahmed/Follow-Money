@@ -2,15 +2,13 @@ package com.mohamedgamal.masareef;
 
 /**
  * When the home screen shows the in-app update card. Pure logic; InAppUpdate feeds it what Google Play reports.
- * The card offers an update as soon as Play reports one (owner, 26 Oct 2026; it used to wait two days for Play's own
- * auto-update), «بعدين» quiets the same version for three days, and an update that finished downloading always asks
- * for the restart (it otherwise waits on the phone, using storage).
+ * Play's automatic update gets two days first, «بعدين» quiets the same version for three days, and an update that
+ * finished downloading always asks for the restart (it otherwise waits on the phone, using storage).
  */
 final class UpdatePrompt {
     private UpdatePrompt() {}
 
-    /** Days Play must have known about the update first; 0 = at once. Unknown staleness (null) counts as 0. */
-    static final int MIN_STALENESS_DAYS = 0;
+    static final int MIN_STALENESS_DAYS = 2;
     static final long SNOOZE_MS = 3L * 24 * 60 * 60 * 1000;
 
     enum Status { NONE, DOWNLOADING, DOWNLOADED }
@@ -20,7 +18,7 @@ final class UpdatePrompt {
                      int availableVersion, int snoozedVersion, long snoozedAt, long now) {
         if (status == Status.DOWNLOADED) return Card.RESTART;
         if (status == Status.DOWNLOADING) return Card.DOWNLOADING;
-        if (!available || !flexibleAllowed || (stalenessDays == null ? 0 : stalenessDays) < MIN_STALENESS_DAYS) return Card.NONE;
+        if (!available || !flexibleAllowed || stalenessDays == null || stalenessDays < MIN_STALENESS_DAYS) return Card.NONE;
         if (snoozedVersion == availableVersion && now - snoozedAt < SNOOZE_MS) return Card.NONE;
         return Card.OFFER;
     }
