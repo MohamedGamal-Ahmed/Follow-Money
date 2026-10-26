@@ -1,6 +1,8 @@
 # Change log
 
-## Unreleased — classification fixes (owner report, 26 Oct 2026)
+## 0.4.4 — 26 October 2026 (versionCode 14)
+
+Classification fixes from the owner report of 26 Oct 2026 (PR #45).
 
 - Banque Misr credit-card messages that glue «في» to a Latin merchant and the merchant to «بتاريخ» («فيOPENAI *CHATGPTبتاريخ») name the merchant again: ChatGPT, Google One, Google Truecall and Google Play are recorded automatically as «اشتراكات» instead of «Banque Misr · غير مصنف» waiting for review. A Latin merchant ends where the Arabic text starts. Extractor version extraction-5. Rows already recorded under the bank's name are not rewritten.
 - Another bank's ATM charged on a card and named only by codes («على BRKN0123 BRKA») is a cash withdrawal recorded without review, not a purchase from «BRKN… BRKA». The rule is a shape (terminal id of letters then digits, plus one or two short codes) with a round EGP amount (multiple of 50), not a list of banks; a coded merchant with an odd or foreign amount stays a purchase.
