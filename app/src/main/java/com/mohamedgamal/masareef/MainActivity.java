@@ -2234,7 +2234,11 @@ public final class MainActivity extends Activity {
         }
         @Override void onSaved() {
             if(OWN_TRANSFER_CHOICE.equals(text("category"))&&openTransfer()){reconcileTransfers(java.util.Collections.singletonList(draft.getLong("id",-1)));return;}
-            if(draft.getLong("id",-1)>=0){toast("اتحفظ تعديل العملية");if(draft.getBoolean("remember")&&"expense".equals(text("kind")))offerPastMerchantCategory(text("merchant"),text("category"));}
+            if(draft.getLong("id",-1)>=0){toast("اتحفظ تعديل العملية");
+                Runnable remember=()->{if(draft.getBoolean("remember")&&"expense".equals(text("kind")))offerPastMerchantCategory(text("merchant"),text("category"));};
+                boolean changed=!text("category").equals(original.getString("category",""));
+                if(changed&&"expense".equals(text("kind")))offerCommitmentLink(java.util.Collections.singletonList(draft.getLong("id",-1)),text("category"),remember);
+                else remember.run();}
         }
         @Override boolean restoreAfterRecreation(){return true;}
     }
@@ -3623,7 +3627,7 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams actionsParams=new LinearLayout.LayoutParams(-1,-2);actionsParams.topMargin=dp(10);tools.addView(actions,actionsParams);
             bulkApply=ui.button("تغيير تصنيف المحدد",true,false,this::bulkCategoryDialog);
             LinearLayout.LayoutParams applyParams=new LinearLayout.LayoutParams(-1,-2);applyParams.topMargin=dp(8);tools.addView(bulkApply,applyParams);
-            tools.addView(label("المصروفات يتغير تصنيفها؛ الدخل والتحويلات والتسويات المحتاجة مراجعة يتعلّموا إنهم اتراجعوا مع الحفاظ على نوعهم.",12,MUTED,false));
+            tools.addView(label("التحويلات لناس: اختار غرضها (عائلة، إيجار، قسط...) فتتحسب في مكانها. المصروفات: يتغير تصنيفها. الدخل والتسويات المحتاجة مراجعة: يتعلّموا إنهم اتراجعوا من غير ما نوعهم يتغير.",12,MUTED,false));
         }
         EditText search = null;
         if (searchOpen) {
@@ -3801,34 +3805,53 @@ public final class MainActivity extends Activity {
 
     private void updateBulkCount() {
         if(bulkCount!=null)bulkCount.setText("المحدد: "+bulkSelected.size()+" عملية");
-        if(bulkApply!=null)bulkApply.setEnabled(!bulkSelected.isEmpty());
+        if(bulkApply!=null){bulkApply.setEnabled(!bulkSelected.isEmpty());bulkApply.setText(allOpenTransfers(bulkSelected)?"حدد غرض المحدد":"تغيير تصنيف المحدد");}
+    }
+
+    /** Every selected row is a transfer to a person whose purpose is still open (owner, 26 Oct 2026: «تغيير تصنيف» read as the wrong action). */
+    private boolean allOpenTransfers(java.util.Collection<Long> ids) {
+        if(ids.isEmpty())return false;
+        for(Long id:ids)if(id==null||!openTransferRow(id))return false;
+        return true;
     }
 
     private void bulkCategoryDialog() {
         if(bulkSelected.isEmpty())return;
         Bundle draft=new Bundle();draft.putString("ids",bulkSelected.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
-        draft.putString("category",CATEGORIES[0]);savePageScroll();formPages.push(new BulkCategoryPage(draft,draft));
+        boolean purpose=allOpenTransfers(bulkSelected);draft.putBoolean("purpose",purpose);
+        // A purpose has no safe default: «غير مصنف» would only move the transfers to another open list.
+        draft.putString("category",purpose?"":CATEGORIES[0]);savePageScroll();formPages.push(new BulkCategoryPage(draft,draft));
     }
 
     private final class BulkCategoryPage extends UiPages.Page {
-        BulkCategoryPage(Bundle draft,Bundle original){super("transaction_bulk_category","تصنيف ومراجعة العمليات",draft,original);}
+        BulkCategoryPage(Bundle draft,Bundle original){super("transaction_bulk_category",draft.getBoolean("purpose")?"غرض التحويلات":"تصنيف ومراجعة العمليات",draft,original);}
+        private TextView error;
         private List<Long> ids(){List<Long> ids=new ArrayList<>();for(String id:draft.getString("ids","").split(","))if(!id.isEmpty())ids.add(Long.parseLong(id));return ids;}
         @Override void build(LinearLayout body,UiComponents components){
-            List<Long> ids=ids();components.caption("مراجعة "+ids.size()+" عملية · التصنيف للمصروفات المتاحة فقط؛ الباقي اعتماد مراجعة من غير تغيير النوع أو الأرقام والحسابات",body);
-            boolean open=!ids.isEmpty();for(Long id:ids)open&=openTransferRow(id);
-            String[] choices=open?withOwnTransfer(CATEGORIES):CATEGORIES;
+            List<Long> ids=ids();boolean open=allOpenTransfers(ids);
+            components.caption(open?"تحديد غرض "+StatementRows.transfers(ids.size())+" لناس · الغرض بيحطها في مكانها الصح في الصرف":
+                    "مراجعة "+ids.size()+" عملية · التصنيف للمصروفات والتحويلات لناس؛ الباقي اعتماد مراجعة من غير تغيير النوع أو الأرقام والحسابات",body);
+            // Open transfers choose a purpose first («تحويل بين حساباتي», then the purposes); every category stays reachable.
+            String[] choices=open?withOwnTransfer(withRest(PURPOSES)):CATEGORIES;
             if(open)components.caption(OPEN_TRANSFER_HINT,body);
-            Button category=components.button(draft.getString("category"),false,false,()->{});components.caption("التصنيف الجديد",body);body.addView(category);
-            category.setOnClickListener(v->chooseValue("التصنيف الجديد",choices,draft.getString("category"),value->{draft.putString("category",value);category.setText(value);}));
+            String title=open?"الغرض":"التصنيف الجديد";
+            String shown=draft.getString("category","").isEmpty()?"اختار الغرض":draft.getString("category");
+            Button category=components.button(shown,false,false,()->{});category.setTag("transaction_bulk_category_value");components.caption(title,body);body.addView(category);
+            category.setOnClickListener(v->chooseValue(title,choices,draft.getString("category"),value->{draft.putString("category",value);category.setText(value);if(error!=null)error.setVisibility(View.GONE);}));
             for(Long id:ids){ExpenseDb.Transaction tx=db.transactionById(id);if(tx!=null)components.caption(tx.merchant+" · "+money(tx.amountMinor,tx.currency),body);}
+            error=components.label("",UiTheme.BODY,CORAL);error.setTag("transaction_bulk_category_error");error.setVisibility(View.GONE);body.addView(error);
         }
-        @Override String saveLabel(){return "اعتماد التصنيف";}
+        @Override String saveLabel(){return draft.getBoolean("purpose")?"اعتماد الغرض":"اعتماد التصنيف";}
         private List<Long> ownTransfers;
         @Override boolean save(){
+            if(draft.getString("category","").isEmpty()){if(error!=null){error.setText("اختار غرض التحويلات الأول");error.setVisibility(View.VISIBLE);}return false;}
             if(OWN_TRANSFER_CHOICE.equals(draft.getString("category"))){ownTransfers=ids();bulkSelected.clear();bulkMode=false;return true;}
             ExpenseDb.ClassificationResult result=db.classifyReviewed(ids(),draft.getString("category"));bulkSelected.clear();bulkMode=false;toast(result.message());return true;
         }
-        @Override void onSaved(){if(ownTransfers!=null)reconcileTransfers(ownTransfers);}
+        @Override void onSaved(){
+            if(ownTransfers!=null){reconcileTransfers(ownTransfers);return;}
+            offerCommitmentLink(ids(),draft.getString("category"),()->{});
+        }
         @Override boolean restoreAfterRecreation(){return true;}
     }
 
@@ -5479,6 +5502,9 @@ public final class MainActivity extends Activity {
             // Tester, 24 Oct 2026: two months of purchases newest first hid the payment; the likely ones come first now.
             java.util.Map<Long,ExpenseDb.Transaction> byId=new java.util.HashMap<>();List<PaymentCandidates.Item> items=new ArrayList<>();
             for(ExpenseDb.Transaction tx:db.commitmentPaymentCandidates(selected)){byId.put(tx.id,tx);items.add(new PaymentCandidates.Item(tx.id,tx.merchant,tx.amountMinor,tx.currency,tx.when));}
+            // The payment the user started from stays listed even outside the cycle's month window.
+            ExpenseDb.Transaction preselected=draft.getBoolean("learn")&&draft.getLong("transaction")>=0&&!byId.containsKey(draft.getLong("transaction"))?db.transactionById(draft.getLong("transaction")):null;
+            if(preselected!=null){byId.put(preselected.id,preselected);items.add(new PaymentCandidates.Item(preselected.id,preselected.merchant,preselected.amountMinor,preselected.currency,preselected.when));}
             List<PaymentCandidates.Item> ranked=PaymentCandidates.rank(items,item.amountMinor,item.currency,item.merchant,selected);
             components.caption("٢ · اختار الدفعة اللي تخص "+item.merchant,body);
             if(ranked.isEmpty()){body.addView(components.label("مفيش دفعات مؤهلة في الفترة دي. راجع تاريخ الدورة أو فك رابط سابق من التسويات.",UiTheme.BODY,MUTED));errorLabel(body);return;}
@@ -5523,8 +5549,9 @@ public final class MainActivity extends Activity {
             if(ExpenseParser.manualAmountMisread(text("amount")))return fail("راجع المبلغ","amount");
             long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
             if(minor<=0||minor>preview.max)return fail("اكتب مبلغًا موجبًا لحد المبلغ المتاح","amount");
-            CommitmentPayments.AllocationPreview approved=preview;
-            return submit(()->{db.linkCommitmentPayment(approved,minor);return true;});
+            CommitmentPayments.AllocationPreview approved=preview;boolean learn=draft.getBoolean("learn");
+            // Opened from the transaction: the commitment also learns this merchant's spelling for its next payments.
+            return submit(()->{db.linkCommitmentPayment(approved,minor);if(learn)db.learnCommitmentMerchant(approved.commitmentId,approved.transaction.merchant);return true;});
         }
         // The preview is recomputed from the database on every build, never restored from a stale copy.
         @Override boolean restoreAfterRecreation(){return true;}
@@ -6145,13 +6172,69 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * After the user files an expense as «اشتراكات» or «أقساط», ask which one it pays (owner, 26 Oct 2026: the ChatGPT
+     * charge became «اشتراك وخلاص» with no link to the ChatGPT subscription). Several rows ask once, only when they are the
+     * same merchant (the newest row is linked). A row already in a commitment, or no answer, goes on to next.
+     */
+    private void offerCommitmentLink(List<Long> ids, String category, Runnable next) {
+        String kind = "اشتراكات".equals(category) ? "subscription" : "أقساط".equals(category) ? "installment" : null;
+        ExpenseDb.Transaction newest = null;
+        if (kind != null) for (Long id : ids) {
+            ExpenseDb.Transaction tx = id == null ? null : db.transactionById(id);
+            if (tx == null || !"expense".equals(tx.kind) || !category.equals(tx.category)) { newest = null; break; }
+            if (newest != null && !MerchantClassifier.sameMerchant(newest.merchant, tx.merchant)) { newest = null; break; }
+            if (newest == null || tx.when > newest.when) newest = tx;
+        }
+        if (newest == null || db.inCommitment(newest.id)) { next.run(); return; }
+        ExpenseDb.Transaction tx = newest;
+        List<ExpenseDb.Recurring> plans = new ArrayList<>();
+        for (ExpenseDb.Recurring plan : db.recurring())
+            if (!plan.isDone() && kind.equals(plan.kind) && plan.currency.equals(tx.currency)) plans.add(plan);
+        // The plan already named like this merchant comes first.
+        plans.sort((a, b) -> Boolean.compare(CommitmentPayments.sameCounterparty(b, tx.merchant), CommitmentPayments.sameCounterparty(a, tx.merchant)));
+        boolean installment = "installment".equals(kind);
+        List<String> labels = new ArrayList<>();
+        for (ExpenseDb.Recurring plan : plans) labels.add("اربطها بـ \u2068" + UiKit.displayName(plan.merchant) + "\u2069 · " + money(plan.amountMinor, plan.currency));
+        labels.add(installment ? "قسط جديد من العملية دي" : "اشتراك جديد من العملية دي");
+        labels.add("مش دلوقتي");
+        boolean[] handled = {false};
+        new ChoiceDialogBuilder().setTitle((installment ? "القسط ده بتاع إيه؟ · " : "الاشتراك ده بتاع إيه؟ · ") + "\u2068" + UiKit.displayName(tx.merchant) + "\u2069")
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    handled[0] = true;
+                    if (which < plans.size()) commitmentLinkFromTransaction(plans.get(which), tx);
+                    else if (which == plans.size()) commitmentFromTransaction(tx, kind);
+                    else next.run();
+                })
+                .setOnDismissListener(d -> { if (!handled[0]) { handled[0] = true; next.run(); } })
+                .show();
+    }
+
+    /**
+     * Links this expense to one cycle of an existing commitment: the open cycle on its schedule nearest the payment day
+     * (reviewer, PR #45: stepping back from next_due picked a stale cycle for an overdue plan), editable on the page.
+     */
+    private void commitmentLinkFromTransaction(ExpenseDb.Recurring plan, ExpenseDb.Transaction tx) {
+        LocalDate due = db.suggestedCommitmentCycle(plan.id, tx.id);
+        if (due == null) due = plan.nextDue == null ? Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate() : plan.nextDue;
+        Bundle draft = new Bundle(); draft.putLong("plan", plan.id); draft.putString("due", due.toString());
+        draft.putBoolean("searched", true); draft.putLong("transaction", tx.id); draft.putString("amount", "");
+        draft.putBoolean("learn", true);
+        savePageScroll(); formPages.push(new CommitmentLinkPage(draft, draft));
+    }
+
     private void commitmentFromTransaction(ExpenseDb.Transaction item) {
+        commitmentFromTransaction(item, "أقساط".equals(item.category) ? "installment" : "فواتير".equals(item.category) ? "bill" : "subscription");
+    }
+
+    private void commitmentFromTransaction(ExpenseDb.Transaction item, String kind) {
         LocalDate day = Instant.ofEpochMilli(item.when).atZone(ZoneId.systemDefault()).toLocalDate();
         int anchor = day.getDayOfMonth(); LocalDate next = day.plusMonths(1);
         while (next.isBefore(LocalDate.now())) { java.time.YearMonth m = java.time.YearMonth.from(next).plusMonths(1); next = m.atDay(Math.min(anchor, m.lengthOfMonth())); }
         Bundle draft = new Bundle(); draft.putLong("transaction", item.id); draft.putString("currency", item.currency);
         draft.putString("name", item.merchant); draft.putString("amount", minorText(item.amountMinor));
-        draft.putString("type", "فواتير".equals(item.category) ? "bill" : "subscription"); draft.putString("due", next.toString());
+        draft.putString("type", kind); draft.putString("due", next.toString());
+        draft.putString("paid", ""); draft.putString("remaining", "");
         savePageScroll(); formPages.push(new CommitmentFromTransactionPage(draft, draft));
     }
 
@@ -6161,10 +6244,27 @@ public final class MainActivity extends Activity {
             amountField("المبلغ", "amount", body);
             body.addView(components.label(text("currency"), UiTheme.CAPTION, MUTED));
             textField("اسم الالتزام", "name", body);
-            choiceField("النوع", "type", new String[]{"اشتراك", "فاتورة"}, new String[]{"subscription", "bill"}, null, body);
-            dateField("موعد الدفعة القادمة", "due", body);
+            String[] types = {"subscription", "installment", "bill"};
+            components.caption("النوع", body);
+            // The installment counts appear only for an installment, so the type redraws the page.
+            components.choices(new String[]{"اشتراك", "قسط", "فاتورة"}, null, java.util.Arrays.asList(types).indexOf(text("type")),
+                    i -> { if (!types[i].equals(text("type"))) { draft.putString("type", types[i]); formPages.rebuild(); } }, body).setTag(route + "_type");
+            boolean installment = "installment".equals(text("type"));
+            dateField(installment ? "موعد القسط الجاي" : "موعد الدفعة القادمة", "due", body);
+            if (installment) {
+                components.caption("اختياري · لو مش فاكر سيبهم فاضيين وكمّلهم بعدين من صفحة القسط", body);
+                textField("عدد الأقساط اللي اتدفعت (شامل دي)", "paid", body).setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                textField("عدد الأقساط الباقية", "remaining", body).setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            }
             body.addView(components.label("الموعد مقترح من آخر عملية؛ راجعه. إنشاء الالتزام لا يضيف مصروفًا أو يسجل سدادًا جديدًا.", UiTheme.CAPTION, MUTED));
             errorLabel(body);
+        }
+        /** An optional whole count: null when empty, -1 when unreadable. */
+        private Integer count(String key) {
+            String raw = ExpenseParser.normalizeDigits(text(key).trim());
+            if (raw.isEmpty()) return null;
+            if (!raw.matches("\\d{1,3}")) return -1;
+            return Integer.parseInt(raw);
         }
         @Override String saveLabel() { return "حفظ الالتزام"; }
         private long created = -1;
@@ -6175,8 +6275,17 @@ public final class MainActivity extends Activity {
             String merchant = text("name").trim();
             if (merchant.isEmpty()) return fail("اكتب اسم الالتزام", "name");
             if (text("due").isEmpty() || LocalDate.parse(text("due")).isBefore(LocalDate.now())) return fail("اختار موعد قادم للدفعة", null);
+            Integer total = null; int paidCount = 0;
+            if ("installment".equals(text("type"))) {
+                Integer paid = count("paid"), remaining = count("remaining");
+                if (paid != null && paid < 0) return fail("اكتب عدد الأقساط اللي اتدفعت بالأرقام", "paid");
+                if (remaining != null && remaining < 0) return fail("اكتب عدد الأقساط الباقية بالأرقام", "remaining");
+                if (remaining != null && remaining == 0) return fail("لو مفيش أقساط باقية، القسط ده خلص ومش محتاج يتسجل", "remaining");
+                paidCount = paid == null ? 0 : paid;
+                if (remaining != null) total = paidCount + remaining;
+            }
             long id;
-            try { id = db.putCommitmentFromTransaction(draft.getLong("transaction"), merchant, minor, text("currency"), LocalDate.parse(text("due")), text("type")); }
+            try { id = db.putCommitmentFromTransaction(draft.getLong("transaction"), merchant, minor, text("currency"), LocalDate.parse(text("due")), text("type"), total, paidCount); }
             catch (RuntimeException failed) { return fail("لم نحفظ الالتزام؛ راجع البيانات وحاول مرة أخرى", null); }
             if (id < 0) return fail("التزام بنفس الاسم والمبلغ موجود بالفعل، أو العملية غير متاحة", null);
             created = id; return true;
@@ -7574,7 +7683,15 @@ public final class MainActivity extends Activity {
             if (which == 0) { reconcileTransfers(ids); return; }
             ExpenseDb.ClassificationResult result = db.classifyReviewed(ids, purposes[which]);
             toast(result.message()); render();
+            offerCommitmentLink(ids, purposes[which], () -> {});
         }).setNegativeButton("إلغاء", null).show();
+    }
+
+    /** The purposes, then every other category not already listed (a transfer can pay a subscription, too). */
+    private static String[] withRest(String[] first) {
+        java.util.LinkedHashSet<String> all = new java.util.LinkedHashSet<>(java.util.Arrays.asList(first));
+        for (String category : CATEGORIES) if (!MoneyFlow.UNCATEGORIZED.equals(category) && !MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(category)) all.add(category);
+        return all.toArray(new String[0]);
     }
 
     private static String[] withOwnTransfer(String[] choices) {

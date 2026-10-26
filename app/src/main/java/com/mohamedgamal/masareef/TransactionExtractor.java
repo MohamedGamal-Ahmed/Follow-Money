@@ -403,6 +403,10 @@ final class TransactionExtractor {
         Matcher stop = STOP.matcher(t);
         int end = stop.find(start) ? stop.start() : t.length();
         end = Math.min(end, start + ParsingPolicy.MERCHANT_MAX_CHARS);
+        // A Latin merchant glued to the Arabic word after it ("فيOPENAI *CHATGPTبتاريخ") ends where the script changes.
+        if (start < t.length() && Character.UnicodeScript.of(t.codePointAt(start)) == Character.UnicodeScript.LATIN)
+            for (int i = start; i < end; i++)
+                if (Character.UnicodeScript.of(t.charAt(i)) == Character.UnicodeScript.ARABIC) { end = i; break; }
         String value = t.substring(start, end).trim();
         String token = t.substring(start).split("\\s", 2)[0];
         // A mask repeats */# or touches a digit ("***4636", "#1234"); one * between letters separates a processor
@@ -416,7 +420,14 @@ final class TransactionExtractor {
         return new int[]{lead, lead + value.length()};
     }
 
+    private static final Pattern ATM_TERMINAL = Pattern.compile(ParsingPolicy.ATM_TERMINAL_SHAPE, FLAGS);
+
     private static void setMerchant(Folded f, Extraction x, int start, int end) {
+        // Codes only, for a round EGP amount: an ATM, not a merchant (it is a cash withdrawal, so no merchant is missing).
+        if (ATM_TERMINAL.matcher(f.text.substring(start, end).trim()).matches() && "EGP".equals(x.currency) &&
+                x.amountMinor != null && x.amountMinor > 0 && x.amountMinor % ParsingPolicy.ATM_ROUND_MINOR == 0) {
+            x.reasons.add("ATM_TERMINAL"); return;
+        }
         x.merchantSurface = f.display(start, end).trim();
         x.merchantKey = MerchantNormalizer.key(x.merchantSurface);
         if (x.merchantKey != null && x.merchantKey.isEmpty()) { x.merchantSurface = null; x.merchantKey = null; }
@@ -539,7 +550,7 @@ final class TransactionExtractor {
             review = true;
         }
         // A merchant is expected only for a card purchase; fees, interest, installments and investments describe themselves.
-        if (x.merchantKey == null && x.selfKind == null && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find() &&
+        if (x.merchantKey == null && x.selfKind == null && !x.reasons.contains("ATM_TERMINAL") && CARD_CONTEXT.matcher(t).find() && PURCHASE.matcher(t).find() &&
                 !NOT_A_PURCHASE.matcher(t).find()) { x.reasons.add("MISSING_MERCHANT"); review = true; }
         if (classified.reasons.contains("ADJUSTED_EVENT")) x.reasons.add("ADJUSTED_EVENT");
         x.movementKind = movement(t, x);
@@ -571,7 +582,7 @@ final class TransactionExtractor {
         if (out && "installment".equals(x.selfKind)) return "installment_payment";
         // A fee charged for a withdrawal is a bank fee, not cash; a completed «سحب» to no merchant or party is cash.
         if (out && !("bank_fee".equals(x.selfKind) && WITHDRAWAL_FEE.matcher(t).find()) &&
-                (MOVEMENT_CASH.matcher(t).find() || x.merchantKey == null && x.counterparty == null && WITHDRAWAL_DONE.matcher(t).find())) return "cash_withdrawal";
+                (MOVEMENT_CASH.matcher(t).find() || x.reasons.contains("ATM_TERMINAL") || x.merchantKey == null && x.counterparty == null && WITHDRAWAL_DONE.matcher(t).find())) return "cash_withdrawal";
         if (in && MOVEMENT_SALARY.matcher(t).find()) return "salary";
         if (in && MOVEMENT_REMITTANCE.matcher(t).find()) return "inward_remittance";
         if (MOVEMENT_INSTANT.matcher(t).find()) return in ? "instant_transfer_in" : "instant_transfer_out";

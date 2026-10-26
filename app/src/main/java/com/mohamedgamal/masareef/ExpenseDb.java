@@ -1901,13 +1901,22 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     public long putCommitmentFromTransaction(long transactionId,String merchant,long amount,String currency,LocalDate due,String kind) {
-        if(merchant==null||merchant.isBlank()||amount<=0||due==null||!("subscription".equals(kind)||"bill".equals(kind)))throw new IllegalArgumentException("Invalid commitment");
+        return putCommitmentFromTransaction(transactionId,merchant,amount,currency,due,kind,null,0);
+    }
+
+    /**
+     * A commitment started from a recorded expense. An installment may state how many were paid and how many remain;
+     * both are optional (owner, 26 Oct 2026: people often don't remember), so an unknown total stays open-ended.
+     */
+    public long putCommitmentFromTransaction(long transactionId,String merchant,long amount,String currency,LocalDate due,String kind,Integer totalCount,int paidCount) {
+        if(merchant==null||merchant.isBlank()||amount<=0||due==null||!("subscription".equals(kind)||"bill".equals(kind)||"installment".equals(kind)))throw new IllegalArgumentException("Invalid commitment");
+        if(paidCount<0||totalCount!=null&&(totalCount<=0||!"installment".equals(kind)||paidCount>totalCount))throw new IllegalArgumentException("Invalid installment count");
         Transaction origin=transactionById(transactionId);
         if(origin==null || !"expense".equals(origin.kind))return -1;
         if(!origin.currency.equals(currency))throw new IllegalArgumentException("Currency must match origin");
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try {
-            long id=putCommitment(null,merchant,amount,currency,due,"monthly",kind,null,0,1,
+            long id=putCommitment(null,merchant,amount,currency,due,"monthly",kind,totalCount,paidCount,1,
                     origin.merchant.toLowerCase(Locale.ROOT),origin.paymentSourceId);
             if(id>=0) {
                 ContentValues values=new ContentValues();values.put("origin_transaction_id",transactionId);
@@ -1916,6 +1925,17 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             sql.setTransactionSuccessful();return id;
         } finally {sql.endTransaction();}
     }
+
+    /** The expense already belongs to a commitment: it started one, or an active payment link uses it. */
+    boolean inCommitment(long transactionId) {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM recurring WHERE origin_transaction_id=? LIMIT 1",new String[]{Long.toString(transactionId)})) {
+            if(c.moveToFirst())return true;
+        }
+        return commitmentLinked(transactionId);
+    }
+
+    /** The user linked this merchant's payment to the commitment: its later payments match it too. */
+    boolean learnCommitmentMerchant(long id,String merchant){return commitments.learnMerchant(id,merchant);}
 
     public Long commitmentOriginId(long id) {
         try(Cursor c=getReadableDatabase().rawQuery("SELECT origin_transaction_id FROM recurring WHERE id=?",new String[]{Long.toString(id)})) {
@@ -2214,6 +2234,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     long linkCommitmentPayment(long id,LocalDate due,long transactionId,long amount){return commitmentPayments.link(id,due,transactionId,amount);}
     boolean undoCommitmentPayment(long paymentId){return commitmentPayments.undo(paymentId);}
     EvidenceVault.Read commitmentPaymentEvidence(long id){return commitmentPayments.evidence(id);}
+    LocalDate suggestedCommitmentCycle(long id,long transactionId){return commitmentPayments.suggestedCycle(id,transactionId);}
     CommitmentPayments.AllocationPreview commitmentPaymentPreview(long id,LocalDate due,long transactionId){return commitmentPayments.preview(id,due,transactionId);}
     long linkCommitmentPayment(CommitmentPayments.AllocationPreview preview,long amount){return commitmentPayments.link(preview,amount);}
     List<Transaction> commitmentPaymentCandidates(LocalDate due){return commitmentPayments.candidates(due);}
