@@ -4,6 +4,8 @@
 
 Classification fixes from the owner report of 26 Oct 2026 (PR #45).
 
+- The in-app update card offers an update as soon as Play reports one (UpdatePrompt.MIN_STALENESS_DAYS 2 → 0; unknown staleness counts as 0). Phones still on 0.4.3 keep 0.4.3's two-day rule for this one update.
+
 - Banque Misr credit-card messages that glue «في» to a Latin merchant and the merchant to «بتاريخ» («فيOPENAI *CHATGPTبتاريخ») name the merchant again: ChatGPT, Google One, Google Truecall and Google Play are recorded automatically as «اشتراكات» instead of «Banque Misr · غير مصنف» waiting for review. A Latin merchant ends where the Arabic text starts. Extractor version extraction-5. Rows already recorded under the bank's name are not rewritten.
 - Another bank's ATM charged on a card and named only by codes («على BRKN0123 BRKA») is a cash withdrawal recorded without review, not a purchase from «BRKN… BRKA». The rule is a shape (terminal id of letters then digits, plus one or two short codes) with a round EGP amount (multiple of 50), not a list of banks; a coded merchant with an odd or foreign amount stays a purchase.
 - Transfers whose purpose is open: with only such transfers selected the bulk button reads «حدد غرض المحدد», the page is «غرض التحويلات» and lists «تحويل بين حساباتي», the purposes, then the remaining categories; nothing is preselected and saving without a purpose explains what is missing. The selection note no longer says transfers keep their type.

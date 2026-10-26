@@ -1,9 +1,9 @@
 package com.mohamedgamal.masareef;
 
 /**
- * Owner, 24 Oct 2026: a flexible in-app update (a small card, the download runs while the app is used). The card asks
- * only when Play has not updated the app by itself for two days, «بعدين» quiets the same version for three days, and a
- * downloaded update always asks for the restart.
+ * Owner, 24 Oct 2026: a flexible in-app update (a small card, the download runs while the app is used). Owner, 26 Oct
+ * 2026: the card asks as soon as Play reports the update (no two-day wait); «بعدين» quiets the same version for three
+ * days, and a downloaded update always asks for the restart.
  */
 public final class UpdatePromptTest {
     private static int checks;
@@ -15,9 +15,9 @@ public final class UpdatePromptTest {
     }
 
     public static void main(String[] args) {
-        check(offer(2, 0, 0) == UpdatePrompt.Card.OFFER, "Two days without an automatic update: offer it");
-        check(offer(1, 0, 0) == UpdatePrompt.Card.NONE, "Play's own auto-update gets two days first");
-        check(offer(null, 0, 0) == UpdatePrompt.Card.NONE, "Unknown staleness is not a reason to ask");
+        check(offer(0, 0, 0) == UpdatePrompt.Card.OFFER, "Offered the day Play reports it");
+        check(offer(2, 0, 0) == UpdatePrompt.Card.OFFER, "…and later");
+        check(offer(null, 0, 0) == UpdatePrompt.Card.OFFER, "Play has not dated it yet: still offered");
         check(offer(5, 13, NOW - DAY) == UpdatePrompt.Card.NONE, "«بعدين» quiets the same version");
         check(offer(5, 13, NOW - 3 * DAY) == UpdatePrompt.Card.OFFER, "…for three days");
         check(offer(5, 12, NOW - DAY) == UpdatePrompt.Card.OFFER, "A newer version than the one dismissed asks again");
