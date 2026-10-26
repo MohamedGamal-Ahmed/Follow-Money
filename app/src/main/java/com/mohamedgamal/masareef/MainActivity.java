@@ -6183,7 +6183,7 @@ public final class MainActivity extends Activity {
             if (newest != null && !MerchantClassifier.sameMerchant(newest.merchant, tx.merchant)) { newest = null; break; }
             if (newest == null || tx.when > newest.when) newest = tx;
         }
-        if (newest == null || db.commitmentLinked(newest.id)) { next.run(); return; }
+        if (newest == null || db.inCommitment(newest.id)) { next.run(); return; }
         ExpenseDb.Transaction tx = newest;
         List<ExpenseDb.Recurring> plans = new ArrayList<>();
         for (ExpenseDb.Recurring plan : db.recurring())

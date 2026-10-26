@@ -138,10 +138,10 @@ public final class PhaseOneTest {
     }
     public void testInstallmentFromExpenseCountsAndLearnedMerchant() {
         long when=at(LocalDate.now());ok(db.addManual(when,150000,"EGP","QA Installments Co","أقساط"));long origin=db.latestInserted().id;
-        ok(!db.commitmentLinked(origin));
+        ok(!db.inCommitment(origin));
         // Paid and remaining are optional: unknown remaining stays open-ended.
         long open=db.putCommitmentFromTransaction(origin,"QA Installments Co",150000,"EGP",LocalDate.now().plusMonths(1),"installment",null,3);ok(open>=0);
-        ok(db.commitmentLinked(origin));ExpenseDb.Recurring plan=db.recurringById(open);eq("installment",plan.kind);eq(3,plan.paidCount);ok(plan.totalCount==null);
+        ok(db.inCommitment(origin));ExpenseDb.Recurring plan=db.recurringById(open);eq("installment",plan.kind);eq(3,plan.paidCount);ok(plan.totalCount==null);
         ok(db.addManual(when,150000,"EGP","QA Other Lender","أقساط"));long second=db.latestInserted().id;
         long counted=db.putCommitmentFromTransaction(second,"QA Other Lender",150000,"EGP",LocalDate.now().plusMonths(1),"installment",12,4);ok(counted>=0);
         eq(Integer.valueOf(12),db.recurringById(counted).totalCount);eq(4,db.recurringById(counted).paidCount);

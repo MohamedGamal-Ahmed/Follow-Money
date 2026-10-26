@@ -1927,11 +1927,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
 
     /** The expense already belongs to a commitment: it started one, or an active payment link uses it. */
-    boolean commitmentLinked(long transactionId) {
+    boolean inCommitment(long transactionId) {
         try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM recurring WHERE origin_transaction_id=? LIMIT 1",new String[]{Long.toString(transactionId)})) {
             if(c.moveToFirst())return true;
         }
-        return commitmentPayments.linked(transactionId);
+        return commitmentLinked(transactionId);
     }
 
     /** The user linked this merchant's payment to the commitment: its later payments match it too. */

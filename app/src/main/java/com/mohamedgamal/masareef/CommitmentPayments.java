@@ -142,11 +142,6 @@ final class CommitmentPayments {
         db.getWritableDatabase().update("recurring",v,"id=?",new String[]{Long.toString(plan.id)});
         return selected;
     }
-    /** An active payment link uses this transaction. */
-    boolean linked(long transactionId){
-        String identity=db.rowIdentityKey(transactionId);if(identity==null)return false;
-        try(Cursor c=db.getReadableDatabase().rawQuery("SELECT 1 FROM commitment_payments WHERE transaction_key=? AND active=1 LIMIT 1",new String[]{identity})){return c.moveToFirst();}
-    }
     boolean automatic(long transactionId){
         if(!db.getWritableDatabase().inTransaction())throw new IllegalStateException("Commitment match must share the financial transaction");
         Transaction tx=db.transactionById(transactionId);if(!eligible(tx))return false;
