@@ -300,6 +300,23 @@ final class CommitmentPayments {
             this.commitmentKey=commitmentKey;this.transactionKey=transactionKey;transaction=tx;
         }
     }
+    /**
+     * The open cycle of the commitment's own schedule nearest to the payment day (stored cycles, then the schedule from
+     * next_due on, as possibleCycles builds it), in the payment's currency; null when none is open. An overdue plan
+     * (next_due 26 Aug, paid 26 Oct) gets 26 Oct, a month-end plan keeps its anchor (31 Oct → 30 Nov → 31 Dec).
+     */
+    LocalDate suggestedCycle(long commitmentId,long transactionId){
+        Recurring plan=db.storedRecurringById(commitmentId);Transaction tx=db.transactionById(transactionId);
+        if(plan==null||tx==null||project(plan).isDone())return null;
+        LocalDate day=Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate best=null;long distance=Long.MAX_VALUE;
+        for(Cycle cycle:possibleCycles(plan,day)){
+            if(!cycle.currency.equals(tx.currency)||cycle.remaining()<=0)continue;
+            long d=Math.abs(ChronoUnit.DAYS.between(cycle.due,day));
+            if(d<distance){distance=d;best=cycle.due;}
+        }
+        return best;
+    }
     AllocationPreview preview(long commitmentId,LocalDate due,long transactionId){
         Recurring plan=db.storedRecurringById(commitmentId);Transaction tx=db.transactionById(transactionId);
         if(plan==null||project(plan).isDone()||!eligible(tx))throw new IllegalArgumentException("Payment changed");

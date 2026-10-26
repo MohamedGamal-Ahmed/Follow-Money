@@ -5502,6 +5502,9 @@ public final class MainActivity extends Activity {
             // Tester, 24 Oct 2026: two months of purchases newest first hid the payment; the likely ones come first now.
             java.util.Map<Long,ExpenseDb.Transaction> byId=new java.util.HashMap<>();List<PaymentCandidates.Item> items=new ArrayList<>();
             for(ExpenseDb.Transaction tx:db.commitmentPaymentCandidates(selected)){byId.put(tx.id,tx);items.add(new PaymentCandidates.Item(tx.id,tx.merchant,tx.amountMinor,tx.currency,tx.when));}
+            // The payment the user started from stays listed even outside the cycle's month window.
+            ExpenseDb.Transaction preselected=draft.getBoolean("learn")&&draft.getLong("transaction")>=0&&!byId.containsKey(draft.getLong("transaction"))?db.transactionById(draft.getLong("transaction")):null;
+            if(preselected!=null){byId.put(preselected.id,preselected);items.add(new PaymentCandidates.Item(preselected.id,preselected.merchant,preselected.amountMinor,preselected.currency,preselected.when));}
             List<PaymentCandidates.Item> ranked=PaymentCandidates.rank(items,item.amountMinor,item.currency,item.merchant,selected);
             components.caption("٢ · اختار الدفعة اللي تخص "+item.merchant,body);
             if(ranked.isEmpty()){body.addView(components.label("مفيش دفعات مؤهلة في الفترة دي. راجع تاريخ الدورة أو فك رابط سابق من التسويات.",UiTheme.BODY,MUTED));errorLabel(body);return;}
@@ -6207,13 +6210,13 @@ public final class MainActivity extends Activity {
                 .show();
     }
 
-    /** Links this expense to one cycle of an existing commitment: the cycle closest to the payment day, editable on the page. */
+    /**
+     * Links this expense to one cycle of an existing commitment: the open cycle on its schedule nearest the payment day
+     * (reviewer, PR #45: stepping back from next_due picked a stale cycle for an overdue plan), editable on the page.
+     */
     private void commitmentLinkFromTransaction(ExpenseDb.Recurring plan, ExpenseDb.Transaction tx) {
-        LocalDate paid = Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate();
-        LocalDate due = plan.nextDue == null ? paid : plan.nextDue;
-        // Step back from the next due date to the cycle this payment most likely paid (early payments up to a week).
-        for (int guard = 0; guard < 120 && due.isAfter(paid.plusDays(7)); guard++)
-            due = "weekly".equals(plan.cycle) ? due.minusWeeks(1) : "yearly".equals(plan.cycle) ? due.minusYears(1) : due.minusMonths(1);
+        LocalDate due = db.suggestedCommitmentCycle(plan.id, tx.id);
+        if (due == null) due = plan.nextDue == null ? Instant.ofEpochMilli(tx.when).atZone(ZoneId.systemDefault()).toLocalDate() : plan.nextDue;
         Bundle draft = new Bundle(); draft.putLong("plan", plan.id); draft.putString("due", due.toString());
         draft.putBoolean("searched", true); draft.putLong("transaction", tx.id); draft.putString("amount", "");
         draft.putBoolean("learn", true);

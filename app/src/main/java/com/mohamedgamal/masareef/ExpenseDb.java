@@ -2234,6 +2234,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     long linkCommitmentPayment(long id,LocalDate due,long transactionId,long amount){return commitmentPayments.link(id,due,transactionId,amount);}
     boolean undoCommitmentPayment(long paymentId){return commitmentPayments.undo(paymentId);}
     EvidenceVault.Read commitmentPaymentEvidence(long id){return commitmentPayments.evidence(id);}
+    LocalDate suggestedCommitmentCycle(long id,long transactionId){return commitmentPayments.suggestedCycle(id,transactionId);}
     CommitmentPayments.AllocationPreview commitmentPaymentPreview(long id,LocalDate due,long transactionId){return commitmentPayments.preview(id,due,transactionId);}
     long linkCommitmentPayment(CommitmentPayments.AllocationPreview preview,long amount){return commitmentPayments.link(preview,amount);}
     List<Transaction> commitmentPaymentCandidates(LocalDate due){return commitmentPayments.candidates(due);}
