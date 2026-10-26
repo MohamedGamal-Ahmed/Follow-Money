@@ -101,6 +101,21 @@ final class CommitmentRepository {
         return result;
     }
 
+    /**
+     * Adds a merchant spelling to the commitment's match keywords, unless it already matches or is a generic name (a
+     * bank, «تحويل لحظي») that would pull in unrelated payments. Returns whether the keywords changed.
+     */
+    boolean learnMerchant(long id, String merchant) {
+        Recurring plan = db.storedRecurringById(id);
+        if (plan == null || merchant == null || ExpenseParser.genericMerchant(merchant)) return false;
+        String clean = merchant.trim().toLowerCase(Locale.ROOT);
+        if (clean.length() < 3 || clean.contains("|") || CommitmentPayments.sameCounterparty(plan, merchant)) return false;
+        String current = plan.matchText == null ? "" : plan.matchText.trim();
+        ContentValues values = new ContentValues();
+        values.put("match_text", current.isEmpty() ? clean : current + "|" + clean);
+        return db.getWritableDatabase().update("recurring", values, "id=?", new String[]{Long.toString(id)}) > 0;
+    }
+
     Recurring recurringById(long id) {
         for (Recurring item : recurring()) if (item.id == id) return item;
         return null;

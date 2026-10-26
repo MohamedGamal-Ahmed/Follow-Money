@@ -403,6 +403,10 @@ final class TransactionExtractor {
         Matcher stop = STOP.matcher(t);
         int end = stop.find(start) ? stop.start() : t.length();
         end = Math.min(end, start + ParsingPolicy.MERCHANT_MAX_CHARS);
+        // A Latin merchant glued to the Arabic word after it ("فيOPENAI *CHATGPTبتاريخ") ends where the script changes.
+        if (start < t.length() && Character.UnicodeScript.of(t.codePointAt(start)) == Character.UnicodeScript.LATIN)
+            for (int i = start; i < end; i++)
+                if (Character.UnicodeScript.of(t.charAt(i)) == Character.UnicodeScript.ARABIC) { end = i; break; }
         String value = t.substring(start, end).trim();
         String token = t.substring(start).split("\\s", 2)[0];
         // A mask repeats */# or touches a digit ("***4636", "#1234"); one * between letters separates a processor

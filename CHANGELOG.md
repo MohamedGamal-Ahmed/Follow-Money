@@ -1,5 +1,14 @@
 # Change log
 
+## Unreleased — classification fixes (owner report, 26 Oct 2026)
+
+- Banque Misr credit-card messages that glue «في» to a Latin merchant and the merchant to «بتاريخ» («فيOPENAI *CHATGPTبتاريخ») name the merchant again: ChatGPT, Google One, Google Truecall and Google Play are recorded automatically as «اشتراكات» instead of «Banque Misr · غير مصنف» waiting for review. A Latin merchant ends where the Arabic text starts. Extractor version extraction-5. Rows already recorded under the bank's name are not rewritten.
+- An Al Baraka ATM charged on a Banque Misr card («على BRKN… BRKA») is a cash withdrawal, not a purchase from «BRKN… BRKA». Acquirer codes live in ParsingPolicy.ATM_ACQUIRERS; a code joins only once a real message confirms it.
+- Transfers whose purpose is open: with only such transfers selected the bulk button reads «حدد غرض المحدد», the page is «غرض التحويلات» and lists «تحويل بين حساباتي», the purposes, then the remaining categories; nothing is preselected and saving without a purpose explains what is missing. The selection note no longer says transfers keep their type.
+- Filing an expense as «اشتراكات» or «أقساط» (edit page, bulk page, purpose list) asks which commitment it pays: link it to an existing one of that kind (the same-named one first; the link page opens on the cycle nearest the payment, and the commitment learns the merchant's spelling for its next payments, never a bank's name), start a new one from the expense, or «مش دلوقتي». Several rows ask only when they are one merchant. A row already in a commitment is not asked about.
+- «حوّلها لالتزام شهري» offers «قسط» too, with optional «اتدفع كام» and «فاضل كام»; left empty, the installment stays open-ended.
+- Tests: tools/GluedMerchantAtmTest.java (synthetic Banque Misr, NBE and Al Baraka shapes) in run-checks; PhaseOneTest.testInstallmentFromExpenseCountsAndLearnedMerchant.
+
 ## 0.4.1 — 23 October 2026
 
 - «pending» is a status only in status wording («is pending», «pending payment/transaction/authorization», «still pending», «Status: pending», a message that opens with it, «قيد التنفيذ/الانتظار/المراجعة»); the word inside a merchant name («PENDING COFFEE») no longer stops the purchase being recorded.

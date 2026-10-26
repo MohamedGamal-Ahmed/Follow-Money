@@ -136,6 +136,20 @@ public final class PhaseOneTest {
         eq(-1L,db.putCommitmentFromTransaction(origin,"Netflix",12000,"EGP",LocalDate.now().plusMonths(1),"subscription"));eq(1L,count("recurring"));
         try{db.putCommitmentFromTransaction(origin,"Netflix",12000,"USD",LocalDate.now().plusMonths(1),"bill");throw new AssertionError("Changed currency");}catch(IllegalArgumentException expected){}
     }
+    public void testInstallmentFromExpenseCountsAndLearnedMerchant() {
+        long when=at(LocalDate.now());ok(db.addManual(when,150000,"EGP","QA Installments Co","أقساط"));long origin=db.latestInserted().id;
+        ok(!db.commitmentLinked(origin));
+        // Paid and remaining are optional: unknown remaining stays open-ended.
+        long open=db.putCommitmentFromTransaction(origin,"QA Installments Co",150000,"EGP",LocalDate.now().plusMonths(1),"installment",null,3);ok(open>=0);
+        ok(db.commitmentLinked(origin));ExpenseDb.Recurring plan=db.recurringById(open);eq("installment",plan.kind);eq(3,plan.paidCount);ok(plan.totalCount==null);
+        ok(db.addManual(when,150000,"EGP","QA Other Lender","أقساط"));long second=db.latestInserted().id;
+        long counted=db.putCommitmentFromTransaction(second,"QA Other Lender",150000,"EGP",LocalDate.now().plusMonths(1),"installment",12,4);ok(counted>=0);
+        eq(Integer.valueOf(12),db.recurringById(counted).totalCount);eq(4,db.recurringById(counted).paidCount);
+        try{db.putCommitmentFromTransaction(second,"QA Bad",100,"EGP",LocalDate.now().plusMonths(1),"subscription",5,0);throw new AssertionError("Subscription with a total");}catch(IllegalArgumentException expected){}
+        // Linking from the transaction teaches the commitment the merchant's spelling, never a bank's generic name.
+        ok(db.learnCommitmentMerchant(open,"QA LENDER ONLINE"));ok(db.recurringById(open).matches("paid to qa lender online"));
+        ok(!db.learnCommitmentMerchant(open,"QA LENDER ONLINE"));ok(!db.learnCommitmentMerchant(open,"Banque Misr"));
+    }
     public void testDailySummaryCurrencyBoundariesEditDeleteAndPrivacy() {
         LocalDate today=LocalDate.now();long noon=at(today);
         DailySummary.save(context,new DailyAllowance.Plan("EGP",50000,today,25));DailySummary.save(context,new DailyAllowance.Plan("USD",1000,today,0));
