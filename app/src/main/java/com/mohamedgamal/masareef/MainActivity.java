@@ -4031,8 +4031,17 @@ public final class MainActivity extends Activity {
         TextView amount = label(shownAmount, 14, kindColor(item.kind), true);
         if (statementRows) amount.setTag("statement_transaction_amount:" + item.id);
         amount.setTextDirection(View.TEXT_DIRECTION_LTR);
-        line.addView(amount);
-        row.addView(line);
+        // Preserve every metadata item that fits the full row; the amount yields before a chip or time is cut.
+        WrapRow valueLine = new WrapRow(this,0); // retain the original normal-size merchant width
+        int metadataWidth = 0;
+        for(int i=0;i<meta.getChildCount();i++)if(meta.getChildAt(i) instanceof TextView && meta.getChildAt(i).getVisibility()!=View.GONE){
+            TextView itemText=(TextView)meta.getChildAt(i);
+            metadataWidth=Math.max(metadataWidth,(int)Math.ceil(android.text.Layout.getDesiredWidth(itemText.getText(),itemText.getPaint()))
+                    +itemText.getCompoundPaddingLeft()+itemText.getCompoundPaddingRight()+1);
+        }
+        valueLine.setMinimumLeadingWidth(dp(42 + 12 + (bulkMode && selectedTab == 6 ? 48 : 0)) + metadataWidth);
+        valueLine.addView(line); valueLine.addView(amount);
+        row.addView(valueLine);
         if (statementRows && "income".equals(item.kind) && statementContribution(item) < item.amountMinor) {
             row.addView(label("المبلغ المسجل " + isolate(money(item.amountMinor, item.currency)) + " · المحسوب في كشف الفترة "
                     + isolate(money(statementContribution(item), item.currency)), 12, MUTED, false));
@@ -4126,11 +4135,16 @@ public final class MainActivity extends Activity {
             if(why!=null&&!why.isEmpty())
                 detailRow(details,"حالة المراجعة",label(String.join("\n",ReviewReasons.text(java.util.Arrays.asList(why.split(",")))),12,CORAL,false));
             else detailRow(details,"حالة المراجعة",label("expense".equals(item.kind)&&MoneyFlow.OPEN_TRANSFER_CATEGORY.equals(item.category)?"تحويل محتاج ربط؛ الخصم ما زال محسوبًا لحين مراجعتك":"مصدر العملية يحتاج مراجعة؛ المبلغ ما زال محسوبًا",12,CORAL,false));
-            details.addView(ui.button("تمام، دي صح",false,false,()->{
+            boolean cashSuggestion = MoneyFlow.isCashWithdrawal(item.kind,item.category) && why != null
+                    && java.util.Arrays.asList(why.split(",")).contains("ATM_TERMINAL");
+            Button reviewConfirm = ui.button(cashSuggestion ? "تأكيد سحب نقدي" : "تمام، دي صح",false,false,()->{
                 int changed=db.confirmReview(item.id);selectedTransaction=db.transactionById(item.id);
                 toast(changed>0?"اتعلّمت إنها اتراجعت":"العملية اتراجعت بالفعل أو لم تعد موجودة");
                 if(selectedTransaction==null)selectedTab=transactionReturnTab;render();
-            }));
+            });
+            if(cashSuggestion)reviewConfirm.setTag("confirm_atm_suggestion");
+            details.addView(reviewConfirm);
+            if(cashSuggestion)details.addView(ui.button("دي عملية شراء",false,false,()->editTransactionDialog(item)));
         }
         TextView original=label("عرض الرسالة الأصلية",14,ACCENT,true);
         original.setOnClickListener(v -> showOriginalMessages(db.sourceEvidence(item.id)));

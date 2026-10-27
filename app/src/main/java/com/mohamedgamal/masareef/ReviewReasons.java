@@ -8,6 +8,7 @@ import java.util.List;
 final class ReviewReasons {
     /** Review reasons in the order they are explained (most specific first). */
     static final String[][] TEXT = {
+        {"ATM_TERMINAL", "الاسم كود والمبلغ ممكن يكون سحب نقدي؛ ده اقتراح محتاج تأكيدك. لو شراء، غيّر التصنيف"},
         {"OFFSET_UNLINKED", "مبلغ رجع لحسابك (استرداد أو إلغاء) ومش لاقيين المصروف الأصلي؛ اربطه بيه"},
         {"TRANSFER_REQUESTED", "طلب تحويل، والبنك ما أكدش إنه اتنفذ"},
         {"CURRENCY_INFERRED", "الرسالة ما ذكرتش العملة؛ اعتبرناها جنيه مصري"},
