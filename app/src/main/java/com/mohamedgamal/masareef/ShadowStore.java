@@ -277,6 +277,26 @@ final class ShadowStore {
     }
 
 
+    /** Support diagnostics: {kept rows, rows whose text cannot be opened on this device}. Counts only; no text leaves this method. */
+    static int[] ununderstoodHealth(SQLiteDatabase sql) {
+        int rows = 0, unreadable = 0;
+        try (Cursor c = sql.rawQuery("SELECT encrypted_body FROM ununderstood_messages", null)) {
+            while (c.moveToNext()) { rows++; if (EvidenceVault.decrypt(c.getString(0)) == null) unreadable++; }
+        }
+        return new int[]{rows, unreadable};
+    }
+
+    /** Support diagnostics: live observations since the given time, {SMS, notification, pipeline failed}. */
+    static int[] liveCounts(SQLiteDatabase sql, long since) {
+        try (Cursor c = sql.rawQuery("SELECT " +
+                "COALESCE(SUM(CASE WHEN decision IS NOT 'PIPELINE_FAILED' AND channel='SMS' THEN 1 ELSE 0 END),0), " +
+                "COALESCE(SUM(CASE WHEN decision IS NOT 'PIPELINE_FAILED' AND channel='NOTIFICATION' THEN 1 ELSE 0 END),0), " +
+                "COALESCE(SUM(CASE WHEN decision='PIPELINE_FAILED' THEN 1 ELSE 0 END),0) " +
+                "FROM shadow_observations WHERE origin='live' AND observed_at>=?", new String[]{Long.toString(since)})) {
+            return c.moveToFirst() ? new int[]{c.getInt(0), c.getInt(1), c.getInt(2)} : new int[]{0, 0, 0};
+        }
+    }
+
     private static volatile boolean learningLoaded;
 
     /** Loads the stored shape memory into the process model once; later calls do nothing. */

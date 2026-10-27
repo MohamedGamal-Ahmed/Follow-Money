@@ -26,6 +26,9 @@ public final class PaymentNotificationListener extends NotificationListenerServi
         super.onDestroy();
     }
 
+    /** Whether the system currently has this service bound; shown in the support diagnostics. */
+    static boolean isConnected() { return connected.get() != null; }
+
     /** Selection can happen after the service connected and ignored an already-visible notification. */
     static void refreshSelectedSources(Context context) {
         try {
@@ -40,21 +43,26 @@ public final class PaymentNotificationListener extends NotificationListenerServi
     private void replaySelectedActive() {
         try {
             StatusBarNotification[] active = getActiveNotifications();
-            if (active != null) for (StatusBarNotification item : active) submit(item);
+            if (active != null) for (StatusBarNotification item : active) submit(item, false);
         } catch (RuntimeException unavailable) {
             android.util.Log.w("FollowMoney", "Notification replay unavailable: " + unavailable.getClass().getSimpleName());
         }
     }
 
     @Override public void onNotificationPosted(StatusBarNotification item) {
-        submit(item);
+        submit(item, true);
     }
 
-    /** Only the cheap package filter stays on the callback thread; the ledger work is queued. */
-    private void submit(StatusBarNotification item) {
+    /**
+     * Only the cheap package filter stays on the callback thread; the ledger work is queued. A live delivery of a
+     * selected app is noted (time and a daily count, no content) before anything else, so the support diagnostics show
+     * whether the system delivers that app's notifications at all; a replay of an already-visible one is not a delivery.
+     */
+    private void submit(StatusBarNotification item, boolean live) {
         String packageName = acceptedPackage(item);
         if (packageName == null) return;
         final Context app = getApplicationContext();
+        if (live) CaptureDiagnosticsReader.recordSeen(app, packageName);
         CaptureQueue.submit(() -> process(app, item, packageName));
     }
 

@@ -132,6 +132,18 @@ public final class AuditStructureTest {
                 "A labelled field in a horizontal row must get its own column");
         check(!java.util.regex.Pattern.compile("input\\([^;]*\\);\\s*\\(\\(LinearLayout\\.LayoutParams\\)\\s*\\w+\\.getLayoutParams\\(\\)\\)\\.(?:width|weight)").matcher(main).find(),
                 "A labelled field's own layout params are inside its column; size the column, not the input");
+        // 0.4.5: the listener notes a live delivery of a selected app before it queues any work, so a silent system shows up.
+        String listener = read("app/src/main/java/com/mohamedgamal/masareef/PaymentNotificationListener.java");
+        String submit = body(listener, "private void submit(StatusBarNotification item, boolean live)");
+        check(submit.contains("CaptureDiagnosticsReader.recordSeen(") && submit.contains("CaptureQueue.submit(")
+                && submit.indexOf("CaptureDiagnosticsReader.recordSeen(") < submit.indexOf("CaptureQueue.submit("), "recordSeen runs before CaptureQueue.submit");
+        check(submit.indexOf("acceptedPackage(item)") < submit.indexOf("CaptureDiagnosticsReader.recordSeen("), "only a selected app is noted");
+        check(body(listener, "@Override public void onNotificationPosted(StatusBarNotification item)").contains("submit(item, true)"), "a posted notification is a live delivery");
+        check(listener.contains("submit(item, false)"), "a replay is not a delivery");
+        String support = read("app/src/main/java/com/mohamedgamal/masareef/GitHubSupport.java");
+        check(support.contains("CaptureDiagnosticsReader.text(context)"), "support details include the capture state");
+        String reader = read("app/src/main/java/com/mohamedgamal/masareef/CaptureDiagnosticsReader.java");
+        check(!reader.contains("encrypted_body") && !reader.contains("decrypt("), "the diagnostics reader never opens a message text");
         System.out.println("Source structure checks passed: " + checked);
     }
 
