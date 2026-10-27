@@ -26,6 +26,11 @@ public final class TransactionExtractorTest {
         return TransactionExtractor.extract(normalized, MessageClassifier.classify(normalized), receivedAt);
     }
 
+    static TransactionExtractor.Extraction runNotification(String source, String title, String text, long receivedAt) {
+        MessageNormalizer.Normalized normalized = MessageNormalizer.normalize(MessageNormalizer.Raw.notification(source, 0, title, text, null, null, null, null));
+        return TransactionExtractor.extract(normalized, MessageClassifier.classify(normalized), receivedAt);
+    }
+
     public static void main(String[] args) throws Exception {
         List<ParserCorpusFixture.Row> rows = ParserCorpusFixture.readV2(Path.of("tools/fixtures/parser-corpus-v2-draft.tsv"));
         int compared = 0, listed = 0, kinds = 0;
@@ -92,6 +97,28 @@ public final class TransactionExtractorTest {
         same(run("إستلام نقود لقد استلمت 4.00 جنيه من mo.gamalhsbc@instapay", received).counterparty, "mo.gamalhsbc@instapay", "InstaPay address is the counterparty");
         check(!"AUTO".equals(run("Your transaction of EGP 120 at X is pending", received).decision), "A pending transaction is not recorded");
         same(run("تم استلام 30 ج.م. من خلال شبكة المدفوعات اللحظية", received).movementKind, "instant_transfer_in", "IPN network phrase is an instant transfer");
+        // 0.4.5: myFawry's "spent" notifications are card purchases; a spending summary is not (owner phone, 27 Oct 2026).
+        long fawryReceived = java.time.LocalDate.of(2026, 10, 27).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();
+        String fawryTitle = "You spent 20.00 EGP with your yellowcard";
+        TransactionExtractor.Extraction spent = runNotification("com.fawry.myfawry", fawryTitle, "Debit - 20.00 was spent at KASHIER*BUTLERS", fawryReceived);
+        same(spent.decision, "AUTO", "Fawry spent notification is recorded: " + spent.reasons);
+        same(spent.amountMinor, 2000L, "Fawry spent amount"); same(spent.currency, "EGP", "Fawry spent currency");
+        same(spent.direction, "out", "Fawry spent direction"); same(spent.merchantSurface, "KASHIER*BUTLERS", "Fawry spent merchant");
+        TransactionExtractor.Extraction spentAt = runNotification("com.fawry.myfawry", fawryTitle, "Debit - 20.00 was spent at KASHIER*BUTLERS on 27/10/2026 14:39", fawryReceived);
+        same(spentAt.decision, "AUTO", "Fawry spent notification with a time"); same(spentAt.amountMinor, 2000L, "Fawry spent amount with a time");
+        same(spentAt.datetime, "2026-10-27T14:39", "Fawry spent time");
+        TransactionExtractor.Extraction spentSms = run("You spent 100 EGP at CARREFOUR", fawryReceived);
+        same(spentSms.decision, "AUTO", "You spent <amount> at <merchant>"); same(spentSms.amountMinor, 10000L, "You spent amount"); same(spentSms.direction, "out", "You spent direction");
+        for (String summary : new String[]{"You've spent EGP 5,000 this month", "You have spent 3,200 EGP so far this week", "Total spent in October: EGP 12,000",
+                "You spent EGP 5,000 in October", "You spent 3,200 EGP so far this week"}) {
+            TransactionExtractor.Extraction x = run(summary, fawryReceived);
+            check(!"AUTO".equals(x.decision) && !"REVIEW".equals(x.decision) && x.amountMinor == null, "A spending summary is not recorded: " + summary + " " + x.decision);
+            check(MessageClassifier.classify(MessageNormalizer.normalize(MessageNormalizer.Raw.sms("x", summary))).reasons.contains("SPENDING_SUMMARY"), "Summary reason: " + summary);
+        }
+        for (String other : new String[]{"If you spend 100 EGP get 10% cashback", "\u0633\u064a\u062a\u0645 \u062e\u0635\u0645 100 \u062c\u0646\u064a\u0647 \u0645\u0646 \u062d\u0633\u0627\u0628\u0643 \u063a\u062f\u0627",
+                "\u062e\u0635\u0645 20% \u0639\u0644\u0649 \u0645\u0634\u062a\u0631\u064a\u0627\u062a\u0643 \u0628\u0642\u064a\u0645\u0629 500 \u062c\u0646\u064a\u0647"})
+            check(!"AUTO".equals(run(other, fawryReceived).decision), "Promo or reminder stays unrecorded: " + other);
+        same(run("Paid EGP 100 at X, total spent in October EGP 500", fawryReceived).amountMinor, 10000L, "A summary clause does not hide a real purchase");
         // Folding keeps a map to the original spelling, so the merchant surface keeps its letters.
         same(run("تم دفع 50 جنيه لدى \"مَكْتَبَة النور\"", received).merchantSurface, "مَكْتَبَة النور", "Surface keeps harakat");
 

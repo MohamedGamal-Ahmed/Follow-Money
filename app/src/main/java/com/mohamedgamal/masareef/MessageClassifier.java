@@ -68,6 +68,7 @@ final class MessageClassifier {
     private static final Pattern AMOUNT_STATEMENT = compile(ParsingPolicy.AMOUNT_STATEMENT);
     private static final Pattern HOLD_RELEASED = compile(ParsingPolicy.HOLD_RELEASED);
     private static final Pattern COMMITMENT = compile(ParsingPolicy.COMMITMENT);
+    private static final Pattern SPENDING_SUMMARY = compile(ParsingPolicy.SPENDING_SUMMARY);
 
     static Result classify(MessageNormalizer.Normalized message) {
         Set<String> reasons = new LinkedHashSet<>();
@@ -111,7 +112,9 @@ final class MessageClassifier {
         // One event per clause that pairs an amount with a completed verb, a refund, or a signed (+/-) amount.
         int elided = 0, bareAmounts = 0;
         boolean verbWithoutAmount = false;
-        for (String clause : clauses(text)) {
+        for (String rawClause : clauses(text)) {
+            // A spending summary phrase ("you've spent … this month") is never an event; the rest of the clause still counts.
+            String clause = SPENDING_SUMMARY.matcher(rawClause).replaceAll(" ");
             java.util.List<AmountScanner.Money> amounts = AmountScanner.scan(clause);
             // Conditional or future clauses ("will be charged next month") never describe a completed event.
             if (CONDITIONAL.matcher(clause).find() || FUTURE.matcher(clause).find()) continue;
@@ -132,6 +135,8 @@ final class MessageClassifier {
         }
         // A completion stated in one sentence and its amount in the next ("تم دفع طلب X بنجاح. المبلغ 725 جنيه") is one event.
         if (events == 0 && verbWithoutAmount && bareAmounts > 0) events = 1;
+        // "You've spent EGP 5,000 this month": a report of past spending, not a movement.
+        if (events == 0 && SPENDING_SUMMARY.matcher(text).find()) return result(Type.OTHER, reasons, 0, "SPENDING_SUMMARY");
         // Safety rule: after one completed event, a further "amount at merchant" clause is a second event, never ignored.
         if (events > 0) events += elided;
         boolean completed = events > 0 || COMPLETED_WITHOUT_AMOUNT.matcher(text).find();

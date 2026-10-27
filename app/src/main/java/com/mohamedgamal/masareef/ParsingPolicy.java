@@ -7,9 +7,9 @@ package com.mohamedgamal.masareef;
  * shared text helpers.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-29.2";
+    static final String POLICY_VERSION = "2026-10-29.3";
     static final String NORMALIZER_VERSION = "normalization-2";
-    static final String CLASSIFIER_VERSION = "classification-3";
+    static final String CLASSIFIER_VERSION = "classification-4";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
     static final String CORPUS_CONTRACT = "v2:3e51e960";
 
@@ -181,9 +181,23 @@ final class ParsingPolicy {
     /** First-person completed verbs, as payment apps write them ("لقد استلمت", "لقد أرسلت", "استلمت", "دفعت"). Owner test, 22 Oct 2026. */
     static final String FIRST_PERSON_IN = "(?<!\\p{L})(?:لقد\\s+)?استلمت(?!\\p{L})";
     static final String FIRST_PERSON_OUT = "(?<!\\p{L})(?:لقد\\s+)?(?:ارسلت|دفعت|حولت|سددت)(?!\\p{L})";
+    /**
+     * "Spent" as a completed card purchase (myFawry: "You spent 20.00 EGP with your yellowcard", "Debit - 20.00 was spent at
+     * KASHIER*BUTLERS"). Forms only, never the bare word: "was/has been spent at|in|on|with", and "you spent" with the
+     * amount right after the verb and a place word after it. A summary ("You've spent EGP 5,000 this month") is not one.
+     */
+    static final String SPENT_EVENT = "\\b(?:was|were) spent (?:at|in|on|with)\\b|\\bhas been spent (?:at|in|on)\\b|" +
+            "\\byou spent\\s+(?:" + CURRENCY_CODE + "\\s?\\d[\\d.,]*|\\d[\\d.,]*\\s?" + CURRENCY_CODE + "(?!\\p{L}))\\s+(?:at|with|on|in|using)\\b";
+    /**
+     * A spending summary: "spent" with a period, a running total or a possessive subject ("you've spent … this month",
+     * "total spent in October", "spent … so far"). Never a movement; wins over SPENT_EVENT in the same clause.
+     */
+    static final String SPENDING_SUMMARY = "\\b(?:you['’]ve|you have|total|overall|already) spent\\b|\\btotal (?:amount )?spent\\b|" +
+            "\\bspent\\b[^.\\n]{0,50}?\\b(?:this (?:month|week|year)|so far|today so far|in total|in the (?:last|past)|last (?:month|week|year)|during|over the|in (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\b|total)\\b|" +
+            "اجمالي (?:ال)?(?:انفاق|مصروفات|مصاريف)";
     static final String COMPLETED_EVENT = completion(FINANCIAL_NOUN) + "(?!\\s+(?:الاسعار|السعر))|(?<!\\p{L})بنجاح(?!\\p{L})|" + DEBT_SETTLEMENT + "|" +
             FIRST_PERSON_IN + "|" + FIRST_PERSON_OUT + "|" +
-            "\\b(?:paid|purchased|debited|deducted|credited|charged|received|transferred|deposited|withdrawn|sent|refunded|reversed|approved|posted)\\b|" +
+            "\\b(?:paid|purchased|debited|deducted|credited|charged|received|transferred|deposited|withdrawn|sent|refunded|reversed|approved|posted)\\b|" + SPENT_EVENT + "|" +
             REQUESTED_TRANSFER + "|" + "\\bcash withdrawal\\b|" + PURCHASE_ALERT + "|\\btransfer of (?=" + CURRENCY_CODE + " ?\\d)|\\bsuccessful(?:ly)?\\b|\\bcompleted\\b|\\bwas used (?:for|at|in)\\b|\\bthank(?:s| you) for (?:your )?(?:payment|paying)\\b|\\bdeposit(?:ed)? of\\b.{0,40}?\\b(?:was|has been|is)\\b|" + COMMITMENT + "|" +
             // Statement-style movement nouns name a completed transfer ("تحويل صادر 5,000 EGP").
             "تحويل (?:صادر|وارد)|حواله (?:صادره|وارده)|\\b(?:outgoing|incoming) (?:transfer|remittance)\\b";
@@ -252,7 +266,7 @@ final class ParsingPolicy {
             "تحويل وارد|حواله وارده|\\bincoming (?:transfer|remittance)\\b";
     /** Strong outgoing words: they beat the role of the user's account in the sentence. */
     static final String DIRECTION_OUT = completion("خصم|سحب|دفع|سداد|تسديد|شراء|ارسال") + "|" + FIRST_PERSON_OUT + "|" + DEBT_SETTLEMENT + "|(?<!\\p{L})(?:تم|تمت)\\s+شحن\\s+(?!(?:ال)?(?:محفظ|حساب|بطاق|كارت))|" +
-            "\\b(?:paid|paying|purchased|debited|deducted|charged|withdrawn|sent)\\b|\\bcash withdrawal\\b|\\bpayment of\\b|" +
+            "\\b(?:paid|paying|purchased|debited|deducted|charged|withdrawn|sent)\\b|" + SPENT_EVENT + "|\\bcash withdrawal\\b|\\bpayment of\\b|" +
             PURCHASE_ALERT + "|\\bpayment (?:completed|successful)\\b|تحويل صادر|حواله صادره|\\boutgoing (?:transfer|remittance)\\b|\\bwas used (?:for|at|in)\\b|" +
             "\\bpurchase (?:approved|completed|of)\\b|\\bcard\\b.{0,40}?\\b(?:had|made|completed) a successful\\b|\\bsuccessful (?:card )?(?:purchase|transaction|payment|withdrawal)\\b|" + REQUESTED_TRANSFER + "|" + COMMITMENT + "|" + ADJUSTED;
     /** Neutral transfer words: they decide only when no strong word and no account role does. */
