@@ -41,6 +41,9 @@ final class PipelineDecider {
         int notTransactions;
         Context(ExpenseDb db, String origin) { this.db = db; this.origin = origin; }
 
+        /** Loads the user's merchant rules and learning now (a re-read of kept messages decides without a request). */
+        void prepare() { load(); }
+
         private void load() {
             if (loaded) return;
             java.util.List<LocalLearning.MerchantRule> rules = new java.util.ArrayList<>();

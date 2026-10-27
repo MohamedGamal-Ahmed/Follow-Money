@@ -30,7 +30,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     static final String DATABASE_NAME = "masareef.db";
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
-    static final int SCHEMA_VERSION = 26;
+    static final int SCHEMA_VERSION = 27;
     private long readRevision=-1;
     private final java.util.Map<String,Object> readCache=new java.util.HashMap<>();
 
@@ -320,6 +320,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         }
         if(oldVersion==24)LedgerRevision.create(db);
         if(oldVersion<26)ShadowStore.create(db);
+        if(oldVersion<27)ShadowStore.ensureMissedColumns(db);
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
@@ -407,6 +408,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     }
     public boolean addSms(String sender, String body, long when) {
         return captureSms(sender, body, when).accepted;
+    }
+
+    /** Runs one prepared request through the live capture path (a suggestion the user registers). */
+    CaptureResult capture(CaptureRequest request) {
+        return capture.execute(request);
     }
 
     CaptureResult captureSms(String sender, String body, long when) {

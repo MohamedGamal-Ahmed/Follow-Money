@@ -144,6 +144,19 @@ public final class AuditStructureTest {
         check(support.contains("CaptureDiagnosticsReader.text(context)"), "support details include the capture state");
         String reader = read("app/src/main/java/com/mohamedgamal/masareef/CaptureDiagnosticsReader.java");
         check(!reader.contains("encrypted_body") && !reader.contains("decrypt("), "the diagnostics reader never opens a message text");
+        // 0.4.5: kept messages are read again once per version on the capture worker; the stored version is written only after a
+        // successful pass; a suggestion is registered through the live capture path and the re-read never writes the ledger.
+        String recovery = read("app/src/main/java/com/mohamedgamal/masareef/MissedRecovery.java");
+        String run = body(recovery, "static void runIfDue(Context context, Runnable whenDone)");
+        check(run.contains("CaptureQueue.submit(") && run.indexOf("CaptureQueue.submit(") < run.indexOf("reevaluateMissed("), "the re-read runs on the capture worker");
+        check(run.indexOf("reevaluateMissed(") < run.indexOf("putInt(VERSION_KEY"), "the version is stored only after the pass");
+        check(run.contains("catch (RuntimeException | LinkageError failure)"), "a failed pass never reaches the app");
+        check(body(recovery, "static MissedReevaluation.Outcome register(Context context, ShadowStore.Ununderstood message)").contains("db.capture("), "a suggestion registers through the live capture path");
+        String shadowStore = read("app/src/main/java/com/mohamedgamal/masareef/ShadowStore.java");
+        String reread = body(shadowStore, "static int reevaluateMissed(");
+        check(!reread.contains("transactions") && !reread.contains("insert(\"transactions\""), "the re-read never writes the ledger");
+        check(main.contains("MissedRecovery.runIfDue(this"), "the activity starts the re-read");
+        check(main.contains("\"recovered_messages_card\"") && main.contains("MissedRecovery.register(MainActivity.this, message)"), "the strip and the register button exist");
         System.out.println("Source structure checks passed: " + checked);
     }
 

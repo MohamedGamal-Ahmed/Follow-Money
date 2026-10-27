@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Persistent shadow storage (schema v26). Three tables, none tracked by LedgerRevision, so a write here never looks
+ * Persistent shadow storage (schema v26; v27 adds the capture key and recovery mark to ununderstood_messages). Three tables, none tracked by LedgerRevision, so a write here never looks
  * like a ledger change:
  * shadow_observations: one row per observed message, beside the legacy record it describes (transaction_id /
  * message_hash), with its delivery identity, content hash and ShadowDedupe verdict. Decision, reasons, score and kind
@@ -31,13 +31,27 @@ final class ShadowStore {
         sql.execSQL("CREATE INDEX IF NOT EXISTS shadow_identity ON shadow_observations(delivery_identity)");
         sql.execSQL("CREATE TABLE IF NOT EXISTS ununderstood_messages(message_hash TEXT PRIMARY KEY, first_seen INTEGER NOT NULL, " +
                 "last_seen INTEGER NOT NULL, seen_count INTEGER NOT NULL DEFAULT 1, channel TEXT NOT NULL, source TEXT, " +
-                "reasons TEXT NOT NULL, policy TEXT NOT NULL, encrypted_body TEXT)");
+                "reasons TEXT NOT NULL, policy TEXT NOT NULL, encrypted_body TEXT, source_key TEXT, recovered_at INTEGER)");
         sql.execSQL("CREATE TABLE IF NOT EXISTS learning_rules(rule_key TEXT PRIMARY KEY, kind TEXT NOT NULL, source TEXT, " +
                 "dismissed INTEGER NOT NULL DEFAULT 0, confirmed INTEGER NOT NULL DEFAULT 0, direction TEXT, " +
                 "conflicting INTEGER NOT NULL DEFAULT 0, merchant TEXT, category TEXT, updated_at INTEGER NOT NULL)");
     }
 
 
+    /**
+     * Schema 27 (0.4.5): the key a message is captured under (a notification's package, an SMS sender) and, once an update
+     * reads it again and would now record it, when. What was read is not stored: it is derived from the sealed text when
+     * shown, so nothing beyond encrypted_body holds an amount. Idempotent: a database upgraded from before 26
+     * already got the columns from create().
+     */
+    static void ensureMissedColumns(SQLiteDatabase sql) {
+        java.util.Set<String> have = new java.util.HashSet<>();
+        try (Cursor c = sql.rawQuery("PRAGMA table_info(ununderstood_messages)", null)) {
+            while (c.moveToNext()) have.add(c.getString(c.getColumnIndexOrThrow("name")));
+        }
+        if (!have.contains("source_key")) sql.execSQL("ALTER TABLE ununderstood_messages ADD COLUMN source_key TEXT");
+        if (!have.contains("recovered_at")) sql.execSQL("ALTER TABLE ununderstood_messages ADD COLUMN recovered_at INTEGER");
+    }
 
     /**
      * Stores one observation beside the ledger row it decided (transactionId, or null when it recorded nothing). The
@@ -221,8 +235,11 @@ final class ShadowStore {
     private static void rememberUnunderstood(SQLiteDatabase sql, MessageNormalizer.Raw raw, String hash, String source, ParserShadow.Observation o,
                                              long receivedAt, boolean replay) {
         String reasons = String.join(",", o.reasons);
+        String sourceKey = raw.source == null || raw.source.isEmpty() ? null : raw.source;
         try (Cursor c = sql.rawQuery("SELECT last_seen FROM ununderstood_messages WHERE message_hash=?", new String[]{hash})) {
             if (c.moveToFirst()) {
+                // A row kept by an older version has no key; this delivery names it.
+                if (sourceKey != null) sql.execSQL("UPDATE ununderstood_messages SET source_key=? WHERE message_hash=? AND source_key IS NULL", new Object[]{sourceKey, hash});
                 boolean newDelivery = !replay && Math.abs(receivedAt - c.getLong(0)) > ParsingPolicy.DUPLICATE_CANDIDATE_WINDOW_MS;
                 if (newDelivery) sql.execSQL("UPDATE ununderstood_messages SET last_seen=?, seen_count=seen_count+1, reasons=?, policy=? WHERE message_hash=?",
                         new Object[]{Math.max(receivedAt, c.getLong(0)), reasons, o.policy, hash});
@@ -235,6 +252,7 @@ final class ShadowStore {
         row.put("last_seen", receivedAt);
         row.put("channel", o.channel);
         row.put("source", source);
+        row.put("source_key", sourceKey);
         row.put("reasons", reasons);
         row.put("policy", o.policy);
         row.put("encrypted_body", EvidenceVault.encrypt(MessageNormalizer.normalize(raw).text));
@@ -256,7 +274,11 @@ final class ShadowStore {
     static final class Ununderstood {
         long firstSeen, lastSeen;
         int count;
-        String channel, source, reasons, text, hash;
+        String channel, source, reasons, text, hash, sourceKey;
+        /** Set when an update read the message again and would now record it. */
+        long recoveredAt;
+        boolean recovered() { return recoveredAt > 0; }
+        MissedReevaluation.Row row() { return new MissedReevaluation.Row(hash, channel, source, sourceKey, text, firstSeen, recoveredAt); }
     }
 
     /** Every kept message, newest first (at most UNUNDERSTOOD_MAX_ROWS are kept). */
@@ -264,16 +286,69 @@ final class ShadowStore {
 
     static List<Ununderstood> ununderstood(SQLiteDatabase sql, int limit) {
         List<Ununderstood> rows = new ArrayList<>();
-        try (Cursor c = sql.rawQuery("SELECT first_seen, last_seen, seen_count, channel, source, reasons, encrypted_body, message_hash FROM ununderstood_messages " +
-                "ORDER BY last_seen DESC LIMIT ?", new String[]{Integer.toString(limit)})) {
+        try (Cursor c = sql.rawQuery("SELECT first_seen, last_seen, seen_count, channel, source, reasons, encrypted_body, message_hash, source_key, recovered_at " +
+                "FROM ununderstood_messages ORDER BY last_seen DESC LIMIT ?", new String[]{Integer.toString(limit)})) {
             while (c.moveToNext()) {
                 Ununderstood u = new Ununderstood();
                 u.firstSeen = c.getLong(0); u.lastSeen = c.getLong(1); u.count = c.getInt(2); u.channel = c.getString(3);
                 u.source = c.getString(4); u.reasons = c.getString(5); u.text = EvidenceVault.decrypt(c.getString(6)); u.hash = c.getString(7);
+                u.sourceKey = c.getString(8); u.recoveredAt = c.isNull(9) ? 0 : c.getLong(9);
                 rows.add(u);
             }
         }
         return rows;
+    }
+
+    /** Messages an update read again and would now record, still waiting for the user (the home strip's count). */
+    static int recoveredCount(SQLiteDatabase sql) {
+        try (Cursor c = sql.rawQuery("SELECT COUNT(*) FROM ununderstood_messages WHERE recovered_at IS NOT NULL AND recovered_at>0 AND encrypted_body IS NOT NULL", null)) {
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        }
+    }
+
+    /** The row leaves the list without teaching anything: the ledger holds it now, or the user registered it. */
+    static void removeUnunderstood(SQLiteDatabase sql, String hash) {
+        sql.delete("ununderstood_messages", "message_hash=?", new String[]{hash});
+    }
+
+    /** What the current rules read from a recovered suggestion, for its card; null when it no longer reads (or has no key/text). */
+    static MissedReevaluation.Reading readingOf(Ununderstood message, long now) {
+        if (message.text == null || message.sourceKey == null) return null;
+        return MissedReevaluation.read(message.row(), message.sourceKey, now);
+    }
+
+    /**
+     * Reads every kept message again with the current rules (MissedReevaluation) and marks those it would now record:
+     * when, the key to capture it under, and . Nothing reaches the ledger. Returns how many.
+     * labels: the selected notification apps, package to label, for rows an older version kept without a key.
+     */
+    static int reevaluateMissed(SQLiteDatabase sql, java.util.Map<String, String> labels, LocalLearning learning, long now) {
+        List<MissedReevaluation.Row> rows = new ArrayList<>();
+        for (Ununderstood u : ununderstood(sql)) rows.add(u.row());
+        List<MissedReevaluation.Recovered> found = MissedReevaluation.reevaluate(rows, labels, learning, now);
+        for (MissedReevaluation.Recovered r : found) {
+            ContentValues row = new ContentValues();
+            row.put("recovered_at", now);
+            row.put("source_key", r.sourceKey);
+            sql.update("ununderstood_messages", row, "message_hash=? AND (recovered_at IS NULL OR recovered_at=0)", new String[]{r.hash});
+        }
+        return found.size();
+    }
+
+    /**
+     * A ledger row of the same amount and direction near the message's time (a hand entry, or the bank's SMS of the same
+     * operation). A hint shown on the suggestion; it never hides it.
+     */
+    static boolean possiblyRecorded(SQLiteDatabase sql, Ununderstood message, MissedReevaluation.Reading reading, java.time.ZoneId zone) {
+        if (reading == null) return false;
+        String kinds = "out".equals(reading.direction) ? "kind IN ('expense','transfer')" : "kind IN ('income','transfer')";
+        long day = 24L * 60 * 60 * 1000;
+        try (Cursor c = sql.rawQuery("SELECT occurred_at, time_precision FROM transactions WHERE amount_minor=? AND currency=? AND " + kinds + " AND occurred_at BETWEEN ? AND ?",
+                new String[]{Long.toString(reading.amountMinor), reading.currency, Long.toString(message.firstSeen - day), Long.toString(message.firstSeen + day)})) {
+            while (c.moveToNext())
+                if (MissedReevaluation.possiblyRecorded(message.firstSeen, c.getLong(0), "date_only".equals(c.getString(1)), zone)) return true;
+        }
+        return false;
     }
 
 

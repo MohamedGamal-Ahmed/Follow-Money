@@ -8,7 +8,7 @@ import android.os.Bundle;
 import java.util.List;
 
 /**
- * Shadow storage on a real Android runtime (isolated emulator app only): upgrade v25 → v26, live capture stores its
+ * Shadow storage on a real Android runtime (isolated emulator app only): upgrade v25 → v26 and v26 → v27 (0.4.5: kept messages get a source key and can come back after an update), live capture stores its
  * shadow row beside the ledger row without bumping the ledger revision, Keystore sealing, ununderstood text, dedupe
  * replay, the new pipeline deciding every message with legacy only on its failure and legacy guards noted, learning persistence, backup open/re-seal, and "delete all data".
  */
@@ -69,7 +69,7 @@ final class ShadowStoreTest {
             for (String table : new String[]{"shadow_observations", "ununderstood_messages", "learning_rules"}) sql.execSQL("DROP TABLE IF EXISTS " + table);
             sql.setVersion(25); db.close();
             db = new ExpenseDb(target); sql = db.getWritableDatabase();
-            check(sql.getVersion() == ExpenseDb.SCHEMA_VERSION && ExpenseDb.SCHEMA_VERSION == 26, "Schema upgraded to 26");
+            check(sql.getVersion() == ExpenseDb.SCHEMA_VERSION && ExpenseDb.SCHEMA_VERSION == 27, "Schema upgraded to 27");
             check(count(sql, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('shadow_observations','ununderstood_messages','learning_rules')") == 3,
                     "Upgrade from 25 creates the three shadow tables");
 
@@ -268,6 +268,57 @@ final class ShadowStoreTest {
             sql.execSQL("UPDATE payment_sources SET kind='بطاقة' WHERE id=" + telda);
             db.repairAll();
             check("تطبيق دفع".equals(db.paymentSource(telda).kind), "An older Telda card source becomes a payment app once: " + db.paymentSource(telda).kind);
+
+            // 11. 0.4.5 (schema 27). A message kept by this version names the key it is captured under; a database from 0.4.4
+            // (schema 26, no such column) upgrades without losing a row; an update reads the kept messages again and offers
+            // those it now records, without writing the ledger; registering one twice records it once.
+            check("QABANK".equals(ShadowStore.ununderstood(sql, 500).get(0).sourceKey), "A kept SMS names its sender as its key");
+            long nowM = System.currentTimeMillis(), seenM = nowM - 2 * 86_400_000L;
+            String fawryText = MessageNormalizer.normalize(MessageNormalizer.Raw.notification("com.fawry.myfawry", 0, "You spent 20.00 EGP with your yellowcard",
+                    "Debit - 20.00 was spent at KASHIER*BUTLERS", null, null, null, null)).text;
+            sql.execSQL("DROP TABLE ununderstood_messages");
+            sql.execSQL("CREATE TABLE ununderstood_messages(message_hash TEXT PRIMARY KEY, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, " +
+                    "seen_count INTEGER NOT NULL DEFAULT 1, channel TEXT NOT NULL, source TEXT, reasons TEXT NOT NULL, policy TEXT NOT NULL, encrypted_body TEXT)");
+            String[][] keptM = {{"hm-fawry", "NOTIFICATION", "myFawry", fawryText}, {"hm-mystery", "NOTIFICATION", "Mystery App", fawryText},
+                    {"hm-sms", "SMS", "QABANK", "Paid EUR 1.250 at Cafe Nine"}};
+            for (String[] k : keptM) {
+                android.content.ContentValues kept0 = new android.content.ContentValues();
+                kept0.put("message_hash", k[0]); kept0.put("first_seen", seenM); kept0.put("last_seen", seenM); kept0.put("channel", k[1]);
+                kept0.put("source", k[2]); kept0.put("reasons", "NO_COMPLETED_EVENT"); kept0.put("policy", "2026-10-29.2"); kept0.put("encrypted_body", EvidenceVault.encrypt(k[3]));
+                sql.insert("ununderstood_messages", null, kept0);
+            }
+            sql.setVersion(26); db.close();
+            db = new ExpenseDb(target); sql = db.getWritableDatabase();
+            check(sql.getVersion() == 27, "Schema 26 upgrades to 27");
+            check(count(sql, "SELECT COUNT(*) FROM pragma_table_info('ununderstood_messages') WHERE name IN ('source_key','recovered_at')") == 2, "The new columns exist");
+            check(count(sql, "SELECT COUNT(*) FROM ununderstood_messages") == 3 && count(sql, "SELECT COUNT(*) FROM ununderstood_messages WHERE source_key IS NULL AND recovered_at IS NULL") == 3,
+                    "Rows kept by 0.4.4 survive without a key and are not recovered");
+            check(ShadowStore.ununderstood(sql, 500).size() == 3 && ShadowStore.recoveredCount(sql) == 0, "They still list on the old page");
+            long ledgerM = db.transactionCount();
+            java.util.Map<String, String> selectedM = java.util.Collections.singletonMap("com.fawry.myfawry", "myFawry");
+            check(ShadowStore.reevaluateMissed(sql, selectedM, ParserShadow.learning(), nowM) == 1, "One of three kept messages is now understood");
+            check(db.transactionCount() == ledgerM, "Reading kept messages again never writes the ledger");
+            check(ShadowStore.recoveredCount(sql) == 1, "One suggestion waits");
+            ShadowStore.Ununderstood fawryRow = null;
+            for (ShadowStore.Ununderstood u : ShadowStore.ununderstood(sql, 500)) {
+                if ("hm-fawry".equals(u.hash)) fawryRow = u;
+                else check(!u.recovered(), "Other rows stay where they were: " + u.hash);
+            }
+            check(fawryRow != null && fawryRow.recovered() && "com.fawry.myfawry".equals(fawryRow.sourceKey), "The notification row got its package as key");
+            check(ShadowStore.reevaluateMissed(sql, selectedM, ParserShadow.learning(), nowM + 1000) == 0, "A second pass finds nothing new");
+            MissedReevaluation.Reading cardM = ShadowStore.readingOf(fawryRow, nowM);
+            check(cardM != null && cardM.amountMinor == 2000 && "EGP".equals(cardM.currency) && "out".equals(cardM.direction), "The suggestion reads 20.00 EGP out");
+            check(!ShadowStore.possiblyRecorded(sql, fawryRow, cardM, java.time.ZoneId.systemDefault()), "No ledger row of that amount near it: no duplicate hint");
+            long beforeM = db.transactionCount();
+            CaptureResult firstM = db.capture(MissedReevaluation.request(fawryRow.row(), fawryRow.sourceKey));
+            CaptureResult secondM = db.capture(MissedReevaluation.request(fawryRow.row(), fawryRow.sourceKey));
+            check(firstM.accepted && firstM.transaction != null && firstM.transaction.amountMinor == 2000 && db.transactionCount() == beforeM + 1,
+                    "Registering records the purchase through the live path: " + firstM.reason);
+            check(!secondM.accepted && db.transactionCount() == beforeM + 1, "Registering twice records once: " + secondM.reason);
+            check(MissedReevaluation.outcome(secondM.accepted, secondM.reason.name()) == MissedReevaluation.Outcome.ALREADY_RECORDED, "The second tap is an already-recorded outcome");
+            check(ShadowStore.possiblyRecorded(sql, fawryRow, cardM, java.time.ZoneId.systemDefault()), "Once recorded, the same suggestion shows the duplicate hint");
+            ShadowStore.removeUnunderstood(sql, fawryRow.hash);
+            check(ShadowStore.recoveredCount(sql) == 0, "The registered suggestion left the list");
 
             // 9. Delete all local data removes shadow data.
             db.clearAllData();

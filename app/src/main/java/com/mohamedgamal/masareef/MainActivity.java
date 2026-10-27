@@ -219,6 +219,8 @@ public final class MainActivity extends Activity {
         loadWhatsNew(readAsset("whats-new.txt"));
         updates = new InAppUpdate(this, () -> postUi(() -> { if (selectedTab == 0 && canRedrawNow()) render(); }));
         if (state == null) AppResources.read(() -> LocalBackup.removeLeftovers(this));
+        // Once per app version, off the UI thread: messages kept as «ما اتسجلتش» are read again with the current rules.
+        MissedRecovery.runIfDue(this, () -> postUi(() -> { if (selectedTab == 0 && canRedrawNow()) render(); }));
         boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
         introStep=state==null?0:Math.min(3,state.getInt("intro_step",0));
@@ -1679,6 +1681,24 @@ public final class MainActivity extends Activity {
             getSharedPreferences(APP_STATE, MODE_PRIVATE).edit().putInt(LAST_SEEN_VERSION, BuildConfig.VERSION_CODE).apply();
             whatsNew = null; render();
         });
+        row.addView(close);
+    }
+
+    /** 0.4.5: kept «ما اتسجلتش» messages the updated app now understands wait for review on the missed-messages page. */
+    private void recoveredCard() {
+        int count;
+        try { count = ShadowStore.recoveredCount(db.getReadableDatabase()); } catch (RuntimeException unavailable) { return; }
+        SharedPreferences state = getSharedPreferences(APP_STATE, MODE_PRIVATE);
+        if (count <= 0 || state.getBoolean(MissedRecovery.STRIP_HIDDEN_KEY, false)) return;
+        String many = count == 1 ? "رسالة" : count == 2 ? "رسالتين" : count <= 10 ? count + " رسائل" : count + " رسالة";
+        WrapRow row = homeStrip("recovered_messages_card");
+        TextView headline = label("التحديث الجديد فهم " + many + " كانت فاتتك ›", 12, INK, true);
+        headline.setMinHeight(dp(UiTheme.TOUCH)); headline.setGravity(Gravity.CENTER_VERTICAL);
+        headline.setOnClickListener(v -> { settingsSection = "missed"; selectedTab = 5; render(); });
+        row.addView(headline);
+        TextView close = label("✕", 16, MUTED, false); close.setGravity(Gravity.CENTER);
+        close.setContentDescription("إخفاء الرسائل المقترحة"); close.setMinWidth(dp(UiTheme.TOUCH)); close.setMinHeight(dp(UiTheme.TOUCH));
+        close.setOnClickListener(v -> { state.edit().putBoolean(MissedRecovery.STRIP_HIDDEN_KEY, true).apply(); render(); });
         row.addView(close);
     }
 
@@ -3268,6 +3288,7 @@ public final class MainActivity extends Activity {
 
         updateCard();
         whatsNewCard();
+        recoveredCard();
         // MVP home: one number, one period, one definition. The daily budget and points keep their data, dialogs,
         // widgets and settings entry («الميزانية اليومية والراتب», «ميزانياتك»); only their home card is off.
         if (HOME_SHOWS_DAILY_BUDGET) dailyHomeCard();
@@ -4874,10 +4895,28 @@ public final class MainActivity extends Activity {
      * (ShadowStore.missedFromBank, or not understood). Text redacted; report one as a misreading or dismiss it.
      */
     private void missedBankMessages() {
+        List<ShadowStore.Ununderstood> kept = ShadowStore.ununderstood(db.getReadableDatabase());
+        // 0.4.5: messages an update now reads as transactions come first, as suggestions the user registers or dismisses.
+        long now = System.currentTimeMillis();
+        List<ShadowStore.Ununderstood> suggested = new ArrayList<>();
+        List<MissedReevaluation.Reading> readings = new ArrayList<>();
+        Set<String> suggestedHashes = new HashSet<>();
+        for (ShadowStore.Ununderstood message : kept) {
+            if (!message.recovered() || message.text == null || message.hash == null) continue;
+            MissedReevaluation.Reading reading = ShadowStore.readingOf(message, now);
+            if (reading == null) continue;
+            suggested.add(message); readings.add(reading); suggestedHashes.add(message.hash);
+        }
+        if (!suggested.isEmpty()) {
+            section("اتفهمت بعد التحديث", null, null);
+            note("التحديث الجديد بقى يقرا الرسائل دي كعمليات. مش هتتسجل لوحدها: راجعها وسجّلها لو عملية فعلًا، أو تجاهلها.");
+            for (int i = 0; i < suggested.size(); i++) recoveredSuggestionCard(suggested.get(i), readings.get(i));
+            section("لسه مش مفهومة", null, null);
+        }
         note("رسائل من بنك أو تطبيق دفع فيها مبلغ والتطبيق ما سجّلهاش. لو كانت عملية فعلًا، بلّغ عنها عشان نصلّح قراءتها؛ لو مش عملية، تجاهلها. الأرقام والأسماء محجوبة.");
         int shown = 0;
-        for (ShadowStore.Ununderstood message : ShadowStore.ununderstood(db.getReadableDatabase())) {
-            if (message.text == null || message.hash == null) continue;
+        for (ShadowStore.Ununderstood message : kept) {
+            if (message.text == null || message.hash == null || suggestedHashes.contains(message.hash)) continue;
             shown++;
             String redacted = Redaction.text(message.text);
             LinearLayout box = card();
@@ -4891,7 +4930,48 @@ public final class MainActivity extends Activity {
                     new LinearLayout.LayoutParams(0, -2, 1));
             box.addView(actions);
         }
-        if (shown == 0) note("مفيش رسائل من بنوكك محتاجة مراجعة.");
+        if (shown == 0 && suggested.isEmpty()) note("مفيش رسائل من بنوكك محتاجة مراجعة.");
+    }
+
+    /** One suggestion: what the new reading found, the redacted text, a hint when the ledger may already hold it. */
+    private void recoveredSuggestionCard(ShadowStore.Ununderstood message, MissedReevaluation.Reading reading) {
+        LinearLayout box = card();
+        box.setTag("recovered_suggestion");
+        box.addView(label(message.source + " · " + Instant.ofEpochMilli(message.firstSeen).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL), 12, MUTED, false));
+        String summary = ("out".equals(reading.direction) ? "مصروف " : "دخل ") + money(reading.amountMinor, reading.currency) + (reading.merchant == null ? "" : " · " + reading.merchant);
+        TextView headline = label(summary, 15, INK, true); headline.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG); box.addView(headline);
+        TextView text = label(Redaction.text(message.text), 13, MUTED, false); text.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG); box.addView(text);
+        boolean maybeRecorded;
+        try { maybeRecorded = ShadowStore.possiblyRecorded(db.getReadableDatabase(), message, reading, ZoneId.systemDefault()); }
+        catch (RuntimeException unavailable) { maybeRecorded = false; }
+        if (maybeRecorded) box.addView(label("ممكن تكون متسجلة بالفعل", 12, ORANGE, true));
+        LinearLayout actions = new LinearLayout(this); actions.setPadding(0, dp(8), 0, 0);
+        actions.addView(ui.button("سجّلها", true, false, () -> registerSuggestion(message)), new LinearLayout.LayoutParams(0, -2, 1));
+        actions.addView(ui.button("تجاهل", false, false, () -> { ShadowStore.dismissUnunderstood(db.getWritableDatabase(), message, System.currentTimeMillis()); render(); }),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        box.addView(actions);
+    }
+
+    private final Set<String> registering = new HashSet<>();
+
+    /** «سجّلها»: through the live capture path on the capture worker; a second tap while it runs does nothing. */
+    private void registerSuggestion(ShadowStore.Ununderstood message) {
+        if (!registering.add(message.hash)) return;
+        CaptureQueue.submit(() -> {
+            MissedReevaluation.Outcome outcome;
+            try { outcome = MissedRecovery.register(MainActivity.this, message); }
+            catch (RuntimeException failure) { outcome = MissedReevaluation.Outcome.NOT_RECORDED; }
+            final MissedReevaluation.Outcome done = outcome;
+            postUi(() -> {
+                registering.remove(message.hash);
+                toast(done == MissedReevaluation.Outcome.RECORDED ? "اتسجلت العملية"
+                        : done == MissedReevaluation.Outcome.ALREADY_RECORDED ? "العملية دي متسجلة بالفعل"
+                        : done == MissedReevaluation.Outcome.EXCLUDED ? "كنت حذفت العملية دي قبل كده فما اتسجلتش"
+                        : "ما اتسجلتش. لو عملية فعلًا، بلّغ عنها من القائمة تحت.");
+                if (done == MissedReevaluation.Outcome.RECORDED) invalidateLedger();
+                render();
+            });
+        });
     }
 
     private LinearLayout cardStrip(ExpenseDb.PaymentSource source) {
