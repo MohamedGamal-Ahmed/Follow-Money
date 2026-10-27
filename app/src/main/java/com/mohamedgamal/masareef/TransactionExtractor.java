@@ -423,10 +423,11 @@ final class TransactionExtractor {
     private static final Pattern ATM_TERMINAL = Pattern.compile(ParsingPolicy.ATM_TERMINAL_SHAPE, FLAGS);
 
     private static void setMerchant(Folded f, Extraction x, int start, int end) {
-        // Codes only, for a round EGP amount: an ATM, not a merchant (it is a cash withdrawal, so no merchant is missing).
-        if (ATM_TERMINAL.matcher(f.text.substring(start, end).trim()).matches() && "EGP".equals(x.currency) &&
-                x.amountMinor != null && x.amountMinor > 0 && x.amountMinor % ParsingPolicy.ATM_ROUND_MINOR == 0) {
-            x.reasons.add("ATM_TERMINAL"); return;
+        // Code-only shape suggests cash, but never proves it. Keep its original merchant for review/correction.
+        if ("out".equals(x.direction) && ATM_TERMINAL.matcher(f.text.substring(start, end).trim()).matches() && "EGP".equals(x.currency) &&
+                x.amountMinor != null && x.amountMinor > 0 && x.amountMinor % ParsingPolicy.ATM_ROUND_MINOR == 0 &&
+                !MOVEMENT_CASH.matcher(f.text).find()) {
+            x.reasons.add("ATM_TERMINAL");
         }
         x.merchantSurface = f.display(start, end).trim();
         x.merchantKey = MerchantNormalizer.key(x.merchantSurface);

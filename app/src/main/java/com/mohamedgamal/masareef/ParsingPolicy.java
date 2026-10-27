@@ -7,7 +7,7 @@ package com.mohamedgamal.masareef;
  * shared text helpers.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-29.1";
+    static final String POLICY_VERSION = "2026-10-29.2";
     static final String NORMALIZER_VERSION = "normalization-2";
     static final String CLASSIFIER_VERSION = "classification-3";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
@@ -296,9 +296,11 @@ final class ParsingPolicy {
     /**
      * An ATM named only by codes, with no ATM wording: a terminal id (letters then digits) and one or two short bank or
      * location codes ("على BRKN0123 BRKA", another bank's machine on a Banque Misr card). Shape, not a list of banks
-     * (owner, 26 Oct 2026). Applies only with a round EGP amount (ATM_ROUND_MINOR), so a coded shop charge stays a purchase.
+     * (owner, 26 Oct 2026). Requires a round EGP amount (ATM_ROUND_MINOR). A location/retail word alone is not an
+     * acquirer code, and x letters are not terminal digits: otherwise ordinary coded purchases would become cash.
      */
-    static final String ATM_TERMINAL_SHAPE = "[a-z]{2,6}[\\d#*x]{3,}(?:\\s+[a-z]{2,5}){1,2}";
+    static final String ATM_TERMINAL_SHAPE = "[a-z]{2,6}[\\d#*]{3,}\\s+" +
+            "(?!(?:cairo|giza|alex|eg|egypt|store|shop)(?:\\s|$))[a-z]{2,5}(?:\\s+[a-z]{2,5})?";
     /** ATMs pay out notes: a withdrawal is a whole multiple of 50 EGP. */
     static final long ATM_ROUND_MINOR = 5000;
     static final String MOVEMENT_CASH ="\\batm\\d*\\b|صراف|سحب نقدي|\\bcash withdrawal\\b|(?<!\\p{L})ماكينه|(?<!\\p{L})اله (?:رقم|صراف)";
@@ -382,7 +384,7 @@ final class ParsingPolicy {
             "NON_POSITIVE_AMOUNT", "AMBIGUOUS_DIRECTION"};
     /** Any of these caps the decision at REVIEW: the user must confirm ownership, expiry, merchant or direction. */
     static final String[] REVIEW_CAPS = {"TRANSFER_REQUESTED", "CURRENCY_INFERRED", "PAYER_UNKNOWN", "POSSIBLE_INTERNAL_TRANSFER", "EXPIRING_CREDIT", "MISSING_MERCHANT", "INFERRED_OUTGOING_DIRECTION",
-            "UNASSIGNED_SECOND_AMOUNT", "COMMITMENT_EVENT", "RETAINED_FEE", "ADJUSTED_EVENT"};
+            "UNASSIGNED_SECOND_AMOUNT", "COMMITMENT_EVENT", "RETAINED_FEE", "ADJUSTED_EVENT", "ATM_TERMINAL"};
 
     // Local learning (stage 5): on-device only, from the user's own actions; never uploaded.
     static final String LEARNING_VERSION = "learning-1";

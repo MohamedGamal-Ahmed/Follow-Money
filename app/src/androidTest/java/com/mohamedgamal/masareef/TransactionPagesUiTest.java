@@ -169,8 +169,43 @@ final class TransactionPagesUiTest {
             // A long English name with an InstaPay chip and a review note: chips and time wrap whole, never mid-word.
             ok(db.addManualEntry(System.currentTimeMillis()-60000,90333,"EGP","International Trading Company Limited Cairo@instapay","بقالة",to,"expense",null,null),"Long InstaPay row saved");
             db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{db.latestInserted().id});
+            // Separate regression: the review chip is wider than the time at 320dp / 200%.
+            ok(db.addManualEntry(System.currentTimeMillis()-30000,90333,"EGP","QA Pending Transfer",MoneyFlow.OPEN_TRANSFER_CATEGORY,to,"expense",null,null),"Long review chip fixture saved");
+            db.getWritableDatabase().execSQL("UPDATE transactions SET needs_review=1 WHERE id=?",new Object[]{db.latestInserted().id});
             main(()->{invoke("resetTransactionFilters",new Class<?>[0]);set("transactionSearch","");set("transactionPeriod",null);set("bulkMode",false);set("selectedTab",6);invoke("render",new Class<?>[0]);});
             main(()->ok(TransactionRowChecks.verify(root(),this::ok)>=4,"Transaction row chips and times checked"));screen("07-rows");
+            // Exercise the actual row at constrained widths: a chip may fit the full row but not beside the amount.
+            final ExpenseDb.Transaction chipProbe=db.latestInserted();
+            main(()->{
+                for(int widthDp:new int[]{240,280,320}){
+                    android.widget.LinearLayout probe=new android.widget.LinearLayout(activity);probe.setOrientation(1);
+                    probe.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                    invoke("transactionRow",new Class<?>[]{android.widget.LinearLayout.class,ExpenseDb.Transaction.class,boolean.class},probe,chipProbe,false);
+                    int width=Math.round(widthDp*activity.getResources().getDisplayMetrics().density);
+                    probe.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));
+                    probe.layout(0,0,width,probe.getMeasuredHeight());
+                    ok(TransactionRowChecks.verify(probe,this::ok)>=3,"Long review chip measured at "+widthDp+"dp");
+                }
+            });
+            // Code-only cash suggestion: original merchant, one-tap confirmation, and a purchase correction route.
+            String atmBody="شكرًا لاستخدامك بطاقة بنك مصر *2222 ، تم الآن خصم EGP 500.00 على BRKN0123 BRKA يوم 24/10/2026";
+            CaptureResult capture=db.captureSms("Banque Misr",atmBody,System.currentTimeMillis());
+            ok(capture.transaction!=null&&capture.transaction.needsReview,"Code-only terminal is saved for review");
+            long atmId=capture.transaction.id;long countBeforeConfirm=db.transactionCount();
+            ExpenseDb.Transaction pendingAtm=db.transactionById(atmId);
+            ok("BRKN0123 BRKA".equals(pendingAtm.merchant)&&MoneyFlow.CASH_WITHDRAWAL_CATEGORY.equals(pendingAtm.category),"Original name with prepared cash proposal");
+            main(()->{set("selectedTransaction",pendingAtm);set("selectedTab",10);invoke("render",new Class<?>[0]);});
+            main(()->{View confirm=root().findViewWithTag("confirm_atm_suggestion");ok(confirm!=null,"One-tap cash proposal action exists");confirm.performClick();});
+            ExpenseDb.Transaction confirmedAtm=db.transactionById(atmId);
+            ok(!confirmedAtm.needsReview&&confirmedAtm.amountMinor==50000&&"EGP".equals(confirmedAtm.currency)&&"BRKN0123 BRKA".equals(confirmedAtm.merchant),"One tap confirms without changing name, amount or currency");
+            ok(db.transactionCount()==countBeforeConfirm,"Confirmation never inserts a second transaction");
+            CaptureResult nextCapture=db.captureSms("Banque Misr",atmBody.replace("500.00","1000.00"),System.currentTimeMillis()+1000);
+            ok(nextCapture.transaction!=null&&nextCapture.transaction.needsReview,"Confirmation does not enable future automatic terminal learning");
+            ExpenseDb.Transaction toPurchase=nextCapture.transaction;
+            main(()->invoke("editTransactionDialog",new Class<?>[]{ExpenseDb.Transaction.class},toPurchase));
+            pageClick(MoneyFlow.CASH_WITHDRAWAL_CATEGORY);click("بقالة");submit();
+            ExpenseDb.Transaction corrected=db.transactionById(toPurchase.id);
+            ok("بقالة".equals(corrected.category)&&"BRKN0123 BRKA".equals(corrected.merchant)&&corrected.amountMinor==100000,"User can change cash proposal to purchase without losing original name or money");
             result.putString("stream","Transaction pages checks passed: "+checks+"; failed: 0; dark="+dark+"; fontScale="+scale+"\nCaptures: "+captures+"\n");
         }catch(Throwable error){status=0;try{screen("failure");}catch(Exception ignored){}java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));result.putString("stream","Transaction pages FAILED: "+trace);}
         finally{try{if(activity!=null)main(()->activity.finish());if(db!=null){db.clearAllData();db.close();}}catch(Exception e){status=0;result.putString("stream",result.getString("stream","")+e);}runner.finish(status,result);}
