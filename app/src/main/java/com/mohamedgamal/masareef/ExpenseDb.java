@@ -30,7 +30,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     static final String DATABASE_NAME = "masareef.db";
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
-    static final int SCHEMA_VERSION = 27;
+    static final int SCHEMA_VERSION = 28;
     private long readRevision=-1;
     private final java.util.Map<String,Object> readCache=new java.util.HashMap<>();
 
@@ -321,6 +321,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if(oldVersion==24)LedgerRevision.create(db);
         if(oldVersion<26)ShadowStore.create(db);
         if(oldVersion<27)ShadowStore.ensureMissedColumns(db);
+        if(oldVersion<28)CommitmentPayments.allowSplitPayments(db);
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
@@ -2306,6 +2307,9 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     LocalDate suggestedCommitmentCycle(long id,long transactionId){return commitmentPayments.suggestedCycle(id,transactionId);}
     CommitmentPayments.AllocationPreview commitmentPaymentPreview(long id,LocalDate due,long transactionId){return commitmentPayments.preview(id,due,transactionId);}
     long linkCommitmentPayment(CommitmentPayments.AllocationPreview preview,long amount){return commitmentPayments.link(preview,amount);}
+    int linkCommitmentPayments(CommitmentPayments.AllocationPreview preview,List<LocalDate> dues){return commitmentPayments.linkMany(preview,dues);}
+    List<CommitmentPayments.Cycle> openCommitmentCycles(long id,LocalDate from,int limit){return commitmentPayments.openCyclesFrom(id,from,limit);}
+    long commitmentAllocated(long transactionId){return commitmentPayments.allocatedByTransaction(rowIdentityKey(transactionId));}
     List<Transaction> commitmentPaymentCandidates(LocalDate due){return commitmentPayments.candidates(due);}
     String commitmentIdentity(long id){return commitmentPayments.key(id);}
     boolean confirmCommitmentCycle(long id,LocalDate due,String key,LocalDate day){return commitmentPayments.confirmCycle(id,due,key,day);}

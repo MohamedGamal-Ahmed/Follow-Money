@@ -69,7 +69,7 @@ final class ShadowStoreTest {
             for (String table : new String[]{"shadow_observations", "ununderstood_messages", "learning_rules"}) sql.execSQL("DROP TABLE IF EXISTS " + table);
             sql.setVersion(25); db.close();
             db = new ExpenseDb(target); sql = db.getWritableDatabase();
-            check(sql.getVersion() == ExpenseDb.SCHEMA_VERSION && ExpenseDb.SCHEMA_VERSION == 27, "Schema upgraded to 27");
+            check(sql.getVersion() == ExpenseDb.SCHEMA_VERSION && ExpenseDb.SCHEMA_VERSION == 28, "Schema upgraded to 28");
             check(count(sql, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('shadow_observations','ununderstood_messages','learning_rules')") == 3,
                     "Upgrade from 25 creates the three shadow tables");
 
@@ -289,7 +289,7 @@ final class ShadowStoreTest {
             }
             sql.setVersion(26); db.close();
             db = new ExpenseDb(target); sql = db.getWritableDatabase();
-            check(sql.getVersion() == 27, "Schema 26 upgrades to 27");
+            check(sql.getVersion() == ExpenseDb.SCHEMA_VERSION, "Schema 26 upgrades to the current schema");
             check(count(sql, "SELECT COUNT(*) FROM pragma_table_info('ununderstood_messages') WHERE name IN ('source_key','recovered_at')") == 2, "The new columns exist");
             check(count(sql, "SELECT COUNT(*) FROM ununderstood_messages") == 3 && count(sql, "SELECT COUNT(*) FROM ununderstood_messages WHERE source_key IS NULL AND recovered_at IS NULL") == 3,
                     "Rows kept by 0.4.4 survive without a key and are not recovered");

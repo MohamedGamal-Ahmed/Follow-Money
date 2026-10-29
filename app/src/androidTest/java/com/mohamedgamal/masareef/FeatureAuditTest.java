@@ -98,6 +98,32 @@ final class FeatureAuditTest {
         db.linkCommitmentPayment(reviewed,due,partial,6000);
         eq("مطاعم",db.transactionById(partial).category);
     }
+    /** Owner, 29 Oct 2026: one transfer pays several installments; the payment's own amount caps what it can cover. */
+    public void testOnePaymentCoversSeveralInstallments(){
+        LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due),t=at(due);
+        ok(db.addManual(t,25000,"EGP","QA OTHER NAME","أقساط"));long tx=db.latestInserted().id;
+        eq(2,db.recurringById(plan).paidCount);
+        CommitmentPayments.AllocationPreview preview=db.commitmentPaymentPreview(plan,due,tx);
+        eq(10000,preview.max);eq(25000,preview.available);
+        java.util.List<CommitmentPayments.Cycle> open=db.openCommitmentCycles(plan,due,3);eq(3,open.size());ok(open.get(0).due.equals(due));
+        eq(2,db.linkCommitmentPayments(preview,java.util.Arrays.asList(open.get(1).due,open.get(0).due)));
+        eq(4,db.recurringById(plan).paidCount);eq(20000,db.commitmentAllocated(tx));
+        eq(1,db.transactionCount());
+        // 5,000 is still free: the payment stays a candidate and pays part of the next cycle, never more than it has.
+        LocalDate third=db.recurringById(plan).nextDue;
+        ok(db.commitmentPaymentCandidates(due).stream().anyMatch(c->c.id==tx));
+        CommitmentPayments.AllocationPreview rest=db.commitmentPaymentPreview(plan,third,tx);
+        eq(5000,rest.max);eq(5000,rest.available);
+        try{db.linkCommitmentPayment(rest,6000);throw new AssertionError("Payment over-allocated");}catch(IllegalArgumentException expected){}
+        db.linkCommitmentPayment(rest,5000);eq(25000,db.commitmentAllocated(tx));
+        ok(db.commitmentPaymentCandidates(due).stream().noneMatch(c->c.id==tx));
+        eq(5000,db.commitmentCycles(plan).get(2).remaining());eq(4,db.recurringById(plan).paidCount);
+        // Undoing one cycle frees exactly its part.
+        ok(db.undoCommitmentPayment(db.commitmentPayments(plan).get(0).id));eq(20000,db.commitmentAllocated(tx));
+        eq(10000,CommitmentPayments.split(25000,new long[]{10000,10000,10000})[1]);
+        eq(5000,CommitmentPayments.split(25000,new long[]{10000,10000,10000})[2]);
+        eq(0,CommitmentPayments.split(5000,new long[]{10000,10000})[1]);
+    }
     public void testReviewedAutomaticTransferClassificationAndFailureAreAtomic(){
         LocalDate due=LocalDate.of(2026,10,31);long plan=paymentPlan(due);
         ok(db.addHistoricalSms(SmsPreview.parse("BANK","Card purchase EGP 60 at QA provider",at(due))));

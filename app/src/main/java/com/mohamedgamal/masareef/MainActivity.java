@@ -5604,7 +5604,7 @@ public final class MainActivity extends Activity {
             components.caption("١ · دورة الاستحقاق",body);
             EditText due=dateField("دورة الاستحقاق","due",body);
             due.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void afterTextChanged(Editable s){}
-                public void onTextChanged(CharSequence s,int a,int b,int c){if(draft.getBoolean("searched")){draft.putBoolean("searched",false);draft.putBoolean("show_all",false);draft.putLong("transaction",-1);formPages.rebuild();}}});
+                public void onTextChanged(CharSequence s,int a,int b,int c){if(draft.getBoolean("searched")){draft.putBoolean("searched",false);draft.putBoolean("show_all",false);draft.putLong("transaction",-1);draft.remove("dues");formPages.rebuild();}}});
             body.addView(components.label("اختار دورة من الجدول؛ هنجيب العمليات المسجلة في الشهر المحيط بها.",UiTheme.CAPTION,MUTED));
             if(!draft.getBoolean("searched")){
                 LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(10);
@@ -5636,7 +5636,7 @@ public final class MainActivity extends Activity {
                 option.setTypeface(REGULAR);option.setTextSize(UiTheme.BODY);option.setTextColor(INK);option.setMinHeight(dp(UiTheme.TOUCH));
                 option.setPadding(dp(8),dp(8),dp(8),dp(8));
                 option.setButtonTintList(ColorStateList.valueOf(ACCENT));option.setChecked(tx.id==draft.getLong("transaction"));
-                option.setOnClickListener(v->{if(draft.getLong("transaction")==tx.id)return;draft.putLong("transaction",tx.id);draft.putString("amount","");formPages.rebuild();});
+                option.setOnClickListener(v->{if(draft.getLong("transaction")==tx.id)return;draft.putLong("transaction",tx.id);draft.putString("amount","");draft.remove("dues");formPages.rebuild();});
                 group.addView(option);
             }
             if(!showAll&&!rest.isEmpty())
@@ -5645,7 +5645,40 @@ public final class MainActivity extends Activity {
             if(chosen>=0){
                 try{preview=db.commitmentPaymentPreview(item.id,selected,chosen);}
                 catch(IllegalArgumentException changed){body.addView(components.label("الدورة مش متاحة بنفس العملة أو العملية اتغيرت؛ راجع الاختيار",UiTheme.BODY,CORAL));}
-                if(preview!=null){
+                if(preview!=null&&preview.available>preview.max){
+                    // Owner, 29 Oct 2026: one transfer often pays two or three installments at once. The payment is
+                    // bigger than this cycle needs, so the user ticks every installment it covers.
+                    components.caption("٣ · الدفعة دي بتغطي أنهي أقساط؟",body);
+                    body.addView(components.label(preview.transaction.merchant+" · "+money(preview.transaction.amountMinor,preview.transaction.currency),UiTheme.BODY,INK));
+                    List<CommitmentPayments.Cycle> open=db.openCommitmentCycles(item.id,selected,12);
+                    ArrayList<String> ticked=draft.getStringArrayList("dues");
+                    if(ticked==null){
+                        ticked=new ArrayList<>();long left=preview.available;
+                        for(CommitmentPayments.Cycle cycle:open){if(left<=0)break;ticked.add(cycle.due.toString());left-=cycle.remaining();}
+                        draft.putStringArrayList("dues",ticked);
+                    }
+                    List<CommitmentPayments.Cycle> covered=new ArrayList<>();
+                    for(CommitmentPayments.Cycle cycle:open){
+                        android.widget.CheckBox box=new android.widget.CheckBox(MainActivity.this);box.setSaveEnabled(false);
+                        box.setText("\u2068"+dayLabel(cycle.due)+"\u2069 · \u2068"+money(cycle.remaining(),cycle.currency)+"\u2069");
+                        box.setTypeface(REGULAR);box.setTextSize(UiTheme.BODY);box.setTextColor(INK);box.setMinHeight(dp(UiTheme.TOUCH));
+                        box.setButtonTintList(ColorStateList.valueOf(ACCENT));box.setChecked(ticked.contains(cycle.due.toString()));
+                        final ArrayList<String> list=ticked;
+                        box.setOnClickListener(v->{if(box.isChecked()){if(!list.contains(cycle.due.toString()))list.add(cycle.due.toString());}else list.remove(cycle.due.toString());formPages.rebuild();});
+                        body.addView(box);
+                        if(box.isChecked())covered.add(cycle);
+                    }
+                    long[] needs=new long[covered.size()];for(int i=0;i<needs.length;i++)needs[i]=covered.get(i).remaining();
+                    long[] split=CommitmentPayments.split(preview.available,needs);long used=0,missing=0;
+                    for(int i=0;i<split.length;i++){used+=split[i];missing+=needs[i]-split[i];}
+                    String summary=covered.isEmpty()?"اختار قسط واحد على الأقل":
+                            "هتتربط "+covered.size()+" أقساط بـ "+money(used,preview.currency)+
+                            (missing>0?"\nآخر قسط هيفضل عليه "+money(missing,preview.currency):"")+
+                            (preview.available>used?"\nيفضل من الدفعة "+money(preview.available-used,preview.currency)+" مش مربوط":"");
+                    body.addView(components.label(summary,UiTheme.CAPTION,MUTED));
+                    body.addView(components.label("الربط يستخدم العملية الحالية ولا يضيف مصروفًا.",UiTheme.CAPTION,MUTED));
+                }
+                else if(preview!=null){
                     components.caption("٣ · راجع ربط الدفعة",body);
                     body.addView(components.label(preview.transaction.merchant+" · "+money(preview.transaction.amountMinor,preview.transaction.currency)+"\nدورة "+preview.due+" · المطلوب "+money(preview.expected,preview.currency),UiTheme.BODY,INK));
                     if(text("amount").isEmpty())draft.putString("amount",minorText(preview.max));
@@ -5659,6 +5692,13 @@ public final class MainActivity extends Activity {
         @Override String saveLabel(){return "اعتماد الربط";}
         @Override boolean save(){
             if(preview==null)return fail(draft.getBoolean("searched")?"اختار الدفعة اللي تخص الالتزام":"اختار الدورة واضغط «اختار العملية»",null);
+            if(preview.available>preview.max){
+                ArrayList<String> ticked=draft.getStringArrayList("dues");
+                if(ticked==null||ticked.isEmpty())return fail("اختار قسط واحد على الأقل",null);
+                List<LocalDate> dues=new ArrayList<>();for(String due:ticked)dues.add(LocalDate.parse(due));
+                CommitmentPayments.AllocationPreview approved=preview;boolean learn=draft.getBoolean("learn");
+                return submit(()->{db.linkCommitmentPayments(approved,dues);if(learn)db.learnCommitmentMerchant(approved.commitmentId,approved.transaction.merchant);return true;});
+            }
             if(ExpenseParser.manualAmountMisread(text("amount")))return fail("راجع المبلغ","amount");
             long minor=ExpenseParser.parseMinor(ExpenseParser.normalizeDigits(text("amount")));
             if(minor<=0||minor>preview.max)return fail("اكتب مبلغًا موجبًا لحد المبلغ المتاح","amount");
