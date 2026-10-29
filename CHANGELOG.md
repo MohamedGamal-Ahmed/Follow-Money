@@ -1,6 +1,6 @@
 # Change log
 
-## Unreleased — 29 October 2026
+## 0.4.5 — 29 October 2026 (versionCode 15, schema 28)
 
 From an owner report (salary month, HSBC → Banque Misr transfer, credit-card repayment).
 
@@ -12,7 +12,7 @@ From an owner report (salary month, HSBC → Banque Misr transfer, credit-card r
 - Tests: `FeatureAuditTest.testOnePaymentCoversSeveralInstallments`; `ShadowStoreTest` expects schema 28.
 - Tests: `CaptureNoticeTest` card-deposit cases, `MerchantClassificationTest` provider logos/category, `FeatureAuditTest.testOwnNameTransferAndCardRepaymentLegsAreNeitherIncomeNorSpending` (emulator).
 
-## 0.4.5 — 27 October 2026 (versionCode 15, schema 27)
+Also in 0.4.5 (27 October):
 
 From an owner-phone report (Honor, myFawry yellowcard purchases not recorded).
 
