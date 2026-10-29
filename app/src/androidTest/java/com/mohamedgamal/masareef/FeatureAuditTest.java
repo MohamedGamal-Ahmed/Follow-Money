@@ -1186,7 +1186,7 @@ final class FeatureAuditTest {
         ok(MoneyFlow.bucket(own.kind, own.category) == MoneyFlow.Bucket.INTERNAL);
 
         // The bank's debit names no card digits: the only credit card is the destination, no review needed.
-        int before = db.transactionCount();
+        long before = db.transactionCount();
         ok(db.addSms("QA Bank", "تم تحويل مبلغ 3218EGP      من حساب رقم xxx1111      الى كارت ائتمان / مسبق الدفع فى " + mon, t + 60_000));
         ExpenseDb.Transaction debit = db.lastCaptured();
         eq("expense", debit.kind); eq(321800L, debit.amountMinor); ok(!debit.needsReview);
