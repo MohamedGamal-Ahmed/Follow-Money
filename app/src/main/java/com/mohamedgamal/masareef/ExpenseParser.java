@@ -667,12 +667,23 @@ public final class ExpenseParser {
         return name.length() > 45 ? name.substring(0, 45).trim() : name;
     }
 
+    /** Egyptian installment / BNPL providers a merchant name can be (owner list, 29 Oct 2026). Whole name or name + suffix only. */
+    private static final String[] INSTALLMENT_PROVIDERS = {"valu", "فاليو", "souhoola", "sohoula", "سهولة", "سهوله", "premium card", "premiumcard",
+            "بريميوم كارد", "بريميم كارد", "halan", "mnt halan", "mnt-halan", "حالا", "contact", "contact credit", "كونتكت", "كونتاكت", "sympl", "سيمبل", "سمبل",
+            "mogo", "موجو", "moneyfellows", "money fellows", "موني فيلوز", "ماني فيلوز", "seven", "سيفن", "forsa", "فرصة", "فرصه", "takka", "تكة", "تكه"};
+
+    static boolean installmentProvider(String lowerName) {
+        String value = lowerName == null ? "" : lowerName.trim();
+        for (String name : INSTALLMENT_PROVIDERS) if (value.equals(name) || value.startsWith(name + " ")) return true;
+        return false;
+    }
+
     static String category(String merchant) {
         String known = MerchantClassifier.category(merchant);
         if (known != null) return known;
         if (merchant == null) return "غير مصنف";
         String value = merchant.toLowerCase(Locale.ROOT);
-        if (value.equals("tru") || value.equals("ترو")) return "أقساط";
+        if (value.equals("tru") || value.equals("ترو") || installmentProvider(value)) return "أقساط";
         if (value.contains("vodafone") || value.contains("فودافون")) return "فواتير";
         if (value.contains("atm") || value.contains("سحب نقدي")) return "سحب نقدي";
         if (value.contains("claude") || value.contains("anthropic") || value.contains("truecaller") || value.contains("onedrive") ||

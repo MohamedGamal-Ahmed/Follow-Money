@@ -738,7 +738,7 @@ public final class MainActivity extends Activity {
                 setting("تطبيقات الدفع والإشعارات",this::chooseNotificationApps);
                 note("العمليات المسجلة تفضل محفوظة بعد مسح الإشعار. لو عملية ما ظهرتش، سيب إشعارها ظاهر وافتح Follow Money لإعادة فحص إشعارات التطبيقات المختارة؛ الإشعارات الممسوحة قبل التقاطها مش متاحة للاسترجاع.");
                 setting(hasNotificationAccess()?"الوصول للإشعارات: مفعل":"تفعيل الوصول للإشعارات",this::openNotificationSettings);
-                setting("حساباتك على إنستاباي",this::ownHandlesDialog);
+                setting("حساباتك واسمك في التحويلات",this::ownHandlesDialog);
                 setting("قواعد التجار والتصنيف",()->{selectedTab=7;render();});
                 setting("رسائل من بنوكك ما اتسجلتش",()->{settingsSection="missed";render();});
                 break;
@@ -872,7 +872,7 @@ public final class MainActivity extends Activity {
         all.add(new SettingEntry("استيراد رسائل SMS القديمة", "sms import messages bank رسائل البنك", "capture", "استيراد رسائل SMS"));
         all.add(new SettingEntry("تطبيقات الدفع والإشعارات", "payment apps notifications instapay", "capture", "تطبيقات الدفع"));
         all.add(new SettingEntry("الوصول للإشعارات", "notification access listener إذن", "capture", hasNotificationAccess() ? "الوصول للإشعارات" : "تفعيل الوصول للإشعارات"));
-        all.add(new SettingEntry("حساباتك على إنستاباي", "instapay handles ipa تحويل", "capture", "حساباتك على إنستاباي"));
+        all.add(new SettingEntry("حساباتك واسمك في التحويلات", "instapay handles ipa تحويل اسمي اسم حسابي", "capture", "حساباتك واسمك في التحويلات"));
         all.add(new SettingEntry("قواعد التجار والتصنيف", "merchant rules category تصنيف تاجر", "capture", "قواعد التجار"));
         all.add(new SettingEntry("رسائل من بنوكك ما اتسجلتش", "missed bank messages not recorded report رسائل لم تسجل بلاغ", "capture", "رسائل من بنوكك"));
         all.add(new SettingEntry("اسم العرض على الرئيسية", "name profile display اسم", "appearance", "اسم العرض"));
@@ -4538,6 +4538,18 @@ public final class MainActivity extends Activity {
                             render();
                         }).setNegativeButton("إلغاء", null).show());
             }
+            else if ("income".equals(item.kind) && personName(item.merchant)) {
+                // The bank names who sent the money; when that is the user ("تحويل لحظي … من MOHAMED GAMAL"), every
+                // transfer under this name is between the user's own accounts from now on.
+                labels.add("المحوِّل ده أنا");
+                actions.add(() -> new ChoiceDialogBuilder().setTitle("الاسم ده اسمك؟")
+                        .setMessage(item.merchant + "\n\nأي تحويل جاي من الاسم ده هيتسجل تحويل بين حساباتك، ومش هيتحسب دخل.")
+                        .setPositiveButton("أيوه، ده أنا", (dialog, which) -> {
+                            db.addOwnHandle(item.merchant);
+                            selectedTransaction = db.transactionById(item.id);
+                            render();
+                        }).setNegativeButton("إلغاء", null).show());
+            }
             labels.add("ده تحويل بين حساباتي");
             actions.add(() -> {
                 db.markAsTransfer(item.id);
@@ -4791,19 +4803,26 @@ public final class MainActivity extends Activity {
         });dialog.show();
     }
 
+    /** A person's name as a bank prints it: two or more words of letters, no digits, no handle, not a generic merchant. */
+    static boolean personName(String text) {
+        if (text == null || text.contains("@") || ExpenseParser.genericMerchant(text)) return false;
+        String clean = text.trim();
+        return clean.matches("[\\p{L}][\\p{L} .'-]{2,60}") && clean.split("\\s+").length >= 2;
+    }
+
     private void ownHandlesDialog() {
         Bundle draft = new Bundle(); draft.putString("add", ""); draft.putStringArrayList("remove", new ArrayList<>());
         savePageScroll(); formPages.push(new OwnHandlesPage(draft, draft));
     }
 
     private final class OwnHandlesPage extends DraftFormPage {
-        OwnHandlesPage(Bundle draft, Bundle original) { super("own_handles", "حساباتك على إنستاباي", draft, original); }
+        OwnHandlesPage(Bundle draft, Bundle original) { super("own_handles", "حساباتك واسمك في التحويلات", draft, original); }
         private ArrayList<String> removed() { ArrayList<String> list = draft.getStringArrayList("remove"); return list == null ? new ArrayList<>() : list; }
         @Override void build(LinearLayout body, UiComponents components) {
             List<String> handles = db.ownHandles();
-            body.addView(components.label(handles.isEmpty() ? "لسه مفيش حسابات مؤكدة. ضيف حسابك هنا علشان تحويلاتك لنفسك ما تتحسبش صرف." :
+            body.addView(components.label(handles.isEmpty() ? "لسه مفيش حسابات مؤكدة. ضيف حسابك أو اسمك زي ما البنك بيكتبه، علشان تحويلاتك لنفسك ما تتحسبش صرف ولا دخل." :
                     "التحويلات من وإلى الحسابات دي مش بتتحسب صرف ولا دخل. اختار حساب لو عايز تشيله.", UiTheme.BODY, MUTED));
-            EditText add = textField("حساب جديد", "add", body); add.setHint("مثال: name@instapay");
+            EditText add = textField("حساب جديد", "add", body); add.setHint("مثال: name@instapay أو اسمك بالإنجليزي");
             add.setTextDirection(View.TEXT_DIRECTION_LTR);
             add.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
             if (handles.isEmpty()) { errorLabel(body); return; }
@@ -4837,7 +4856,7 @@ public final class MainActivity extends Activity {
         }
         @Override boolean save() {
             String value = text("add").trim();
-            if (!value.isEmpty() && !value.contains("@")) return fail("اكتب الحساب كامل، مثال name@instapay", "add");
+            if (!value.isEmpty() && !value.contains("@") && !personName(value)) return fail("اكتب حساب إنستاباي كامل (name@instapay) أو اسمك زي ما بيظهر في رسالة البنك", "add");
             for (String handle : removed()) db.removeOwnHandle(handle);
             if (!value.isEmpty()) db.addOwnHandle(value);
             return true;
@@ -6882,6 +6901,18 @@ public final class MainActivity extends Activity {
             case "ezaby" -> R.drawable.brand_ezaby;
             case "illy" -> R.drawable.brand_illy;
             case "tru" -> R.drawable.brand_tru;
+            case "valu" -> R.drawable.brand_valu;
+            case "souhoola" -> R.drawable.brand_souhoola;
+            case "premiumcard" -> R.drawable.brand_premiumcard;
+            case "halan" -> R.drawable.brand_halan;
+            case "contact" -> R.drawable.brand_contact;
+            case "sympl" -> R.drawable.brand_sympl;
+            case "mogo" -> R.drawable.brand_mogo;
+            case "moneyfellows" -> R.drawable.brand_moneyfellows;
+            case "seven" -> R.drawable.brand_seven;
+            case "forsa" -> R.drawable.brand_forsa;
+            case "takka" -> R.drawable.brand_takka;
+            case "breadfast" -> R.drawable.brand_breadfast;
             default -> 0;
         };
     }

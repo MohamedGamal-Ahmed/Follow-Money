@@ -1,5 +1,15 @@
 # Change log
 
+## Unreleased — 29 October 2026
+
+From an owner report (salary month, HSBC → Banque Misr transfer, credit-card repayment).
+
+- An instant transfer from the user's own name («تحويل لحظي … من <الاسم>») is a move between own accounts once that name is confirmed: «المحوِّل ده أنا» on an income from a person's name, or the renamed settings page «حساباتك واسمك في التحويلات», which now accepts a name as the bank prints it besides an InstaPay handle.
+- Money paid into a credit card («تم إيداع … بالبطاقة الائتمانية», «credit card payment … received») is never income: it is a transfer into the card. A refund or reversal on the card is not a repayment. Shape-based (`CaptureNotice.cardDeposit`), no bank template.
+- A debit «من حساب … الى كارت ائتمان» that names no card digits repays the user's only live credit card (two cards and no digits: no guess) and no longer waits for review. The bank's debit and the card's receipt of the same repayment (same amount and currency, within the own-transfer window) are one row, whichever arrives first.
+- Installment providers valU, Souhoola, Premium Card, Halan, Contact, Sympl, MoGo, MoneyFellows, Seven, Forsa and Takka are in the commitment provider tiles, named merchants file under «أقساط», and they show owner-supplied logos (Breadfast too).
+- Tests: `CaptureNoticeTest` card-deposit cases, `MerchantClassificationTest` provider logos/category, `FeatureAuditTest.testOwnNameTransferAndCardRepaymentLegsAreNeitherIncomeNorSpending` (emulator).
+
 ## 0.4.5 — 27 October 2026 (versionCode 15, schema 27)
 
 From an owner-phone report (Honor, myFawry yellowcard purchases not recorded).

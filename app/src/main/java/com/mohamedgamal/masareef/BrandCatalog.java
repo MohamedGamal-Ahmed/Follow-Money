@@ -74,6 +74,19 @@ final class BrandCatalog {
         new Entry("ezaby",false,new String[]{"El Ezaby","Ezaby Pharmacy","العزبي","صيدلية العزبي"}),
         new Entry("illy",false,new String[]{"illy","illy caffe"}),
         new Entry("tru",false,true,new String[]{"TRU"}),
+        // Installment / BNPL providers and Breadfast: owner-supplied logos, 29 Oct 2026.
+        new Entry("valu",false,new String[]{"valU","ValU Egypt","فاليو"}),
+        new Entry("souhoola",false,new String[]{"Souhoola","Sohoula","سهولة","سهوله"}),
+        new Entry("premiumcard",false,new String[]{"Premium Card","PremiumCard","بريميوم كارد","بريميم كارد"}),
+        new Entry("halan",false,new String[]{"Halan","MNT-Halan","MNT Halan","حالا","حالاً"}),
+        new Entry("contact",false,true,new String[]{"Contact","Contact Credit","كونتكت","كونتاكت"}),
+        new Entry("sympl",false,new String[]{"Sympl","سيمبل","سمبل"}),
+        new Entry("mogo",false,true,new String[]{"MoGo","موجو"}),
+        new Entry("moneyfellows",false,new String[]{"MoneyFellows","Money Fellows","موني فيلوز","ماني فيلوز"}),
+        new Entry("seven",false,true,new String[]{"Seven","سيفن"}),
+        new Entry("forsa",false,new String[]{"Forsa","فرصة","فرصه"}),
+        new Entry("takka",false,new String[]{"Takka","تكة","تكه"}),
+        new Entry("breadfast",false,new String[]{"Breadfast","بريدفاست"}),
         // The label the parser gives an InstaPay transfer that has no handle: the channel itself is the identity.
         new Entry("instapay",false,true,new String[]{"تحويل لحظي"})
     };

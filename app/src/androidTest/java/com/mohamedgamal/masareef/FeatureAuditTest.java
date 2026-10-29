@@ -1163,6 +1163,63 @@ final class FeatureAuditTest {
         ok(MoneyFlow.bucket(unknown.kind,unknown.category,false)==MoneyFlow.Bucket.OPEN_TRANSFER);
     }
 
+    /**
+     * Owner report, 29 Oct 2026 (synthetic names and digits): an instant transfer from the user's own name, a bank debit
+     * "الى كارت ائتمان" that names no card digits, and the card's "تم إيداع … بالبطاقة الائتمانية" receipt. None of them
+     * is income or spending, and the debit and receipt are one repayment.
+     */
+    public void testOwnNameTransferAndCardRepaymentLegsAreNeitherIncomeNorSpending() {
+        LocalDate day = LocalDate.now().minusDays(1);
+        long t = at(day);
+        String dmy = day.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")), ymd = day.toString();
+        String mon = day.format(java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yyyy", java.util.Locale.ENGLISH)).toUpperCase(java.util.Locale.ROOT);
+        long account = db.addPaymentSource("QA Bank", "حساب", "1111");
+        long card = db.addPaymentSource("QA Bank", "بطاقة ائتمان", "2222");
+
+        // Own name: before the user confirms it, the sender is income; after, a move into the user's own account.
+        ok(db.addSms("QA Bank", "تم إضافة تحويل لحظي لحسابكم رقم xxx1111 بمبلغ 500 جم من QA STRANGER PERSON رقم مرجعي 900000000001 يوم " + ymd + " الساعه 10:00", t));
+        eq("income", db.lastCaptured().kind);
+        db.addOwnHandle("QA OWNER NAME");
+        ok(db.addSms("QA Bank", "تم إضافة تحويل لحظي لحسابكم رقم xxx1111 بمبلغ 20000 جم من QA OWNER NAME رقم مرجعي 900000000002 يوم " + ymd + " الساعه 10:05", t + 1000));
+        ExpenseDb.Transaction own = db.lastCaptured();
+        eq("transfer", own.kind); ok(own.paymentSourceId == null); ok(own.destinationSourceId != null && own.destinationSourceId == account);
+        ok(MoneyFlow.bucket(own.kind, own.category) == MoneyFlow.Bucket.INTERNAL);
+
+        // The bank's debit names no card digits: the only credit card is the destination, no review needed.
+        int before = db.transactionCount();
+        ok(db.addSms("QA Bank", "تم تحويل مبلغ 3218EGP      من حساب رقم xxx1111      الى كارت ائتمان / مسبق الدفع فى " + mon, t + 60_000));
+        ExpenseDb.Transaction debit = db.lastCaptured();
+        eq("expense", debit.kind); eq(321800L, debit.amountMinor); ok(!debit.needsReview);
+        ok(debit.paymentSourceId != null && debit.paymentSourceId == account); ok(debit.destinationSourceId != null && debit.destinationSourceId == card);
+        ok(MoneyFlow.bucket(debit.kind, debit.category, true) == MoneyFlow.Bucket.INTERNAL);
+        // The card's receipt of the same repayment joins the debit: no second row, never income.
+        db.addSms("QA Bank", "عميلنا العزيز، تم إيداع EGP 3218  بالبطاقة الائتمانية المنتهية بـ ****2222، فى QA-Online يوم  " + dmy + " ، ورصيدكم الحالي 10920.95 EGP", t + 90_000);
+        eq(before + 1, db.transactionCount());
+        eq("expense", db.transactionById(debit.id).kind);
+
+        // A receipt with no debit seen (another bank paid it): a transfer into the card, never income.
+        db.addSms("QA Bank", "عميلنا العزيز، تم إيداع EGP 1500  بالبطاقة الائتمانية المنتهية بـ ****2222، فى QA-Online يوم  " + dmy, t + 200_000);
+        ExpenseDb.Transaction deposit = db.lastCaptured();
+        eq("transfer", deposit.kind); eq(150000L, deposit.amountMinor); ok(deposit.paymentSourceId == null);
+        ok(deposit.destinationSourceId != null && deposit.destinationSourceId == card); ok(!deposit.needsReview);
+        ok(MoneyFlow.bucket(deposit.kind, deposit.category) == MoneyFlow.Bucket.INTERNAL);
+        // Its debit arriving afterwards completes that same row: one transfer from the account to the card.
+        before = db.transactionCount();
+        db.addSms("QA Bank", "تم تحويل مبلغ 1500EGP من حساب رقم xxx1111 الى كارت ائتمان / مسبق الدفع فى " + mon, t + 230_000);
+        eq(before, db.transactionCount());
+        ExpenseDb.Transaction completed = db.transactionById(deposit.id);
+        eq("transfer", completed.kind); ok(completed.paymentSourceId != null && completed.paymentSourceId == account);
+        ok(completed.destinationSourceId != null && completed.destinationSourceId == card);
+
+        // A refund on the card is not a repayment.
+        ok(!CaptureNotice.cardDeposit("تم رد مبلغ EGP 50 للبطاقة الائتمانية المنتهية بـ ****2222 من QA SHOP"));
+        ok(CaptureNotice.cardDeposit("Your credit card ****2222 payment of EGP 700.00 has been received. Thank you"));
+        // Two credit cards and no digits in the debit: no guess.
+        db.addPaymentSource("QA Bank", "بطاقة ائتمان", "3333");
+        ok(db.repaidCreditCard("تم تحويل مبلغ 900EGP من حساب رقم xxx1111 الى كارت ائتمان / مسبق الدفع") == null);
+        ok(db.repaidCreditCard("تم تحويل مبلغ 900EGP من حساب رقم xxx1111 الى كارت ائتمان رقم 3333") != null);
+    }
+
     private long oldPurchase(String merchant,String category,long t,boolean edited) {
         db.addManual(t,8250,"EGP",merchant,category);long id=db.latestInserted().id;
         ContentValues values=new ContentValues();values.put("source","SMS");values.put("user_edited",edited?1:0);

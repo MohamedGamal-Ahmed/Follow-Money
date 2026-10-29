@@ -596,23 +596,44 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 // Step 7: a debit whose other party is only an account/card tail that belongs to exactly one of the user's
                 // own sources went between the user's accounts (owner test, 22 Oct 2026: HSBC «to 7392» = Banque Misr 7392).
                 Long ownDestination = decided != null && "expense".equals(direction) ? ownSourceByTail(PipelineDecision.counterpartyTail(decided.counterparty), account) : null;
+                // An own account named by handle or, since 29 Oct 2026, by the user's own name as the bank prints it
+                // ("تحويل لحظي … من MOHAMED GAMAL ABDELAZIZ"): money between the user's accounts, never income or spending.
                 boolean ownHandle = transfer != null ? isOwnHandle(transfer.counterpart) :
-                        decided != null && decided.counterparty != null && decided.counterparty.contains("@") && isOwnHandle(decided.counterparty);
-                String kind = ownHandle || ownDestination != null ? "transfer" : direction;
+                        decided != null && (decided.counterparty != null && isOwnHandle(decided.counterparty) || decided.merchant != null && isOwnHandle(decided.merchant));
+                // Money paid INTO a credit card ("تم إيداع … بالبطاقة الائتمانية") is the user's own money reaching the card:
+                // a transfer into the card, never income. A return on the card stays an expense offset.
+                boolean cardDeposit = "income".equals(direction) && CaptureNotice.cardDeposit(body)
+                        && (decided == null || decided.offsetOfTransactionId == null && !decided.unlinkedOffset);
+                boolean cardRepayment = "expense".equals(direction) && CaptureNotice.cardRepayment(body);
+                String kind = ownHandle || ownDestination != null || cardDeposit ? "transfer" : direction;
                 if (ownDestination != null) parsed = new ExpenseParser.Parsed(parsed.amountMinor, parsed.currency, "تحويل بين حساباتي", parsed.category, parsed.cardLast4);
+                if (cardDeposit) parsed = new ExpenseParser.Parsed(parsed.amountMinor, parsed.currency, CARD_REPAYMENT_MERCHANT, MoneyFlow.OPEN_TRANSFER_CATEGORY, parsed.cardLast4);
                 // A debit to one of the user's own credit cards keeps that card as destination (the statement treats it as
                 // internal); the settlement dialog stays optional for allocating it to purchases.
                 Long destination = ownDestination != null ? ownDestination : "transfer".equals(kind) && "income".equals(direction) ? account :
-                        "expense".equals(kind) && CaptureNotice.cardRepayment(body) ? ownCreditCard(ExpenseParser.cardLast4(body)) : null;
-                added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
-                        "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
-                        "transfer".equals(kind) && "income".equals(direction) ? null : account, kind,
-                        destination, null, receivedAt);
+                        "expense".equals(kind) && cardRepayment ? repaidCreditCard(body) : null;
+                // The bank's debit and the card's receipt are two messages about one repayment: the second joins the first.
+                long otherLeg = cardDeposit && account != null ? cardRepaymentLeg(account, parsed, receivedAt, true)
+                        : cardRepayment && destination != null && account != null ? cardRepaymentLeg(destination, parsed, receivedAt, false) : -1;
+                if (otherLeg >= 0) {
+                    ContentValues joined = new ContentValues();
+                    if (cardRepayment) joined.put("payment_source_id", account);
+                    joined.put("needs_review", 0);
+                    writable.update("transactions", joined, "id=? AND user_edited=0", new String[]{Long.toString(otherLeg)});
+                    existing = otherLeg;
+                } else {
+                    added = insertEntry(key, eventAt, parsed.amountMinor, parsed.currency, parsed.merchant,
+                            "transfer".equals(kind) ? "تحويلات" : parsed.category, channel, hash, parsed.cardLast4,
+                            "transfer".equals(kind) && "income".equals(direction) ? null : account, kind,
+                            destination, null, receivedAt);
+                }
                 if (added) {
                     existing = latestInserted().id;
                     ContentValues precision=new ContentValues();precision.put("time_precision",event.precision);
                     // A new-pipeline REVIEW (or a return with no expense to link) waits for the user; its reason is on the observation.
-                    if (decided != null && decided.review) precision.put("needs_review",1);
+                    // A card repayment that reached a known card, or money paid into a card, needs no question.
+                    boolean settledCardMove = cardDeposit || cardRepayment && destination != null;
+                    if (decided != null && decided.review && !settledCardMove) precision.put("needs_review",1);
                     writable.update("transactions",precision,"id=? AND user_edited=0",new String[]{Long.toString(existing)});
                     // A return of an earlier charge is an expense offset: an income linked to that expense.
                     if (decided != null && decided.offsetOfTransactionId != null && "income".equals(kind)) linkReimbursement(existing, decided.offsetOfTransactionId);
@@ -1323,6 +1344,48 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             if (payingSource != null && accountId(source.id) == accountId(payingSource)) continue;
             if (found != null) return null;
             found = source.id;
+        }
+        return found;
+    }
+
+    static final String CARD_REPAYMENT_MERCHANT = "سداد بطاقة ائتمان";
+    private static final java.util.regex.Pattern REPAID_CARD_DIGITS = java.util.regex.Pattern.compile(
+            "(?is)(?:الى|إلى|الي|to)\\s*.{0,25}?(?:كارت|بطاق|card)[^\\d]{0,30}?(\\d{3,4})(?!\\d)");
+
+    /**
+     * The credit card a "from account … to card" debit repays: the card its digits name; when the message names no
+     * card digits ("الى كارت ائتمان / مسبق الدفع"), the user's only live credit card. Two cards and no digits: no guess.
+     */
+    Long repaidCreditCard(String body) {
+        java.util.regex.Matcher digits = REPAID_CARD_DIGITS.matcher(body == null ? "" : ExpenseParser.normalizeDigits(body));
+        if (digits.find()) return ownCreditCard(digits.group(1));
+        Long named = ownCreditCard(ExpenseParser.cardLast4(body));
+        if (named != null) return named;
+        Long only = null;
+        for (PaymentSource source : paymentSources()) {
+            if (source.archived || !"بطاقة ائتمان".equals(source.kind)) continue;
+            if (only != null) return null;
+            only = source.id;
+        }
+        return only;
+    }
+
+    /**
+     * The other half of a credit-card repayment already recorded within the own-transfer window: for the card's receipt
+     * (incoming = true) the bank's debit to this card; for the bank's debit, the card's receipt still waiting for its
+     * source. Exactly one candidate or none (-1); user-edited rows are never joined.
+     */
+    private long cardRepaymentLeg(long card, ExpenseParser.Parsed parsed, long receivedAt, boolean incoming) {
+        String query = incoming
+                ? "SELECT id FROM transactions WHERE kind IN ('expense','transfer') AND payment_source_id IS NOT NULL AND destination_source_id=?"
+                : "SELECT id FROM transactions WHERE kind='transfer' AND payment_source_id IS NULL AND destination_source_id=?";
+        long found = -1;
+        try (Cursor c = getReadableDatabase().rawQuery(query + " AND amount_minor=? AND currency=? AND user_edited=0 AND ABS(received_at-?)<=?",
+                new String[]{Long.toString(card), Long.toString(parsed.amountMinor), parsed.currency, Long.toString(receivedAt), Long.toString(RepairRules.OWN_TRANSFER_WINDOW_MS)})) {
+            while (c.moveToNext()) {
+                if (found >= 0) return -1;
+                found = c.getLong(0);
+            }
         }
         return found;
     }

@@ -60,6 +60,11 @@ public final class MerchantClassificationTest {
             eq(pair[0],BrandCatalog.merchant(pair[1]));
         for(String[] pair:new String[][]{{"paymob","PAYMOB-"},{"mahalawy","El Mahalawy"},{"pizzaking","PIZZA KING"}})
             eq(pair[0],BrandCatalog.merchant(pair[1]));
+        for(String[] pair:new String[][]{{"valu","valU"},{"souhoola","سهولة"},{"premiumcard","Premium Card"},{"halan","حالا"},{"contact","كونتاكت"},{"sympl","Sympl"},
+                {"mogo","MoGo"},{"moneyfellows","Money Fellows"},{"seven","Seven"},{"forsa","فرصة"},{"takka","تكة"},{"breadfast","Breadfast"}})
+            eq(pair[0],BrandCatalog.merchant(pair[1]));
+        for(String provider:new String[]{"valU","Halan","MoneyFellows","Takka","Forsa","Seven","Premium Card"})eq("أقساط",ExpenseParser.category(provider));
+        eq(null,BrandCatalog.merchant("Seven Stars Cafe"));eq(null,BrandCatalog.merchant("Contact Lens Center"));
         eq("أكل وشرب",MerchantClassifier.category("PIZZA KING"));
         eq("تسوق",MerchantClassifier.category("LC Waikiki"));eq("تسوق",MerchantClassifier.category("Sharaf DG"));
         eq("nbe",BrandCatalog.bank("NBE"));eq("bdc",BrandCatalog.bank("Banque du Caire"));eq("bdc",BrandCatalog.bank("بنك القاهرة"));eq("cib",BrandCatalog.bank("CIB"));
