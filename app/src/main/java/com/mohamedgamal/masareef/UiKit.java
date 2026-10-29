@@ -263,10 +263,17 @@ final class UiKit {
     static final Provider[] PROVIDERS = {
             new Provider("valU", "valu|فاليو", "installment", 0xff0e7c66),
             new Provider("TRU", "tru|ترو", "installment", 0xff1f3a93),
-            new Provider("Contact", "contact|كونتكت", "installment", 0xffb0306e),
-            new Provider("Souhoola", "souhoola|سهولة", "installment", 0xff7c5cdb),
+            new Provider("Contact", "contact|كونتكت|كونتاكت", "installment", 0xff2a2a86),
+            new Provider("Souhoola", "souhoola|sohoula|سهولة|سهوله", "installment", 0xff7c3aed),
             new Provider("Aman", "aman|أمان", "installment", 0xff2563a8),
-            new Provider("Sympl", "sympl|سمبل", "installment", 0xff111827),
+            new Provider("Sympl", "sympl|سمبل|سيمبل", "installment", 0xffff4c6a),
+            new Provider("Premium Card", "premium card|premiumcard|بريميوم كارد|بريميم كارد", "installment", 0xffd3202a),
+            new Provider("Halan", "halan|حالا", "installment", 0xff36b37e),
+            new Provider("MoGo", "mogo|موجو", "installment", 0xffee5941),
+            new Provider("MoneyFellows", "moneyfellows|money fellows|موني فيلوز|ماني فيلوز", "installment", 0xff3b55c4),
+            new Provider("Seven", "seven|سيفن", "installment", 0xff7b4dff),
+            new Provider("Forsa", "forsa|فرصة|فرصه", "installment", 0xff1fb5a8),
+            new Provider("Takka", "takka|تكة|تكه", "installment", 0xfff5c518),
             new Provider("Claude", "claude|anthropic", "subscription", 0xffd97757),
             new Provider("ChatGPT", "chatgpt|openai", "subscription", 0xff10a37f),
             new Provider("Google One", "google one|google storage|google", "subscription", 0xff4285f4),
@@ -339,7 +346,7 @@ final class UiKit {
     /** Logos drawn on their own solid colour: they fill the whole circle instead of sitting inside a white ring. */
     static boolean fullBleedLogo(String brandId) {
         return brandId != null && java.util.Arrays.asList("bdc", "bookingdotcom", "butlers", "cib", "costa", "etoile", "ezaby",
-                "illy", "lcwaikiki", "seoudi", "sharafdg", "tru", "zaher", "paymob", "mahalawy", "pizzaking").contains(brandId);
+                "illy", "lcwaikiki", "seoudi", "sharafdg", "tru", "zaher", "paymob", "mahalawy", "pizzaking", "sympl", "mogo", "takka", "waffarha").contains(brandId);
     }
 
     /**

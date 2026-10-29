@@ -219,6 +219,8 @@ public final class MainActivity extends Activity {
         loadWhatsNew(readAsset("whats-new.txt"));
         updates = new InAppUpdate(this, () -> postUi(() -> { if (selectedTab == 0 && canRedrawNow()) render(); }));
         if (state == null) AppResources.read(() -> LocalBackup.removeLeftovers(this));
+        // Once per app version, off the UI thread: messages kept as «ما اتسجلتش» are read again with the current rules.
+        MissedRecovery.runIfDue(this, () -> postUi(() -> { if (selectedTab == 0 && canRedrawNow()) render(); }));
         boolean direct=Intent.ACTION_SEND.equals(getIntent().getAction()) || getIntent().hasExtra(CaptureNotifier.EXTRA_TRANSACTION) || getIntent().hasExtra(CaptureNotifier.EXTRA_CAPTURE_EVENT) || getIntent().getBooleanExtra("open_transactions",false) || getIntent().getBooleanExtra("open_add_transaction",false) || getIntent().getBooleanExtra("open_daily_budget",false) || getIntent().getBooleanExtra("open_commitments",false) || getIntent().hasExtra(MonthlySummaryReceiver.EXTRA_MONTH);
         introVisible=state==null?!direct&&!getPreferences(MODE_PRIVATE).getBoolean("intro_completed",false):state.getBoolean("intro_visible",false);
         introStep=state==null?0:Math.min(3,state.getInt("intro_step",0));
@@ -736,7 +738,7 @@ public final class MainActivity extends Activity {
                 setting("تطبيقات الدفع والإشعارات",this::chooseNotificationApps);
                 note("العمليات المسجلة تفضل محفوظة بعد مسح الإشعار. لو عملية ما ظهرتش، سيب إشعارها ظاهر وافتح Follow Money لإعادة فحص إشعارات التطبيقات المختارة؛ الإشعارات الممسوحة قبل التقاطها مش متاحة للاسترجاع.");
                 setting(hasNotificationAccess()?"الوصول للإشعارات: مفعل":"تفعيل الوصول للإشعارات",this::openNotificationSettings);
-                setting("حساباتك على إنستاباي",this::ownHandlesDialog);
+                setting("حساباتك واسمك في التحويلات",this::ownHandlesDialog);
                 setting("قواعد التجار والتصنيف",()->{selectedTab=7;render();});
                 setting("رسائل من بنوكك ما اتسجلتش",()->{settingsSection="missed";render();});
                 break;
@@ -870,7 +872,7 @@ public final class MainActivity extends Activity {
         all.add(new SettingEntry("استيراد رسائل SMS القديمة", "sms import messages bank رسائل البنك", "capture", "استيراد رسائل SMS"));
         all.add(new SettingEntry("تطبيقات الدفع والإشعارات", "payment apps notifications instapay", "capture", "تطبيقات الدفع"));
         all.add(new SettingEntry("الوصول للإشعارات", "notification access listener إذن", "capture", hasNotificationAccess() ? "الوصول للإشعارات" : "تفعيل الوصول للإشعارات"));
-        all.add(new SettingEntry("حساباتك على إنستاباي", "instapay handles ipa تحويل", "capture", "حساباتك على إنستاباي"));
+        all.add(new SettingEntry("حساباتك واسمك في التحويلات", "instapay handles ipa تحويل اسمي اسم حسابي", "capture", "حساباتك واسمك في التحويلات"));
         all.add(new SettingEntry("قواعد التجار والتصنيف", "merchant rules category تصنيف تاجر", "capture", "قواعد التجار"));
         all.add(new SettingEntry("رسائل من بنوكك ما اتسجلتش", "missed bank messages not recorded report رسائل لم تسجل بلاغ", "capture", "رسائل من بنوكك"));
         all.add(new SettingEntry("اسم العرض على الرئيسية", "name profile display اسم", "appearance", "اسم العرض"));
@@ -1679,6 +1681,24 @@ public final class MainActivity extends Activity {
             getSharedPreferences(APP_STATE, MODE_PRIVATE).edit().putInt(LAST_SEEN_VERSION, BuildConfig.VERSION_CODE).apply();
             whatsNew = null; render();
         });
+        row.addView(close);
+    }
+
+    /** 0.4.5: kept «ما اتسجلتش» messages the updated app now understands wait for review on the missed-messages page. */
+    private void recoveredCard() {
+        int count;
+        try { count = ShadowStore.recoveredCount(db.getReadableDatabase()); } catch (RuntimeException unavailable) { return; }
+        SharedPreferences state = getSharedPreferences(APP_STATE, MODE_PRIVATE);
+        if (count <= 0 || state.getBoolean(MissedRecovery.STRIP_HIDDEN_KEY, false)) return;
+        String many = count == 1 ? "رسالة" : count == 2 ? "رسالتين" : count <= 10 ? count + " رسائل" : count + " رسالة";
+        WrapRow row = homeStrip("recovered_messages_card");
+        TextView headline = label("التحديث الجديد فهم " + many + " كانت فاتتك ›", 12, INK, true);
+        headline.setMinHeight(dp(UiTheme.TOUCH)); headline.setGravity(Gravity.CENTER_VERTICAL);
+        headline.setOnClickListener(v -> { settingsSection = "missed"; selectedTab = 5; render(); });
+        row.addView(headline);
+        TextView close = label("✕", 16, MUTED, false); close.setGravity(Gravity.CENTER);
+        close.setContentDescription("إخفاء الرسائل المقترحة"); close.setMinWidth(dp(UiTheme.TOUCH)); close.setMinHeight(dp(UiTheme.TOUCH));
+        close.setOnClickListener(v -> { state.edit().putBoolean(MissedRecovery.STRIP_HIDDEN_KEY, true).apply(); render(); });
         row.addView(close);
     }
 
@@ -3268,6 +3288,7 @@ public final class MainActivity extends Activity {
 
         updateCard();
         whatsNewCard();
+        recoveredCard();
         // MVP home: one number, one period, one definition. The daily budget and points keep their data, dialogs,
         // widgets and settings entry («الميزانية اليومية والراتب», «ميزانياتك»); only their home card is off.
         if (HOME_SHOWS_DAILY_BUDGET) dailyHomeCard();
@@ -4517,6 +4538,18 @@ public final class MainActivity extends Activity {
                             render();
                         }).setNegativeButton("إلغاء", null).show());
             }
+            else if ("income".equals(item.kind) && personName(item.merchant)) {
+                // The bank names who sent the money; when that is the user ("تحويل لحظي … من MOHAMED GAMAL"), every
+                // transfer under this name is between the user's own accounts from now on.
+                labels.add("المحوِّل ده أنا");
+                actions.add(() -> new ChoiceDialogBuilder().setTitle("الاسم ده اسمك؟")
+                        .setMessage(item.merchant + "\n\nأي تحويل جاي من الاسم ده هيتسجل تحويل بين حساباتك، ومش هيتحسب دخل.")
+                        .setPositiveButton("أيوه، ده أنا", (dialog, which) -> {
+                            db.addOwnHandle(item.merchant);
+                            selectedTransaction = db.transactionById(item.id);
+                            render();
+                        }).setNegativeButton("إلغاء", null).show());
+            }
             labels.add("ده تحويل بين حساباتي");
             actions.add(() -> {
                 db.markAsTransfer(item.id);
@@ -4770,19 +4803,26 @@ public final class MainActivity extends Activity {
         });dialog.show();
     }
 
+    /** A person's name as a bank prints it: two or more words of letters, no digits, no handle, not a generic merchant. */
+    static boolean personName(String text) {
+        if (text == null || text.contains("@") || ExpenseParser.genericMerchant(text)) return false;
+        String clean = text.trim();
+        return clean.matches("[\\p{L}][\\p{L} .'-]{2,60}") && clean.split("\\s+").length >= 2;
+    }
+
     private void ownHandlesDialog() {
         Bundle draft = new Bundle(); draft.putString("add", ""); draft.putStringArrayList("remove", new ArrayList<>());
         savePageScroll(); formPages.push(new OwnHandlesPage(draft, draft));
     }
 
     private final class OwnHandlesPage extends DraftFormPage {
-        OwnHandlesPage(Bundle draft, Bundle original) { super("own_handles", "حساباتك على إنستاباي", draft, original); }
+        OwnHandlesPage(Bundle draft, Bundle original) { super("own_handles", "حساباتك واسمك في التحويلات", draft, original); }
         private ArrayList<String> removed() { ArrayList<String> list = draft.getStringArrayList("remove"); return list == null ? new ArrayList<>() : list; }
         @Override void build(LinearLayout body, UiComponents components) {
             List<String> handles = db.ownHandles();
-            body.addView(components.label(handles.isEmpty() ? "لسه مفيش حسابات مؤكدة. ضيف حسابك هنا علشان تحويلاتك لنفسك ما تتحسبش صرف." :
+            body.addView(components.label(handles.isEmpty() ? "لسه مفيش حسابات مؤكدة. ضيف حسابك أو اسمك زي ما البنك بيكتبه، علشان تحويلاتك لنفسك ما تتحسبش صرف ولا دخل." :
                     "التحويلات من وإلى الحسابات دي مش بتتحسب صرف ولا دخل. اختار حساب لو عايز تشيله.", UiTheme.BODY, MUTED));
-            EditText add = textField("حساب جديد", "add", body); add.setHint("مثال: name@instapay");
+            EditText add = textField("حساب جديد", "add", body); add.setHint("مثال: name@instapay أو اسمك بالإنجليزي");
             add.setTextDirection(View.TEXT_DIRECTION_LTR);
             add.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
             if (handles.isEmpty()) { errorLabel(body); return; }
@@ -4816,7 +4856,7 @@ public final class MainActivity extends Activity {
         }
         @Override boolean save() {
             String value = text("add").trim();
-            if (!value.isEmpty() && !value.contains("@")) return fail("اكتب الحساب كامل، مثال name@instapay", "add");
+            if (!value.isEmpty() && !value.contains("@") && !personName(value)) return fail("اكتب حساب إنستاباي كامل (name@instapay) أو اسمك زي ما بيظهر في رسالة البنك", "add");
             for (String handle : removed()) db.removeOwnHandle(handle);
             if (!value.isEmpty()) db.addOwnHandle(value);
             return true;
@@ -4874,10 +4914,28 @@ public final class MainActivity extends Activity {
      * (ShadowStore.missedFromBank, or not understood). Text redacted; report one as a misreading or dismiss it.
      */
     private void missedBankMessages() {
+        List<ShadowStore.Ununderstood> kept = ShadowStore.ununderstood(db.getReadableDatabase());
+        // 0.4.5: messages an update now reads as transactions come first, as suggestions the user registers or dismisses.
+        long now = System.currentTimeMillis();
+        List<ShadowStore.Ununderstood> suggested = new ArrayList<>();
+        List<MissedReevaluation.Reading> readings = new ArrayList<>();
+        Set<String> suggestedHashes = new HashSet<>();
+        for (ShadowStore.Ununderstood message : kept) {
+            if (!message.recovered() || message.text == null || message.hash == null) continue;
+            MissedReevaluation.Reading reading = ShadowStore.readingOf(message, now);
+            if (reading == null) continue;
+            suggested.add(message); readings.add(reading); suggestedHashes.add(message.hash);
+        }
+        if (!suggested.isEmpty()) {
+            section("اتفهمت بعد التحديث", null, null);
+            note("التحديث الجديد بقى يقرا الرسائل دي كعمليات. مش هتتسجل لوحدها: راجعها وسجّلها لو عملية فعلًا، أو تجاهلها.");
+            for (int i = 0; i < suggested.size(); i++) recoveredSuggestionCard(suggested.get(i), readings.get(i));
+            section("لسه مش مفهومة", null, null);
+        }
         note("رسائل من بنك أو تطبيق دفع فيها مبلغ والتطبيق ما سجّلهاش. لو كانت عملية فعلًا، بلّغ عنها عشان نصلّح قراءتها؛ لو مش عملية، تجاهلها. الأرقام والأسماء محجوبة.");
         int shown = 0;
-        for (ShadowStore.Ununderstood message : ShadowStore.ununderstood(db.getReadableDatabase())) {
-            if (message.text == null || message.hash == null) continue;
+        for (ShadowStore.Ununderstood message : kept) {
+            if (message.text == null || message.hash == null || suggestedHashes.contains(message.hash)) continue;
             shown++;
             String redacted = Redaction.text(message.text);
             LinearLayout box = card();
@@ -4891,7 +4949,48 @@ public final class MainActivity extends Activity {
                     new LinearLayout.LayoutParams(0, -2, 1));
             box.addView(actions);
         }
-        if (shown == 0) note("مفيش رسائل من بنوكك محتاجة مراجعة.");
+        if (shown == 0 && suggested.isEmpty()) note("مفيش رسائل من بنوكك محتاجة مراجعة.");
+    }
+
+    /** One suggestion: what the new reading found, the redacted text, a hint when the ledger may already hold it. */
+    private void recoveredSuggestionCard(ShadowStore.Ununderstood message, MissedReevaluation.Reading reading) {
+        LinearLayout box = card();
+        box.setTag("recovered_suggestion");
+        box.addView(label(message.source + " · " + Instant.ofEpochMilli(message.firstSeen).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL), 12, MUTED, false));
+        String summary = ("out".equals(reading.direction) ? "مصروف " : "دخل ") + money(reading.amountMinor, reading.currency) + (reading.merchant == null ? "" : " · " + reading.merchant);
+        TextView headline = label(summary, 15, INK, true); headline.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG); box.addView(headline);
+        TextView text = label(Redaction.text(message.text), 13, MUTED, false); text.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG); box.addView(text);
+        boolean maybeRecorded;
+        try { maybeRecorded = ShadowStore.possiblyRecorded(db.getReadableDatabase(), message, reading, ZoneId.systemDefault()); }
+        catch (RuntimeException unavailable) { maybeRecorded = false; }
+        if (maybeRecorded) box.addView(label("ممكن تكون متسجلة بالفعل", 12, ORANGE, true));
+        LinearLayout actions = new LinearLayout(this); actions.setPadding(0, dp(8), 0, 0);
+        actions.addView(ui.button("سجّلها", true, false, () -> registerSuggestion(message)), new LinearLayout.LayoutParams(0, -2, 1));
+        actions.addView(ui.button("تجاهل", false, false, () -> { ShadowStore.dismissUnunderstood(db.getWritableDatabase(), message, System.currentTimeMillis()); render(); }),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        box.addView(actions);
+    }
+
+    private final Set<String> registering = new HashSet<>();
+
+    /** «سجّلها»: through the live capture path on the capture worker; a second tap while it runs does nothing. */
+    private void registerSuggestion(ShadowStore.Ununderstood message) {
+        if (!registering.add(message.hash)) return;
+        CaptureQueue.submit(() -> {
+            MissedReevaluation.Outcome outcome;
+            try { outcome = MissedRecovery.register(MainActivity.this, message); }
+            catch (RuntimeException failure) { outcome = MissedReevaluation.Outcome.NOT_RECORDED; }
+            final MissedReevaluation.Outcome done = outcome;
+            postUi(() -> {
+                registering.remove(message.hash);
+                toast(done == MissedReevaluation.Outcome.RECORDED ? "اتسجلت العملية"
+                        : done == MissedReevaluation.Outcome.ALREADY_RECORDED ? "العملية دي متسجلة بالفعل"
+                        : done == MissedReevaluation.Outcome.EXCLUDED ? "كنت حذفت العملية دي قبل كده فما اتسجلتش"
+                        : "ما اتسجلتش. لو عملية فعلًا، بلّغ عنها من القائمة تحت.");
+                if (done == MissedReevaluation.Outcome.RECORDED) invalidateLedger();
+                render();
+            });
+        });
     }
 
     private LinearLayout cardStrip(ExpenseDb.PaymentSource source) {
@@ -6802,6 +6901,19 @@ public final class MainActivity extends Activity {
             case "ezaby" -> R.drawable.brand_ezaby;
             case "illy" -> R.drawable.brand_illy;
             case "tru" -> R.drawable.brand_tru;
+            case "valu" -> R.drawable.brand_valu;
+            case "souhoola" -> R.drawable.brand_souhoola;
+            case "premiumcard" -> R.drawable.brand_premiumcard;
+            case "halan" -> R.drawable.brand_halan;
+            case "contact" -> R.drawable.brand_contact;
+            case "sympl" -> R.drawable.brand_sympl;
+            case "mogo" -> R.drawable.brand_mogo;
+            case "moneyfellows" -> R.drawable.brand_moneyfellows;
+            case "seven" -> R.drawable.brand_seven;
+            case "forsa" -> R.drawable.brand_forsa;
+            case "takka" -> R.drawable.brand_takka;
+            case "breadfast" -> R.drawable.brand_breadfast;
+            case "waffarha" -> R.drawable.brand_waffarha;
             default -> 0;
         };
     }

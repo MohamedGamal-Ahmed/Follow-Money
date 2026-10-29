@@ -1,5 +1,24 @@
 # Change log
 
+## Unreleased — 29 October 2026
+
+From an owner report (salary month, HSBC → Banque Misr transfer, credit-card repayment).
+
+- An instant transfer from the user's own name («تحويل لحظي … من <الاسم>») is a move between own accounts once that name is confirmed: «المحوِّل ده أنا» on an income from a person's name, or the renamed settings page «حساباتك واسمك في التحويلات», which now accepts a name as the bank prints it besides an InstaPay handle.
+- Money paid into a credit card («تم إيداع … بالبطاقة الائتمانية», «credit card payment … received») is never income: it is a transfer into the card. A refund or reversal on the card is not a repayment. Shape-based (`CaptureNotice.cardDeposit`), no bank template.
+- A debit «من حساب … الى كارت ائتمان» that names no card digits repays the user's only live credit card (two cards and no digits: no guess) and no longer waits for review. The bank's debit and the card's receipt of the same repayment (same amount and currency, within the own-transfer window) are one row, whichever arrives first.
+- Installment providers valU, Souhoola, Premium Card, Halan, Contact, Sympl, MoGo, MoneyFellows, Seven, Forsa and Takka are in the commitment provider tiles, named merchants file under «أقساط», and they show owner-supplied logos (Breadfast and Waffarha too).
+- Tests: `CaptureNoticeTest` card-deposit cases, `MerchantClassificationTest` provider logos/category, `FeatureAuditTest.testOwnNameTransferAndCardRepaymentLegsAreNeitherIncomeNorSpending` (emulator).
+
+## 0.4.5 — 27 October 2026 (versionCode 15, schema 27)
+
+From an owner-phone report (Honor, myFawry yellowcard purchases not recorded).
+
+- myFawry «spent» notifications are card purchases: «You spent 20.00 EGP with your yellowcard» / «Debit - 20.00 was spent at KASHIER*BUTLERS» is recorded automatically (20.00 EGP, outgoing). The rule is wording, not the bare word: «was/has been spent at|in|on|with» and «you spent <amount> at|with|on|in|using». A spending summary («You've spent EGP 5,000 this month», «You have spent … so far this week», «Total spent in October», «you spent … in October») is `OTHER`/`SPENDING_SUMMARY` and never recorded; a summary clause no longer hides a real purchase in the same message. Classifier version classification-4, policy 2026-10-29.3. The corpus v2 (455 rows) and held-out sets 1–5 are unchanged row for row.
+- Support diagnostics (the text copied from «نسخ بيانات التشخيص», the support email and the GitHub report) now describe capture: notification access, listener connected, selected apps with installed / last seen / count today, default SMS app and SMS permission, missed-list rows and unreadable rows, live observations in the last 7 days (sms, notification, failed) and battery-optimization exemption. Counts, flags, times and package names only; the snapshot has no field for message text, amount, merchant or card. The listener notes a live delivery of a selected app (time and a per-day counter in SharedPreferences) before queueing any work; a replay of an already-visible notification is not a delivery.
+- Kept «ما اتسجلتش» messages are read again once per app version (schema 27 adds `source_key` and `recovered_at` to `ununderstood_messages`; the key is a notification's package or an SMS sender, taken from the shadow input). A message the current rules would record is marked recovered and waits as a suggestion: a home strip («التحديث الجديد فهم N رسالة كانت فاتتك ›») opens the missed-messages page, whose first section lists each suggestion with source, date, the new reading (amount, direction, merchant), the redacted text and «ممكن تكون متسجلة بالفعل» when the ledger holds the same amount and direction near the message time. «سجّلها» records it through the live capture path (exclusions, dedupe, settlement and legacy guards apply; twice records once); «تجاهل» teaches the dismissed shape. Nothing is written to the ledger without the user. The re-read runs on the capture worker; a failure leaves the stored version unset so the next launch retries. The reading shown on a card is derived from the sealed text when displayed, so no amount is stored outside `encrypted_body`.
+- Tests: `MissedReevaluationTest` and `CaptureDiagnosticsTest` in run-checks; myFawry and summary cases in `TransactionExtractorTest`; source-structure checks for the listener, the re-read and the register path in `AuditStructureTest`; `ShadowStoreTest` section 11 (schema 26 → 27 with a kept row, re-read, double register) for the emulator.
+
 ## 0.4.4 — 26 October 2026 (versionCode 14)
 
 Classification fixes from the owner report of 26 Oct 2026 (PR #45).

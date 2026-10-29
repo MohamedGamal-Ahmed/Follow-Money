@@ -7,7 +7,7 @@ import android.net.Uri;
 import android.os.Build;
 import java.util.Locale;
 
-/** User-reviewed GitHub links containing environment metadata only; no ledger or identifiers. */
+/** User-reviewed GitHub links containing environment metadata only; no ledger, message text or identifiers (capture state: counts, flags, package names). */
 final class GitHubSupport {
     static final String REPOSITORY="https://github.com/MohamedGamal-Ahmed/Follow-Money-Support";
     private GitHubSupport() {}
@@ -22,7 +22,8 @@ final class GitHubSupport {
 
     static String details(Context context) {
         return "Follow Money: "+version(context)+"\nDevice: "+Build.MANUFACTURER+" "+Build.MODEL+
-                "\nAndroid: "+Build.VERSION.RELEASE+" (API "+Build.VERSION.SDK_INT+")\nLocale: "+Locale.getDefault().toLanguageTag();
+                "\nAndroid: "+Build.VERSION.RELEASE+" (API "+Build.VERSION.SDK_INT+")\nLocale: "+Locale.getDefault().toLanguageTag()+
+                "\n"+CaptureDiagnosticsReader.text(context);
     }
 
     static Uri bugUri(Context context) {

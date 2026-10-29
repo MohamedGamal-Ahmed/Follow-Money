@@ -17,4 +17,20 @@ final class CaptureNotice {
     static boolean cardRepayment(String body){
         return body!=null&&Pattern.compile("(?is)(?:من\\s*حساب|from.{0,30}account).{0,100}(?:الى|إلى|to).{0,25}(?:كارت|بطاق|card)").matcher(body).find();
     }
+
+    private static final String CREDIT_CARD_WORDS = "(?:\\p{L}*بطاق\\p{L}*\\s+(?:\\p{L}+\\s+){0,3}?ال[اإآ]?ئتماني\\p{L}*|بطاق\\p{L}*\\s+[اإ]ئتمان|كارت\\s+[اإ]ئتمان|credit\\s+card)";
+    private static final Pattern CARD_DEPOSIT = Pattern.compile("(?is)(?:"
+            + "(?:تم|تمت)\\s+(?:ايداع|إيداع|سداد|تسديد|اضافة|إضافة)(?!\\p{L}).{0,120}?" + CREDIT_CARD_WORDS + "|"
+            + CREDIT_CARD_WORDS + ".{0,80}?\\bpayment\\b.{0,60}?\\b(?:received|credited|posted)\\b|"
+            + "\\bpayment\\b.{0,60}?\\b(?:received|credited)\\b.{0,60}?" + CREDIT_CARD_WORDS + ")");
+    private static final Pattern RETURN_WORDS = Pattern.compile("(?is)(?<!\\p{L})(?:رد|استرداد|إسترداد|عكس|كاش\\s*باك)(?!\\p{L})|\\b(?:refund(?:ed)?|revers(?:al|ed)|cash\\s*back)\\b");
+
+    /**
+     * Money paid INTO a credit card ("تم إيداع EGP 3218 بالبطاقة الائتمانية …", "Your credit card payment … received"):
+     * the user's own money moving onto the card, never income. A refund or reversal on the card is not a repayment.
+     * Shape-based, no bank template (owner rule, 29 Oct 2026).
+     */
+    static boolean cardDeposit(String body){
+        return body!=null&&CARD_DEPOSIT.matcher(body).find()&&!RETURN_WORDS.matcher(body).find();
+    }
 }
