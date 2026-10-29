@@ -87,6 +87,7 @@ final class BrandCatalog {
         new Entry("forsa",false,new String[]{"Forsa","فرصة","فرصه"}),
         new Entry("takka",false,new String[]{"Takka","تكة","تكه"}),
         new Entry("breadfast",false,new String[]{"Breadfast","بريدفاست"}),
+        new Entry("waffarha",false,new String[]{"Waffarha","وفرها"}),
         // The label the parser gives an InstaPay transfer that has no handle: the channel itself is the identity.
         new Entry("instapay",false,true,new String[]{"تحويل لحظي"})
     };

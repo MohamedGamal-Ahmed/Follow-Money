@@ -346,7 +346,7 @@ final class UiKit {
     /** Logos drawn on their own solid colour: they fill the whole circle instead of sitting inside a white ring. */
     static boolean fullBleedLogo(String brandId) {
         return brandId != null && java.util.Arrays.asList("bdc", "bookingdotcom", "butlers", "cib", "costa", "etoile", "ezaby",
-                "illy", "lcwaikiki", "seoudi", "sharafdg", "tru", "zaher", "paymob", "mahalawy", "pizzaking", "sympl", "mogo", "takka").contains(brandId);
+                "illy", "lcwaikiki", "seoudi", "sharafdg", "tru", "zaher", "paymob", "mahalawy", "pizzaking", "sympl", "mogo", "takka", "waffarha").contains(brandId);
     }
 
     /**

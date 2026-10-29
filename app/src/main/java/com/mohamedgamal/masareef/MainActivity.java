@@ -6913,6 +6913,7 @@ public final class MainActivity extends Activity {
             case "forsa" -> R.drawable.brand_forsa;
             case "takka" -> R.drawable.brand_takka;
             case "breadfast" -> R.drawable.brand_breadfast;
+            case "waffarha" -> R.drawable.brand_waffarha;
             default -> 0;
         };
     }
