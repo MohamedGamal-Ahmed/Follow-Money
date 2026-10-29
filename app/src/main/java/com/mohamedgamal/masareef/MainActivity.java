@@ -5657,7 +5657,7 @@ public final class MainActivity extends Activity {
                         for(CommitmentPayments.Cycle cycle:open){if(left<=0)break;ticked.add(cycle.due.toString());left-=cycle.remaining();}
                         draft.putStringArrayList("dues",ticked);
                     }
-                    List<CommitmentPayments.Cycle> chosen=new ArrayList<>();
+                    List<CommitmentPayments.Cycle> covered=new ArrayList<>();
                     for(CommitmentPayments.Cycle cycle:open){
                         android.widget.CheckBox box=new android.widget.CheckBox(MainActivity.this);box.setSaveEnabled(false);
                         box.setText("\u2068"+dayLabel(cycle.due)+"\u2069 · \u2068"+money(cycle.remaining(),cycle.currency)+"\u2069");
@@ -5666,13 +5666,13 @@ public final class MainActivity extends Activity {
                         final ArrayList<String> list=ticked;
                         box.setOnClickListener(v->{if(box.isChecked()){if(!list.contains(cycle.due.toString()))list.add(cycle.due.toString());}else list.remove(cycle.due.toString());formPages.rebuild();});
                         body.addView(box);
-                        if(box.isChecked())chosen.add(cycle);
+                        if(box.isChecked())covered.add(cycle);
                     }
-                    long[] needs=new long[chosen.size()];for(int i=0;i<needs.length;i++)needs[i]=chosen.get(i).remaining();
+                    long[] needs=new long[covered.size()];for(int i=0;i<needs.length;i++)needs[i]=covered.get(i).remaining();
                     long[] split=CommitmentPayments.split(preview.available,needs);long used=0,missing=0;
                     for(int i=0;i<split.length;i++){used+=split[i];missing+=needs[i]-split[i];}
-                    String summary=chosen.isEmpty()?"اختار قسط واحد على الأقل":
-                            "هتتربط "+chosen.size()+" أقساط بـ "+money(used,preview.currency)+
+                    String summary=covered.isEmpty()?"اختار قسط واحد على الأقل":
+                            "هتتربط "+covered.size()+" أقساط بـ "+money(used,preview.currency)+
                             (missing>0?"\nآخر قسط هيفضل عليه "+money(missing,preview.currency):"")+
                             (preview.available>used?"\nيفضل من الدفعة "+money(preview.available-used,preview.currency)+" مش مربوط":"");
                     body.addView(components.label(summary,UiTheme.CAPTION,MUTED));
