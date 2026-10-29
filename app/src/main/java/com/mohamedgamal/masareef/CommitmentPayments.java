@@ -26,8 +26,29 @@ final class CommitmentPayments {
         sql.execSQL("UPDATE recurring SET settlement_key='legacy:'||id WHERE settlement_key IS NULL");
         sql.execSQL("CREATE TABLE IF NOT EXISTS commitment_cycles(id INTEGER PRIMARY KEY AUTOINCREMENT,commitment_key TEXT NOT NULL,due_date TEXT NOT NULL,amount_minor INTEGER NOT NULL CHECK(amount_minor>0),currency TEXT NOT NULL,UNIQUE(commitment_key,due_date))");
         sql.execSQL("CREATE TABLE IF NOT EXISTS commitment_payments(id INTEGER PRIMARY KEY AUTOINCREMENT,cycle_id INTEGER,transaction_key TEXT,confirmation_key TEXT UNIQUE,amount_minor INTEGER NOT NULL CHECK(amount_minor>=0),paid_date TEXT NOT NULL,merchant TEXT,transaction_date TEXT,origin TEXT NOT NULL CHECK(origin IN ('automatic','reviewed','provider','manual')),active INTEGER NOT NULL DEFAULT 1,undone_at INTEGER,encrypted_body TEXT,notice_hash TEXT,received_at INTEGER,review_status TEXT NOT NULL DEFAULT 'resolved' CHECK(review_status IN ('pending','dismissed','resolved')))");
-        sql.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS commitment_active_transaction ON commitment_payments(transaction_key) WHERE active=1 AND transaction_key IS NOT NULL");
+        allowSplitPayments(sql);
         sql.execSQL("CREATE INDEX IF NOT EXISTS commitment_cycle_payments ON commitment_payments(cycle_id)");
+    }
+
+    /**
+     * Schema 28: one payment may cover several cycles ("دفعت قسطين مرة واحدة"), never the same cycle twice. The old index
+     * allowed one active allocation per transaction; the new one allows one per (transaction, cycle). The transaction's
+     * own amount still caps the sum of its allocations (link checks it).
+     */
+    static void allowSplitPayments(SQLiteDatabase sql){
+        sql.execSQL("DROP INDEX IF EXISTS commitment_active_transaction");
+        sql.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS commitment_active_transaction_cycle ON commitment_payments(transaction_key,cycle_id) WHERE active=1 AND transaction_key IS NOT NULL");
+    }
+
+    /** What this transaction's active allocations already use, across every commitment and cycle. */
+    long allocatedByTransaction(String identity){
+        if(identity==null)return 0;
+        try(Cursor c=db.getReadableDatabase().rawQuery("SELECT COALESCE(SUM(amount_minor),0) FROM commitment_payments WHERE transaction_key=? AND active=1",new String[]{identity})){
+            return c.moveToFirst()?c.getLong(0):0;
+        }
+    }
+    private long unallocated(Transaction tx,String identity){
+        return Math.max(0,ExpenseDb.effectiveAmount(tx,db.reimbursementOffsets())-allocatedByTransaction(identity));
     }
 
     String key(long id){
@@ -197,7 +218,7 @@ final class CommitmentPayments {
                     !tx.merchant.equals(expected.merchant)||!tx.category.equals(expected.category)||
                     !java.util.Objects.equals(tx.paymentSourceId,expected.paymentSourceId))throw new IllegalArgumentException("Payment preview changed");
             Cycle cycle=materialize(plan,due);String identity=db.rowIdentityKey(transactionId);
-            if(!cycle.currency.equals(tx.currency)||amount>ExpenseDb.effectiveAmount(tx,db.reimbursementOffsets()))throw new IllegalArgumentException("Payment currency or amount changed");
+            if(!cycle.currency.equals(tx.currency)||amount>unallocated(tx,identity))throw new IllegalArgumentException("Payment currency or amount changed");
             insertAllocation(cycle,tx,identity,amount,"reviewed");
             long id;try(Cursor c=sql.rawQuery("SELECT last_insert_rowid()",null)){c.moveToFirst();id=c.getLong(0);}
             classifyPayment(plan,tx);
@@ -289,14 +310,17 @@ final class CommitmentPayments {
         List<Transaction> rows=new ArrayList<>();
         for(Transaction tx:db.transactionsBetween(due.minusMonths(1),due.plusMonths(1).plusDays(1))){
             if(!eligible(tx))continue;String identity=db.rowIdentityKey(tx.id);
-            try(Cursor c=db.getReadableDatabase().rawQuery("SELECT 1 FROM commitment_payments WHERE transaction_key=? AND active=1",new String[]{identity})){if(c.moveToFirst())continue;}
+            // A payment that still has an unallocated part (one transfer for two installments) stays a candidate.
+            if(unallocated(tx,identity)<=0)continue;
             rows.add(tx);
         }return rows;
     }
     static final class AllocationPreview {
-        final long commitmentId,expected,max;final LocalDate due;final String commitmentKey,transactionKey,currency;final Transaction transaction;
-        AllocationPreview(long commitmentId,Cycle cycle,String commitmentKey,String transactionKey,Transaction tx,long max){
-            this.commitmentId=commitmentId;expected=cycle.expected;this.max=max;due=cycle.due;currency=cycle.currency;
+        final long commitmentId,expected,max,available;final LocalDate due;final String commitmentKey,transactionKey,currency;final Transaction transaction;
+        AllocationPreview(long commitmentId,Cycle cycle,String commitmentKey,String transactionKey,Transaction tx,long max){this(commitmentId,cycle,commitmentKey,transactionKey,tx,max,max);}
+        /** available: what the payment still has for any cycle; max: what the chosen cycle can take of it. */
+        AllocationPreview(long commitmentId,Cycle cycle,String commitmentKey,String transactionKey,Transaction tx,long max,long available){
+            this.commitmentId=commitmentId;expected=cycle.expected;this.max=max;this.available=available;due=cycle.due;currency=cycle.currency;
             this.commitmentKey=commitmentKey;this.transactionKey=transactionKey;transaction=tx;
         }
     }
@@ -321,9 +345,9 @@ final class CommitmentPayments {
         Recurring plan=db.storedRecurringById(commitmentId);Transaction tx=db.transactionById(transactionId);
         if(plan==null||project(plan).isDone()||!eligible(tx))throw new IllegalArgumentException("Payment changed");
         for(Cycle cycle:possibleCycles(plan,due))if(cycle.due.equals(due)&&cycle.currency.equals(tx.currency)){
-            long max=Math.min(cycle.remaining(),ExpenseDb.effectiveAmount(tx,db.reimbursementOffsets()));
+            long available=unallocated(tx,db.rowIdentityKey(tx.id)),max=Math.min(cycle.remaining(),available);
             if(max<=0)throw new IllegalArgumentException("Cycle already paid");
-            return new AllocationPreview(commitmentId,cycle,key(commitmentId),db.rowIdentityKey(tx.id),tx,max);
+            return new AllocationPreview(commitmentId,cycle,key(commitmentId),db.rowIdentityKey(tx.id),tx,max,available);
         }
         throw new IllegalArgumentException("Choose a cycle on this commitment's schedule and in the payment currency");
     }
@@ -338,6 +362,65 @@ final class CommitmentPayments {
             if(own)sql.setTransactionSuccessful();return id;
         }finally{if(own)sql.endTransaction();}
     }
+    /**
+     * Open cycles of this commitment from a due date on, oldest first: stored cycles with something left, then the
+     * schedule after them (respecting the plan's total count). For the "this payment covers which installments" list.
+     */
+    List<Cycle> openCyclesFrom(long commitmentId,LocalDate from,int limit){
+        List<Cycle> result=new ArrayList<>();Recurring plan=db.storedRecurringById(commitmentId);
+        if(plan==null||project(plan).isDone())return result;
+        List<Cycle> stored=cycles(commitmentId);
+        for(Cycle cycle:stored)if(!cycle.due.isBefore(from)&&cycle.remaining()>0&&result.size()<limit)result.add(cycle);
+        LocalDate due=plan.nextDue;
+        int capacity=plan.totalCount==null?limit:Math.max(0,plan.totalCount-plan.paidCount-stored.size());
+        for(int i=0;i<1200&&capacity>0&&result.size()<limit;i++){
+            if(!due.isBefore(from)){result.add(new Cycle(-1,due,plan.amountMinor,plan.currency));capacity--;}
+            due=plan.nextAfter(due);
+        }
+        return result;
+    }
+
+    /**
+     * The amounts one payment gives to the chosen cycles, oldest first: each cycle takes what it still needs until the
+     * payment runs out. The last cycle may be partly paid; an amount left over stays unallocated. Pure arithmetic.
+     */
+    static long[] split(long available,long[] remaining){
+        long[] out=new long[remaining.length];long left=Math.max(0,available);
+        for(int i=0;i<remaining.length;i++){long take=Math.min(left,Math.max(0,remaining[i]));out[i]=take;left-=take;}
+        return out;
+    }
+
+    /**
+     * Links one recorded payment to several cycles of one commitment at once, in one database transaction. The
+     * transaction must be unchanged since the preview (identity, amount, date, merchant, category, source).
+     * Returns the number of cycles that received an amount.
+     */
+    int linkMany(AllocationPreview expected,List<LocalDate> dues){
+        if(dues==null||dues.isEmpty())throw new IllegalArgumentException("Choose at least one installment");
+        SQLiteDatabase sql=db.getWritableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransaction();
+        try{
+            if(!expected.commitmentKey.equals(key(expected.commitmentId)))throw new IllegalArgumentException("Commitment preview changed");
+            Recurring plan=db.storedRecurringById(expected.commitmentId);Transaction tx=db.transactionById(expected.transaction.id);
+            Transaction was=expected.transaction;
+            if(plan==null||project(plan).isDone()||!eligible(tx)||!expected.transactionKey.equals(db.rowIdentityKey(tx.id))||
+                    tx.amountMinor!=was.amountMinor||tx.when!=was.when||!tx.currency.equals(was.currency)||!tx.merchant.equals(was.merchant)||
+                    !tx.category.equals(was.category)||!java.util.Objects.equals(tx.paymentSourceId,was.paymentSourceId))
+                throw new IllegalArgumentException("Payment preview changed");
+            List<LocalDate> ordered=new ArrayList<>(new java.util.TreeSet<>(dues));
+            long left=unallocated(tx,expected.transactionKey);int linked=0;
+            for(LocalDate due:ordered){
+                if(left<=0)break;
+                Cycle cycle=materialize(plan,due);plan=db.storedRecurringById(expected.commitmentId);
+                if(!cycle.currency.equals(tx.currency))throw new IllegalArgumentException("Payment currency changed");
+                long take=Math.min(left,cycle.remaining());if(take<=0)continue;
+                insertAllocation(cycle,tx,expected.transactionKey,take,"reviewed");left-=take;linked++;
+            }
+            if(linked==0)throw new IllegalArgumentException("Installments already paid");
+            classifyPayment(plan,tx);
+            if(own)sql.setTransactionSuccessful();return linked;
+        }finally{if(own)sql.endTransaction();}
+    }
+
     EvidenceVault.Read evidence(long paymentId){
         try(Cursor c=db.getReadableDatabase().rawQuery("SELECT encrypted_body FROM commitment_payments WHERE id=? AND origin='provider'",new String[]{Long.toString(paymentId)})){
             return c.moveToFirst()?EvidenceVault.read(c.getString(0)):EvidenceVault.Read.NONE;
