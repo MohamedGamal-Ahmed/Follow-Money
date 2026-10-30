@@ -347,40 +347,63 @@ final class FeatureAuditTest {
         try{db.putCommitment(plan,"QA provider",12000,"USD",newDue,"monthly","installment",3,4,2,"qa provider",null);throw new AssertionError("Historical cycles truncated");}
         catch(IllegalArgumentException expected){}eq(revision,db.changes());eq(2,db.transactionCount());
     }
+    /** The commitment editor's save, as MainActivity runs it: decision and plan terms from CommitmentEdit. */
+    private long editorSave(long plan,String merchant,long typed,String currency,boolean onlyThis){
+        ExpenseDb.Recurring view=db.recurringById(plan),stored=db.storedRecurringById(plan);
+        int action=CommitmentEdit.action(true,!view.isDone(),view.amountMinor,view.currency,typed,currency);
+        CommitmentEdit.Price terms=CommitmentEdit.planTerms(action,onlyThis,new CommitmentEdit.Price(stored.amountMinor,stored.currency),new CommitmentEdit.Price(typed,currency));
+        if(action!=CommitmentEdit.ASK_SCOPE)return db.putCommitment(plan,merchant,terms.amount,terms.currency,view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null);
+        return db.putCommitmentWithCycleAmount(plan,merchant,terms.amount,terms.currency,view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null,typed,currency,!onlyThis);
+    }
     /** Owner, 30 Oct 2026: a card installment's amount drops each month; the edit must reach the due installment. */
     public void testEditedAmountReachesTheDueCycleOnlyOrForward(){
         LocalDate october=LocalDate.of(2026,10,31),november=LocalDate.of(2026,11,30);long plan=paymentPlan(october);
-        // The due cycle is stored first at the old price (as a partial payment or a provider notice would do).
-        db.putCommitmentWithCycleAmount(plan,"QA provider","EGP",october,"monthly","installment",12,2,1,"qa provider",null,9000,false);
-        eq(9000,db.commitmentCycles(plan).get(0).expected);
+        // The due cycle is stored first at another price (as a partial payment or a provider notice would do).
+        editorSave(plan,"QA provider",9000,"EGP",true);eq(9000,db.commitmentCycles(plan).get(0).expected);
         // A second edit of the same stored cycle used to be ignored; now it changes the amount shown and confirmed.
-        db.putCommitmentWithCycleAmount(plan,"QA provider","EGP",october,"monthly","installment",12,2,1,"qa provider",null,4439,false);
+        editorSave(plan,"QA provider",4439,"EGP",true);
         eq(4439,db.recurringById(plan).amountMinor);eq(10000,db.storedRecurringById(plan).amountMinor);
         ok(db.confirmCommitmentDue(plan,october,db.commitmentIdentity(plan),october));
         ok(db.recurringById(plan).nextDue.equals(november));eq(10000,db.recurringById(plan).amountMinor);eq(3,db.recurringById(plan).paidCount);
         // Forward: the plan and every later cycle follow.
-        db.putCommitmentWithCycleAmount(plan,"QA provider","EGP",november,"monthly","installment",12,3,1,"qa provider",null,4200,true);
+        editorSave(plan,"QA provider",4200,"EGP",false);
         eq(4200,db.recurringById(plan).amountMinor);eq(4200,db.storedRecurringById(plan).amountMinor);
         ok(db.confirmCommitmentDue(plan,november,db.commitmentIdentity(plan),november));eq(4200,db.recurringById(plan).amountMinor);
     }
-    /** Review of PR #52: a second save with the amount untouched keeps the plan's amount and the due installment's. */
+    /** Review of PR #52: a second save with the price untouched keeps the plan's amount and the due installment's. */
     public void testSecondSaveAfterAnOnlyThisEditKeepsBothAmounts(){
         LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
-        db.putCommitmentWithCycleAmount(plan,"QA provider","EGP",october,"monthly","installment",12,2,1,"qa provider",null,4439,false);
-        ExpenseDb.Recurring view=db.recurringById(plan);long shown=CommitmentEdit.fieldAmount(view.amountMinor);eq(4439,shown);
-        int action=CommitmentEdit.action(true,!view.isDone(),true,view.amountMinor,shown);eq(CommitmentEdit.KEEP_PLAN,action);
-        // The editor's KEEP_PLAN save: a renamed plan with its stored amount.
-        db.putCommitment(plan,"QA provider renamed",db.storedRecurringById(plan).amountMinor,"EGP",view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null);
+        editorSave(plan,"QA provider",4439,"EGP",true);
+        ExpenseDb.Recurring view=db.recurringById(plan);CommitmentEdit.Price shown=CommitmentEdit.field(view.amountMinor,view.currency);
+        eq(4439,shown.amount);eq("EGP",shown.currency);
+        editorSave(plan,"QA provider renamed",shown.amount,shown.currency,false);
         eq(10000,db.storedRecurringById(plan).amountMinor);eq(4439,db.recurringById(plan).amountMinor);
         eq("QA provider renamed",db.recurringById(plan).merchant);
-        eq(CommitmentEdit.ASK_SCOPE,CommitmentEdit.action(true,true,true,4439,10000));
+    }
+    /** Review of PR #52: an open 4,439 EGP installment and a 100 USD plan; a name-only save keeps both, never 4,439 USD. */
+    public void testNameOnlySaveKeepsAPlanInAnotherCurrency(){
+        LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
+        editorSave(plan,"QA provider",4439,"EGP",true);
+        // New installments in dollars: a new currency is a plan change, the open EGP installment keeps its price.
+        editorSave(plan,"QA provider",10000,"USD",false);
+        eq(10000,db.storedRecurringById(plan).amountMinor);eq("USD",db.storedRecurringById(plan).currency);
+        ExpenseDb.Recurring view=db.recurringById(plan);eq(4439,view.amountMinor);eq("EGP",view.currency);
+        CommitmentEdit.Price shown=CommitmentEdit.field(view.amountMinor,view.currency);eq(4439,shown.amount);eq("EGP",shown.currency);
+        long id=editorSave(plan,"QA provider renamed",shown.amount,shown.currency,false);eq(plan,id);
+        eq(10000,db.storedRecurringById(plan).amountMinor);eq("USD",db.storedRecurringById(plan).currency);
+        eq(4439,db.recurringById(plan).amountMinor);eq("EGP",db.recurringById(plan).currency);
+        eq("QA provider renamed",db.recurringById(plan).merchant);
+        // The due cycle never takes an amount in another currency.
+        try{db.putCommitmentWithCycleAmount(plan,"QA provider",10000,"USD",view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null,4000,"USD",false);throw new AssertionError("Cross-currency cycle amount accepted");}
+        catch(IllegalArgumentException expected){}
+        eq(4439,db.recurringById(plan).amountMinor);
     }
     public void testEditedAmountNeverDropsBelowWhatTheCycleReceived(){
         LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
         ok(db.addManual(at(october),6000,"EGP","QA other payee","تحويلات"));long tx=db.latestInserted().id;
         db.linkCommitmentPayment(plan,october,tx,6000);eq(4000,db.commitmentCycles(plan).get(0).remaining());
         long revision=db.changes();
-        try{db.putCommitmentWithCycleAmount(plan,"QA provider","EGP",october,"monthly","installment",12,2,1,"qa provider",null,5000,false);throw new AssertionError("Amount below paid accepted");}
+        try{editorSave(plan,"QA provider",5000,"EGP",true);throw new AssertionError("Amount below paid accepted");}
         catch(IllegalArgumentException expected){eq(CommitmentPayments.BELOW_PAID,expected.getMessage());}
         eq(revision,db.changes());eq(10000,db.commitmentCycles(plan).get(0).expected);
     }

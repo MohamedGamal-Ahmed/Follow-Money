@@ -2315,18 +2315,19 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     boolean confirmCommitmentCycle(long id,LocalDate due,String key,LocalDate day){return commitmentPayments.confirmCycle(id,due,key,day);}
     boolean confirmCommitmentDue(long id,LocalDate due,String key,LocalDate day){return commitmentPayments.confirmDue(id,due,key,day);}
     /**
-     * Saves an edited commitment and gives its due cycle the new amount, in one database transaction. Only that cycle when
-     * forward is false (the plan keeps its old amount for later cycles), every later open cycle too when it is true.
+     * Saves an edited commitment with the given plan terms and gives its due cycle the new amount (in that cycle's
+     * currency), in one database transaction. Only that cycle when forward is false, every later open cycle in the same
+     * currency too when it is true. The caller picks the plan terms (CommitmentEdit.planTerms).
      */
-    long putCommitmentWithCycleAmount(long id,String merchant,String currency,LocalDate nextDue,String cycle,String kind,
+    long putCommitmentWithCycleAmount(long id,String merchant,long planAmount,String planCurrency,LocalDate nextDue,String cycle,String kind,
                                       Integer totalCount,int paidCount,int remindDays,String matchText,Long paymentSourceId,
-                                      long amount,boolean forward){
+                                      long amount,String amountCurrency,boolean forward){
         SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
         try{
-            Recurring stored=storedRecurringById(id);if(stored==null)throw new IllegalArgumentException("Commitment missing");
-            long saved=commitments.putCommitment(id,merchant,forward?amount:stored.amountMinor,currency,nextDue,cycle,kind,
+            if(storedRecurringById(id)==null)throw new IllegalArgumentException("Commitment missing");
+            long saved=commitments.putCommitment(id,merchant,planAmount,planCurrency,nextDue,cycle,kind,
                     totalCount,paidCount,remindDays,matchText,paymentSourceId);
-            commitmentPayments.setCycleAmount(saved,commitments.recurringById(saved).nextDue,amount,forward);
+            commitmentPayments.setCycleAmount(saved,commitments.recurringById(saved).nextDue,amount,amountCurrency,forward);
             sql.setTransactionSuccessful();return saved;
         }finally{sql.endTransaction();}
     }

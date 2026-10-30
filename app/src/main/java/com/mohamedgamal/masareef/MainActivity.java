@@ -5892,7 +5892,7 @@ public final class MainActivity extends Activity {
         amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         if(suggestion!=null && suggestion.amount>0) amount.setText(String.format(Locale.ROOT,"%.2f",suggestion.amount/100.0));
         // The due installment's amount, as on the commitment page; the plan's own amount is kept unless this number changes.
-        else if (existing != null) amount.setText(String.format(Locale.ROOT, "%.2f", CommitmentEdit.fieldAmount(existing.amountMinor) / 100.0));
+        else if (existing != null) amount.setText(String.format(Locale.ROOT, "%.2f", CommitmentEdit.field(existing.amountMinor, existing.currency).amount / 100.0));
         Spinner currency = new AppChoiceSpinner("العملة", CURRENCIES);
         currency.setBackground(outlined(SURFACE, BORDER, 12));
         // Grows with the font (200% clipped "EGP" at a fixed size); never narrower or shorter than a touch target.
@@ -5900,7 +5900,9 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(-2, -2);
         currencyParams.setMarginStart(dp(8));
         amountRow.addView(currency, currencyParams);
-        if (futureTerms != null) for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(futureTerms.currency)) currency.setSelection(i);
+        // Same source as the amount: the due installment's currency (review of PR #52).
+        if (existing != null) { String shown = CommitmentEdit.field(existing.amountMinor, existing.currency).currency;
+            for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(shown)) currency.setSelection(i); }
         if (suggestion != null) for (int i=0;i<CURRENCIES.length;i++) if(CURRENCIES[i].equals(suggestion.currency)) currency.setSelection(i);
 
         LinearLayout installmentBox = new LinearLayout(this); installmentBox.setOrientation(LinearLayout.VERTICAL);
@@ -6104,18 +6106,20 @@ public final class MainActivity extends Activity {
                             merchant.toLowerCase(Locale.ROOT);
             final Integer totalValue=totalCount; final int paidValue=paidCount;
             final String currencyValue=currency.getSelectedItem().toString(); final Long sourceValue=selectedSource(account, sources);
-            boolean currencyKept = existing != null && existing.currency.equals(currencyValue);
-            int action = CommitmentEdit.action(existing != null, existing != null && !existing.isDone(), currencyKept,
-                    existing == null ? 0 : existing.amountMinor, minor);
-            // Amount untouched: the plan keeps its own amount for later installments (review of PR #52).
-            final long planAmount = action == CommitmentEdit.KEEP_PLAN && futureTerms != null ? futureTerms.amountMinor : minor;
+            int action = CommitmentEdit.action(existing != null, existing != null && !existing.isDone(),
+                    existing == null ? 0 : existing.amountMinor, existing == null ? null : existing.currency, minor, currencyValue);
+            // Price untouched: the plan keeps its own amount and currency for later installments (reviews of PR #52).
+            final CommitmentEdit.Price planPrice = futureTerms == null ? null : new CommitmentEdit.Price(futureTerms.amountMinor, futureTerms.currency);
+            final CommitmentEdit.Price typed = new CommitmentEdit.Price(minor, currencyValue);
+            final int saveAction = action;
             // mode 0: plain save; 1: new amount for the due installment only; 2: for it and every one after it.
             java.util.function.IntConsumer persist = mode -> {
                 long id;
-                try{id = mode == 0 ? db.putCommitment(existing == null ? null : existing.id, merchant, planAmount,
-                        currencyValue, due, cycleValue, kind[0], totalValue, paidValue, remind[0], match, sourceValue)
-                        : db.putCommitmentWithCycleAmount(existing.id, merchant, currencyValue, due, cycleValue, kind[0],
-                        totalValue, paidValue, remind[0], match, sourceValue, minor, mode == 2);}
+                CommitmentEdit.Price terms = CommitmentEdit.planTerms(saveAction, mode == 1, planPrice, typed);
+                try{id = mode == 0 ? db.putCommitment(existing == null ? null : existing.id, merchant, terms.amount,
+                        terms.currency, due, cycleValue, kind[0], totalValue, paidValue, remind[0], match, sourceValue)
+                        : db.putCommitmentWithCycleAmount(existing.id, merchant, terms.amount, terms.currency, due, cycleValue, kind[0],
+                        totalValue, paidValue, remind[0], match, sourceValue, minor, currencyValue, mode == 2);}
                 catch(IllegalArgumentException changed){
                     toast(CommitmentPayments.BELOW_PAID.equals(changed.getMessage()) ? "المبلغ الجديد أقل من اللي اتدفع في القسط ده"
                             : "راجع تسويات الدورات قبل تغيير تاريخ الجدول؛ الدفعات والعمليات محفوظة");

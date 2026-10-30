@@ -15,7 +15,8 @@ From an owner report (salary month, HSBC → Banque Misr transfer, credit-card r
   - «علّمه مدفوع» → «تأكيد يدوي» lists the open installments with their date and remaining amount and settles the one picked, instead of silently closing the oldest open cycle.
   - A repayment into one of the user's own credit cards (bank debit and card receipt, one row) is a payment candidate for any commitment, so card installments can be settled by the card repayment. It stays a move into the card: linking never turns it into an «أقساط» expense.
   - A deleted commitment can be brought back: the commitments page shows «اتحذف «…» · تراجع» until dismissed or another commitment is saved, and restores the row with its cycles and settlements.
-  - Tests: `FeatureAuditTest` — edited amount (only / forward / below paid), chosen-cycle confirmation, card repayment link, delete-and-restore (emulator).
+  - The editor shows the due installment's amount and currency together; a save that leaves that price untouched keeps the plan's own amount and currency (e.g. an open 4,439 EGP installment under a 100 USD plan), and the due installment never takes an amount in another currency.
+  - Tests: `CommitmentEditTest` (JVM); `FeatureAuditTest` — edited amount (only / forward / below paid), second save, other-currency plan, chosen-cycle confirmation, card repayment link, delete-and-restore (emulator).
 - Tests: `CaptureNoticeTest` card-deposit cases, `MerchantClassificationTest` provider logos/category, `FeatureAuditTest.testOwnNameTransferAndCardRepaymentLegsAreNeitherIncomeNorSpending` (emulator).
 
 ## 0.4.5 — 27 October 2026 (versionCode 15, schema 27)

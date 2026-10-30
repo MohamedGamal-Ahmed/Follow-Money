@@ -282,20 +282,20 @@ final class CommitmentPayments {
      * cycle and the plan's amount for cycles not yet stored follow it too. Never below what the cycle already received.
      * Runs inside the caller's transaction when there is one.
      */
-    void setCycleAmount(long id,LocalDate due,long amount,boolean forward){
+    void setCycleAmount(long id,LocalDate due,long amount,String currency,boolean forward){
         if(amount<=0)throw new IllegalArgumentException("Invalid amount");
         SQLiteDatabase sql=db.getWritableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransaction();
         try{
             Recurring plan=db.storedRecurringById(id);
             if(plan==null||project(plan).isDone())throw new IllegalArgumentException("Commitment is closed");
             Cycle cycle=materialize(plan,due);
+            if(!cycle.currency.equals(currency))throw new IllegalArgumentException("Cycle currency differs");
             if(amount<cycle.paid)throw new IllegalArgumentException(BELOW_PAID);
             ContentValues v=new ContentValues();v.put("amount_minor",amount);
             sql.update("commitment_cycles",v,"id=?",new String[]{Long.toString(cycle.id)});
             if(forward){
-                for(Cycle later:cycles(id))if(later.due.isAfter(due)&&later.remaining()>0&&later.paid<=amount)
+                for(Cycle later:cycles(id))if(later.due.isAfter(due)&&later.remaining()>0&&later.paid<=amount&&later.currency.equals(currency))
                     sql.update("commitment_cycles",v,"id=?",new String[]{Long.toString(later.id)});
-                sql.update("recurring",v,"id=?",new String[]{Long.toString(id)});
             }
             if(own)sql.setTransactionSuccessful();
         }finally{if(own)sql.endTransaction();}
