@@ -2313,6 +2313,25 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     List<Transaction> commitmentPaymentCandidates(LocalDate due){return commitmentPayments.candidates(due);}
     String commitmentIdentity(long id){return commitmentPayments.key(id);}
     boolean confirmCommitmentCycle(long id,LocalDate due,String key,LocalDate day){return commitmentPayments.confirmCycle(id,due,key,day);}
+    boolean confirmCommitmentDue(long id,LocalDate due,String key,LocalDate day){return commitmentPayments.confirmDue(id,due,key,day);}
+    /**
+     * Saves an edited commitment and gives its due cycle the new amount, in one database transaction. Only that cycle when
+     * forward is false (the plan keeps its old amount for later cycles), every later open cycle too when it is true.
+     */
+    long putCommitmentWithCycleAmount(long id,String merchant,String currency,LocalDate nextDue,String cycle,String kind,
+                                      Integer totalCount,int paidCount,int remindDays,String matchText,Long paymentSourceId,
+                                      long amount,boolean forward){
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        try{
+            Recurring stored=storedRecurringById(id);if(stored==null)throw new IllegalArgumentException("Commitment missing");
+            long saved=commitments.putCommitment(id,merchant,forward?amount:stored.amountMinor,currency,nextDue,cycle,kind,
+                    totalCount,paidCount,remindDays,matchText,paymentSourceId);
+            commitmentPayments.setCycleAmount(saved,commitments.recurringById(saved).nextDue,amount,forward);
+            sql.setTransactionSuccessful();return saved;
+        }finally{sql.endTransaction();}
+    }
+    android.content.ContentValues commitmentSnapshot(long id){return commitments.snapshot(id);}
+    boolean restoreCommitment(android.content.ContentValues row){return commitments.restore(row);}
     List<CommitmentPayments.ProviderNotice> pendingCommitmentConfirmations(){return commitmentPayments.pendingProviders();}
     boolean resolveCommitmentConfirmation(long notice,long id,LocalDate due){return commitmentPayments.resolveProvider(notice,id,due);}
     boolean resolveCommitmentConfirmation(long notice,long id,LocalDate due,String key){return commitmentPayments.resolveProvider(notice,id,due,key);}

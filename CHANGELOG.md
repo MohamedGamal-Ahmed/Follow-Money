@@ -10,6 +10,12 @@ From an owner report (salary month, HSBC → Banque Misr transfer, credit-card r
 - Installment providers valU, Souhoola, Premium Card, Halan, Contact, Sympl, MoGo, MoneyFellows, Seven, Forsa and Takka are in the commitment provider tiles, named merchants file under «أقساط», and they show owner-supplied logos (Breadfast and Waffarha too).
 - One payment can cover several installments (schema 28): when a linked payment is bigger than the chosen cycle needs, the link page lists the open installments from that cycle on, ticks as many as the payment covers, and links them in one step; the last one may stay partly paid and any extra stays unallocated (still linkable later). The payment's own amount caps the sum of its links across all commitments. The unique index is now one active link per (transaction, cycle) instead of per transaction.
 - Tests: `FeatureAuditTest.testOnePaymentCoversSeveralInstallments`; `ShadowStoreTest` expects schema 28.
+- Commitments, from an owner report of 30 Oct 2026 (Banque Misr card installments, 5,xxx shown while 4,439 was due):
+  - Editing the amount of a commitment that is not closed asks «للقسط الجاي بس» or «للقسط الجاي وكل اللي بعده» and sets the due installment's own amount (stored cycles used to keep their first price forever, so the edit never showed). Never below what that installment already received.
+  - «علّمه مدفوع» → «تأكيد يدوي» lists the open installments with their date and remaining amount and settles the one picked, instead of silently closing the oldest open cycle.
+  - A repayment into one of the user's own credit cards (bank debit and card receipt, one row) is a payment candidate for any commitment, so card installments can be settled by the card repayment. It stays a move into the card: linking never turns it into an «أقساط» expense.
+  - A deleted commitment can be brought back: the commitments page shows «اتحذف «…» · تراجع» until dismissed or another commitment is saved, and restores the row with its cycles and settlements.
+  - Tests: `FeatureAuditTest` — edited amount (only / forward / below paid), chosen-cycle confirmation, card repayment link, delete-and-restore (emulator).
 - Tests: `CaptureNoticeTest` card-deposit cases, `MerchantClassificationTest` provider logos/category, `FeatureAuditTest.testOwnNameTransferAndCardRepaymentLegsAreNeitherIncomeNorSpending` (emulator).
 
 ## 0.4.5 — 27 October 2026 (versionCode 15, schema 27)

@@ -138,6 +138,37 @@ final class CommitmentRepository {
         db.getWritableDatabase().delete("recurring", "id=?", new String[]{Long.toString(id)});
     }
 
+    /**
+     * The commitment's stored row, every column as saved, so a delete can be undone. Cycles and settlements are keyed by
+     * settlement_key and are never deleted with the row, so putting the row back brings its history back with it.
+     */
+    android.content.ContentValues snapshot(long id) {
+        try (Cursor c = db.getReadableDatabase().rawQuery("SELECT * FROM recurring WHERE id=?", new String[]{Long.toString(id)})) {
+            if (!c.moveToFirst()) return null;
+            android.content.ContentValues row = new android.content.ContentValues();
+            for (int i = 0; i < c.getColumnCount(); i++) {
+                String name = c.getColumnName(i);
+                switch (c.getType(i)) {
+                    case Cursor.FIELD_TYPE_NULL: row.putNull(name); break;
+                    case Cursor.FIELD_TYPE_INTEGER: row.put(name, c.getLong(i)); break;
+                    case Cursor.FIELD_TYPE_FLOAT: row.put(name, c.getDouble(i)); break;
+                    case Cursor.FIELD_TYPE_BLOB: row.put(name, c.getBlob(i)); break;
+                    default: row.put(name, c.getString(i));
+                }
+            }
+            return row;
+        }
+    }
+
+    /** Puts a deleted commitment back exactly as it was (same id and settlement key). False if it can't be restored. */
+    boolean restore(android.content.ContentValues row) {
+        if (row == null) return false;
+        if (db.getWritableDatabase().insertWithOnConflict("recurring", null, row, SQLiteDatabase.CONFLICT_IGNORE) != -1) return true;
+        // Its id was taken by a newer commitment: history follows settlement_key, so a fresh id keeps the cycles.
+        android.content.ContentValues fresh = new android.content.ContentValues(row); fresh.remove("id");
+        return db.getWritableDatabase().insertWithOnConflict("recurring", null, fresh, SQLiteDatabase.CONFLICT_IGNORE) != -1;
+    }
+
     void markAlerted(long id, LocalDate today) {
         ContentValues values = new ContentValues();
         values.put("last_alert_date", today.toString());
