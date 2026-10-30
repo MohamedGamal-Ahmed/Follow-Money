@@ -7014,8 +7014,8 @@ public final class MainActivity extends Activity {
         bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
         if (action != null) {
             boolean add = "+".equals(icon) || "＋".equals(icon);
-            int res = add ? R.drawable.ic_plus : "↥".equals(icon) ? R.drawable.ic_cat_income : R.drawable.ic_more;
-            String description = add ? "إضافة" : "↥".equals(icon) ? "تصدير" : "خيارات";
+            int res = add ? R.drawable.ic_plus : R.drawable.ic_more;
+            String description = add ? "إضافة" : "خيارات";
             bar.addView(add ? primaryIconButton(res, description, action) : iconButton(res, description, action),
                     new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
@@ -7419,7 +7419,8 @@ public final class MainActivity extends Activity {
         String title="spending".equals(insightsSection)?"تحليل الإنفاق":"categories".equals(insightsSection)?"تحليل التصنيفات":
                 "flow".equals(insightsSection)?"الفلوس دخلت وخرجت":"living".equals(insightsSection)?"تكلفة المعيشة":
                 "overview".equals(insightsSection)?"فلوسك راحت فين":"تقاريرك المالية";
-        header("التحليلات", title, "↥", this::exportCsv);
+        // CSV export lives in Settings → Data; a top-left arrow here read as "back" in RTL.
+        header("التحليلات", title, "", null);
         if(!insightsSection.isEmpty()) {
             TextView back=label("← كل التقارير",13,ACCENT,true);back.setPadding(0,dp(10),0,dp(10));page.addView(back);
             back.setOnClickListener(v->{insightsSection="";render();});
