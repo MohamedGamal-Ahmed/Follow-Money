@@ -337,7 +337,7 @@ final class UnifiedUiTest {
             main(()->activity.onBackPressed());click("تجاهل التعديلات");
             main(()->{
                 ok(!((UiPages)get("formPages")).isOpen(),"Discard returned to parent");
-                ok("appearance".equals(get("settingsSection")),"Correct parent section");
+                ok((int)get("selectedTab")==5&&"".equals(get("settingsSection")),"Correct parent page");
                 ok("QA original".equals(target.getSharedPreferences(MainActivity.class.getName(),0).getString("profile_name","")),"Discard never saved");
                 invoke("displayNamePage",new Class<?>[0]);name().setText("QA saved");findButton(root(),"حفظ").performClick();
                 ok("QA saved".equals(target.getSharedPreferences(MainActivity.class.getName(),0).getString("profile_name","")),"Save committed draft");
@@ -405,13 +405,18 @@ final class UnifiedUiTest {
                 ok(hit!=null,"Search folds taa marbuta and finds backup");
                 search.setText("app lock");ok(root().findViewWithTag("settings_result:قفل التطبيق")!=null,"English keyword finds app lock");
                 search.setText("zzzz");ok(root().findViewWithTag("settings_result:قفل التطبيق")==null,"Non-matching query hides results");
-                search.setText("قفل");root().findViewWithTag("settings_result:القفل بعد").performClick();
+                search.setText("قفل");root().findViewWithTag("settings_result:قفل التطبيق").performClick();
             });
             runner.getUiAutomation().waitForIdle(300,3000);
             main(()->{
-                ok("data".equals(get("settingsSection")),"Search hit opens owning section");
-                ok(root().findViewWithTag("setting:القفل بعد: فورًا")!=null||root().findViewWithTag("setting:القفل بعد: دقيقة")!=null
-                        ||root().findViewWithTag("setting:القفل بعد: 5 دقائق")!=null,"Lock timeout is a first-level row");
+                ok("".equals(get("settingsSection")),"Search hit stays on the settings page");
+                ok(root().findViewWithTag("setting:قفل التطبيق")!=null,"App lock is a first-level row");
+                ((EditText)root().findViewWithTag("settings_search")).setText("csv");root().findViewWithTag("settings_result:استيراد معاملات CSV").performClick();
+            });
+            runner.getUiAutomation().waitForIdle(300,3000);
+            main(()->{
+                ok((Boolean)get("settingsAdvanced"),"A hit in the advanced tools opens them");
+                ok(root().findViewWithTag("setting:استيراد معاملات CSV")!=null,"Advanced row is shown");
                 ok(!((UiPages)get("formPages")).isOpen(),"Search hit never runs an action");
             });
             screen("05-settings-search-hit");

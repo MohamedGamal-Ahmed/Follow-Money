@@ -72,6 +72,48 @@ final class UiKit {
      * Columns (months or days) stacked by spending bucket, in calendar order; RTL puts the earliest on the right.
      * A tap reports the column index so the screen can open that month. Exact values live in the text rows below.
      */
+    /** A daily-spend line with a soft fill under it, for the analytics total tile (redesign, 31 Oct 2026). */
+    static final class Sparkline extends View {
+        private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private long[] values = new long[0];
+
+        Sparkline(Context context) {
+            super(context);
+            line.setStyle(Paint.Style.STROKE); line.setStrokeJoin(Paint.Join.ROUND); line.setStrokeCap(Paint.Cap.ROUND);
+            fill.setStyle(Paint.Style.FILL);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
+        }
+
+        void setData(long[] values, int color, String description) {
+            this.values = values == null ? new long[0] : values;
+            line.setColor(color); line.setStrokeWidth(2f * getResources().getDisplayMetrics().density);
+            fill.setColor((color & 0x00ffffff) | 0x26000000);
+            setContentDescription(description);
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            if (values.length < 2) return;
+            long max = 1;
+            for (long v : values) max = Math.max(max, v);
+            float w = getWidth(), h = getHeight(), pad = line.getStrokeWidth() * 1.5f;
+            android.graphics.Path path = new android.graphics.Path(), area = new android.graphics.Path();
+            boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
+            for (int i = 0; i < values.length; i++) {
+                float fraction = (float) i / (values.length - 1);
+                float x = rtl ? w - fraction * w : fraction * w;
+                float y = h - pad - (h - pad * 2) * values[i] / max;
+                if (i == 0) { path.moveTo(x, y); area.moveTo(x, h); area.lineTo(x, y); }
+                else { path.lineTo(x, y); area.lineTo(x, y); }
+                if (i == values.length - 1) area.lineTo(x, h);
+            }
+            area.close();
+            canvas.drawPath(area, fill);
+            canvas.drawPath(path, line);
+        }
+    }
+
     static final class StackedBars extends View {
         interface OnColumn { void selected(int index); }
         private final Paint bar = new Paint(Paint.ANTI_ALIAS_FLAG);
