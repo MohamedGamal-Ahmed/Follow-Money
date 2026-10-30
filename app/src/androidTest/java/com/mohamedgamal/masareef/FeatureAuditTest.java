@@ -363,6 +363,18 @@ final class FeatureAuditTest {
         eq(4200,db.recurringById(plan).amountMinor);eq(4200,db.storedRecurringById(plan).amountMinor);
         ok(db.confirmCommitmentDue(plan,november,db.commitmentIdentity(plan),november));eq(4200,db.recurringById(plan).amountMinor);
     }
+    /** Review of PR #52: a second save with the amount untouched keeps the plan's amount and the due installment's. */
+    public void testSecondSaveAfterAnOnlyThisEditKeepsBothAmounts(){
+        LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
+        db.putCommitmentWithCycleAmount(plan,"QA provider","EGP",october,"monthly","installment",12,2,1,"qa provider",null,4439,false);
+        ExpenseDb.Recurring view=db.recurringById(plan);long shown=CommitmentEdit.fieldAmount(view.amountMinor);eq(4439,shown);
+        int action=CommitmentEdit.action(true,!view.isDone(),true,view.amountMinor,shown);eq(CommitmentEdit.KEEP_PLAN,action);
+        // The editor's KEEP_PLAN save: a renamed plan with its stored amount.
+        db.putCommitment(plan,"QA provider renamed",db.storedRecurringById(plan).amountMinor,"EGP",view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null);
+        eq(10000,db.storedRecurringById(plan).amountMinor);eq(4439,db.recurringById(plan).amountMinor);
+        eq("QA provider renamed",db.recurringById(plan).merchant);
+        eq(CommitmentEdit.ASK_SCOPE,CommitmentEdit.action(true,true,true,4439,10000));
+    }
     public void testEditedAmountNeverDropsBelowWhatTheCycleReceived(){
         LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
         ok(db.addManual(at(october),6000,"EGP","QA other payee","تحويلات"));long tx=db.latestInserted().id;
