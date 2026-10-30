@@ -347,6 +347,100 @@ final class FeatureAuditTest {
         try{db.putCommitment(plan,"QA provider",12000,"USD",newDue,"monthly","installment",3,4,2,"qa provider",null);throw new AssertionError("Historical cycles truncated");}
         catch(IllegalArgumentException expected){}eq(revision,db.changes());eq(2,db.transactionCount());
     }
+    /** The commitment editor's save, as MainActivity runs it: decision and plan terms from CommitmentEdit. */
+    private long editorSave(long plan,String merchant,long typed,String currency,boolean onlyThis){
+        ExpenseDb.Recurring view=db.recurringById(plan),stored=db.storedRecurringById(plan);
+        int action=CommitmentEdit.action(true,!view.isDone(),view.amountMinor,view.currency,typed,currency);
+        CommitmentEdit.Price terms=CommitmentEdit.planTerms(action,onlyThis,new CommitmentEdit.Price(stored.amountMinor,stored.currency),new CommitmentEdit.Price(typed,currency));
+        if(action!=CommitmentEdit.ASK_SCOPE)return db.putCommitment(plan,merchant,terms.amount,terms.currency,view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null);
+        return db.putCommitmentWithCycleAmount(plan,merchant,terms.amount,terms.currency,view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null,typed,currency,!onlyThis);
+    }
+    /** Owner, 30 Oct 2026: a card installment's amount drops each month; the edit must reach the due installment. */
+    public void testEditedAmountReachesTheDueCycleOnlyOrForward(){
+        LocalDate october=LocalDate.of(2026,10,31),november=LocalDate.of(2026,11,30);long plan=paymentPlan(october);
+        // The due cycle is stored first at another price (as a partial payment or a provider notice would do).
+        editorSave(plan,"QA provider",9000,"EGP",true);eq(9000,db.commitmentCycles(plan).get(0).expected);
+        // A second edit of the same stored cycle used to be ignored; now it changes the amount shown and confirmed.
+        editorSave(plan,"QA provider",4439,"EGP",true);
+        eq(4439,db.recurringById(plan).amountMinor);eq(10000,db.storedRecurringById(plan).amountMinor);
+        ok(db.confirmCommitmentDue(plan,october,db.commitmentIdentity(plan),october));
+        ok(db.recurringById(plan).nextDue.equals(november));eq(10000,db.recurringById(plan).amountMinor);eq(3,db.recurringById(plan).paidCount);
+        // Forward: the plan and every later cycle follow.
+        editorSave(plan,"QA provider",4200,"EGP",false);
+        eq(4200,db.recurringById(plan).amountMinor);eq(4200,db.storedRecurringById(plan).amountMinor);
+        ok(db.confirmCommitmentDue(plan,november,db.commitmentIdentity(plan),november));eq(4200,db.recurringById(plan).amountMinor);
+    }
+    /** Review of PR #52: a second save with the price untouched keeps the plan's amount and the due installment's. */
+    public void testSecondSaveAfterAnOnlyThisEditKeepsBothAmounts(){
+        LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
+        editorSave(plan,"QA provider",4439,"EGP",true);
+        ExpenseDb.Recurring view=db.recurringById(plan);CommitmentEdit.Price shown=CommitmentEdit.field(view.amountMinor,view.currency);
+        eq(4439,shown.amount);eq("EGP",shown.currency);
+        editorSave(plan,"QA provider renamed",shown.amount,shown.currency,false);
+        eq(10000,db.storedRecurringById(plan).amountMinor);eq(4439,db.recurringById(plan).amountMinor);
+        eq("QA provider renamed",db.recurringById(plan).merchant);
+    }
+    /** Review of PR #52: an open 4,439 EGP installment and a 100 USD plan; a name-only save keeps both, never 4,439 USD. */
+    public void testNameOnlySaveKeepsAPlanInAnotherCurrency(){
+        LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
+        editorSave(plan,"QA provider",4439,"EGP",true);
+        // New installments in dollars: a new currency is a plan change, the open EGP installment keeps its price.
+        editorSave(plan,"QA provider",10000,"USD",false);
+        eq(10000,db.storedRecurringById(plan).amountMinor);eq("USD",db.storedRecurringById(plan).currency);
+        ExpenseDb.Recurring view=db.recurringById(plan);eq(4439,view.amountMinor);eq("EGP",view.currency);
+        CommitmentEdit.Price shown=CommitmentEdit.field(view.amountMinor,view.currency);eq(4439,shown.amount);eq("EGP",shown.currency);
+        long id=editorSave(plan,"QA provider renamed",shown.amount,shown.currency,false);eq(plan,id);
+        eq(10000,db.storedRecurringById(plan).amountMinor);eq("USD",db.storedRecurringById(plan).currency);
+        eq(4439,db.recurringById(plan).amountMinor);eq("EGP",db.recurringById(plan).currency);
+        eq("QA provider renamed",db.recurringById(plan).merchant);
+        // The due cycle never takes an amount in another currency.
+        try{db.putCommitmentWithCycleAmount(plan,"QA provider",10000,"USD",view.nextDue,"monthly","installment",12,view.paidCount,1,"qa provider",null,4000,"USD",false);throw new AssertionError("Cross-currency cycle amount accepted");}
+        catch(IllegalArgumentException expected){}
+        eq(4439,db.recurringById(plan).amountMinor);
+    }
+    public void testEditedAmountNeverDropsBelowWhatTheCycleReceived(){
+        LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
+        ok(db.addManual(at(october),6000,"EGP","QA other payee","تحويلات"));long tx=db.latestInserted().id;
+        db.linkCommitmentPayment(plan,october,tx,6000);eq(4000,db.commitmentCycles(plan).get(0).remaining());
+        long revision=db.changes();
+        try{editorSave(plan,"QA provider",5000,"EGP",true);throw new AssertionError("Amount below paid accepted");}
+        catch(IllegalArgumentException expected){eq(CommitmentPayments.BELOW_PAID,expected.getMessage());}
+        eq(revision,db.changes());eq(10000,db.commitmentCycles(plan).get(0).expected);
+    }
+    /** Owner, 30 Oct 2026: "علّمه مدفوع" settles the installment the user picks, not silently the oldest open one. */
+    public void testManualConfirmationSettlesTheChosenCycle(){
+        LocalDate october=LocalDate.of(2026,10,31),november=LocalDate.of(2026,11,30);long plan=paymentPlan(october);
+        String key=db.commitmentIdentity(plan);
+        ok(db.confirmCommitmentDue(plan,november,key,october.minusDays(1)));
+        ok(db.recurringById(plan).nextDue.equals(october));eq(3,db.recurringById(plan).paidCount);
+        ok(!db.confirmCommitmentDue(plan,november,key,october));
+        ok(db.confirmCommitmentDue(plan,october,key,october));ok(db.recurringById(plan).nextDue.equals(LocalDate.of(2026,12,31)));
+        ok(!db.confirmCommitmentDue(plan,october,"another key",october));eq(0,db.transactionCount());
+    }
+    /** Owner, 30 Oct 2026: card installments are paid by repaying the card; that repayment can settle the commitment. */
+    public void testCardRepaymentCanSettleACardCommitmentWithoutBecomingAnInstallment(){
+        LocalDate day=LocalDate.now().minusDays(1);long t=at(day);
+        String dmy=day.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        long account=db.addPaymentSource("QA Bank","حساب","5678");long card=db.addPaymentSource("QA Bank Card","بطاقة ائتمان","1234");
+        long plan=db.putCommitment(null,"QA card installments",443900,"EGP",day,"monthly","installment",null,0,1,"qa card installments",card);
+        ok(db.addSms("QA Bank","Transfer of EGP 4,439.00 from your account ****5678 to credit card ****1234 on "+dmy,t));
+        ExpenseDb.Transaction repayment=db.lastCaptured();ok(repayment.destinationSourceId!=null&&repayment.destinationSourceId==card);
+        eq(0,db.recurringById(plan).paidCount);
+        ok(db.commitmentPaymentCandidates(day).stream().anyMatch(tx->tx.id==repayment.id));
+        db.linkCommitmentPayment(db.commitmentPaymentPreview(plan,day,repayment.id),443900);
+        eq(1,db.recurringById(plan).paidCount);eq(repayment.category,db.transactionById(repayment.id).category);
+        ok(MoneyFlow.bucket(repayment.kind,repayment.category,true)==MoneyFlow.Bucket.INTERNAL);eq(1,db.transactionCount());
+    }
+    /** Owner, 30 Oct 2026: a deleted commitment came back with nothing; undo restores it with its settlements. */
+    public void testDeletedCommitmentRestoresWithItsSettlements(){
+        LocalDate october=LocalDate.of(2026,10,31);long plan=paymentPlan(october);
+        ok(db.confirmCommitmentDue(plan,october,db.commitmentIdentity(plan),october));
+        ExpenseDb.Recurring before=db.recurringById(plan);android.content.ContentValues row=db.commitmentSnapshot(plan);
+        db.removeRecurring(plan);ok(db.recurringById(plan)==null);
+        ok(db.restoreCommitment(row));ExpenseDb.Recurring back=db.recurringById(plan);
+        ok(back!=null);eq(before.paidCount,back.paidCount);ok(before.nextDue.equals(back.nextDue));eq(1,db.commitmentPayments(plan).size());
+        ok(!db.restoreCommitment(null));
+    }
     public void testSupportFormEncodesOnlyEnvironmentMetadata() {
         android.net.Uri uri = GitHubSupport.bugUri(context);
         ok("https".equals(uri.getScheme()));

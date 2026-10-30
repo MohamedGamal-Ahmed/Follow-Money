@@ -96,6 +96,7 @@ public final class MainActivity extends Activity {
     private java.time.YearMonth monthlyMonth=java.time.YearMonth.now().minusMonths(1);
     private String monthlyCurrency="EGP";
     private ExpenseDb.Recurring editingCommitment;
+    private android.content.ContentValues deletedCommitment; private String deletedCommitmentName;
     private String transactionKindFilter = "";
     private String transactionCategoryFilter = "";
     /** Pseudo-category behind «عملية محتاجة تصنيف»: uncategorized expenses and every row waiting for review. */
@@ -5038,6 +5039,23 @@ public final class MainActivity extends Activity {
         bar.addView(primaryIconButton(R.drawable.ic_plus, "إضافة التزام", () -> openCommitmentEditor(null)),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(bar);
+        // Owner, 30 Oct 2026: a deleted commitment could not be brought back. The last one can be, until the app closes.
+        if (deletedCommitment != null) {
+            LinearLayout undoBox = card(); undoBox.setOrientation(LinearLayout.HORIZONTAL); undoBox.setGravity(Gravity.CENTER_VERTICAL);
+            undoBox.addView(label("اتحذف «" + deletedCommitmentName + "»", 14, INK, true), new LinearLayout.LayoutParams(0, -2, 1));
+            TextView undo = label("تراجع", 14, ACCENT, true); undo.setPadding(dp(12), dp(8), dp(4), dp(8));
+            undo.setOnClickListener(v -> {
+                boolean back = db.restoreCommitment(deletedCommitment);
+                deletedCommitment = null; deletedCommitmentName = null;
+                if (back) try { SmsReceiver.notifyDataChanged(getApplicationContext()); } catch (RuntimeException ignored) {}
+                toast(back ? "رجع الالتزام بكل تسوياته" : "تعذر إرجاع الالتزام");
+                render();
+            });
+            undoBox.addView(undo);
+            TextView dismiss = label("تمام", 13, MUTED, false); dismiss.setPadding(dp(12), dp(8), dp(4), dp(8));
+            dismiss.setOnClickListener(v -> { deletedCommitment = null; deletedCommitmentName = null; render(); });
+            undoBox.addView(dismiss);
+        }
         // Fixed monthly transfers (e.g. an apartment installment paid by instant transfer) are offered as installments.
         List<CommitmentPayments.ProviderNotice> pendingPayments=db.pendingCommitmentConfirmations();
         if(!pendingPayments.isEmpty()){
@@ -5455,13 +5473,10 @@ public final class MainActivity extends Activity {
             paid.setGravity(Gravity.CENTER); paid.setBackground(rounded(0x1fffffff, 14));
             paid.setOnClickListener(v -> {
                 String key=db.commitmentIdentity(item.id);
-                new ChoiceDialogBuilder().setTitle("سداد دورة "+item.nextDue)
+                new ChoiceDialogBuilder().setTitle("سداد "+item.merchant)
                         .setItems(new String[]{"اربط عملية مسجلة · يشمل الدفع الجزئي","تأكيد يدوي فقط · بدون مصروف جديد"},(d,choice)->{
                             if(choice==0)commitmentLinkDialog(item);
-                            else new ChoiceDialogBuilder().setTitle("تأكيد سداد بدون قيد مالي")
-                                    .setMessage(item.merchant+" · دورة "+item.nextDue+"\nالتأكيد يعلّم المتبقي مدفوعًا ولا يضيف مصروفًا. تقدر تتراجع من التسويات.")
-                                    .setPositiveButton("تأكيد",(a,b)->commitmentWrite(()->db.confirmCommitmentCycle(item.id,item.nextDue,key,LocalDate.now())))
-                                    .setNegativeButton("إلغاء",null).show();
+                            else confirmCommitmentDialog(item,key);
                         }).show();
             });
             LinearLayout.LayoutParams paidParams = new LinearLayout.LayoutParams(-1, dp(46)); paidParams.topMargin = dp(10);
@@ -5551,10 +5566,29 @@ public final class MainActivity extends Activity {
         delete.setGravity(Gravity.CENTER);
         delete.setOnClickListener(v -> new ChoiceDialogBuilder().setTitle("حذف " + item.merchant + "؟")
                 .setMessage("التنبيهات هتقف، والعمليات المسجلة هتفضل زي ما هي.")
-                .setPositiveButton("حذف", (dialog, which) -> { db.removeRecurring(item.id); selectedTab = 2; render(); })
+                .setPositiveButton("حذف", (dialog, which) -> {
+                    deletedCommitment = db.commitmentSnapshot(item.id); deletedCommitmentName = item.merchant;
+                    db.removeRecurring(item.id); selectedTab = 2; render();
+                })
                 .setNegativeButton("إلغاء", null).show());
         LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(-1, dp(50)); deleteParams.topMargin = dp(18);
         page.addView(delete, deleteParams);
+    }
+
+    /** Owner, 30 Oct 2026: the user picks which installment was paid; the app never closes the oldest one on its own. */
+    private void confirmCommitmentDialog(ExpenseDb.Recurring item,String key){
+        List<CommitmentPayments.Cycle> open=db.openCommitmentCycles(item.id,item.nextDue,6);
+        if(open.isEmpty()){toast("مفيش أقساط مفتوحة");return;}
+        String[] titles=new String[open.size()];
+        for(int i=0;i<titles.length;i++){CommitmentPayments.Cycle c=open.get(i);
+            titles[i]="\u2068"+dayLabel(c.due)+"\u2069 · المتبقي \u2068"+money(c.remaining(),c.currency)+"\u2069";}
+        new ChoiceDialogBuilder().setTitle("أنهي قسط اندفع؟").setItems(titles,(d,i)->{
+            CommitmentPayments.Cycle c=open.get(i);
+            new ChoiceDialogBuilder().setTitle("تأكيد سداد بدون قيد مالي")
+                    .setMessage(item.merchant+" · قسط "+dayLabel(c.due)+" · "+money(c.remaining(),c.currency)+"\nالتأكيد يعلّم المتبقي مدفوعًا ولا يضيف مصروفًا. تقدر تتراجع من التسويات.")
+                    .setPositiveButton("تأكيد",(a,b)->commitmentWrite(()->db.confirmCommitmentDue(item.id,c.due,key,LocalDate.now())))
+                    .setNegativeButton("إلغاء",null).show();
+        }).show();
     }
 
     private interface CommitmentChange{boolean apply();}
@@ -5850,8 +5884,6 @@ public final class MainActivity extends Activity {
             page.addView(source);
         }
 
-        if(existing!=null&&!db.commitmentCycles(existing.id).isEmpty())
-            note("الدورات التي بدأت تحتفظ بمبلغها وعملتها؛ تعديل المبلغ يخص الدورات الجديدة. تسويات الدفعات محفوظة.");
         LinearLayout amountRow = new LinearLayout(this); amountRow.setGravity(Gravity.BOTTOM);
         page.addView(amountRow, new LinearLayout.LayoutParams(-1, -2));
         EditText amount = input(kind[0].equals("installment") ? "القسط الشهري" : "المبلغ", amountRow);
@@ -5859,7 +5891,8 @@ public final class MainActivity extends Activity {
         TextView amountCaption = (TextView) ((LinearLayout) amount.getParent()).getChildAt(0);
         amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         if(suggestion!=null && suggestion.amount>0) amount.setText(String.format(Locale.ROOT,"%.2f",suggestion.amount/100.0));
-        else if (futureTerms != null) amount.setText(String.format(Locale.ROOT, "%.2f", futureTerms.amountMinor / 100.0));
+        // The due installment's amount, as on the commitment page; the plan's own amount is kept unless this number changes.
+        else if (existing != null) amount.setText(String.format(Locale.ROOT, "%.2f", CommitmentEdit.field(existing.amountMinor, existing.currency).amount / 100.0));
         Spinner currency = new AppChoiceSpinner("العملة", CURRENCIES);
         currency.setBackground(outlined(SURFACE, BORDER, 12));
         // Grows with the font (200% clipped "EGP" at a fixed size); never narrower or shorter than a touch target.
@@ -5867,7 +5900,9 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(-2, -2);
         currencyParams.setMarginStart(dp(8));
         amountRow.addView(currency, currencyParams);
-        if (futureTerms != null) for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(futureTerms.currency)) currency.setSelection(i);
+        // Same source as the amount: the due installment's currency (review of PR #52).
+        if (existing != null) { String shown = CommitmentEdit.field(existing.amountMinor, existing.currency).currency;
+            for (int i = 0; i < CURRENCIES.length; i++) if (CURRENCIES[i].equals(shown)) currency.setSelection(i); }
         if (suggestion != null) for (int i=0;i<CURRENCIES.length;i++) if(CURRENCIES[i].equals(suggestion.currency)) currency.setSelection(i);
 
         LinearLayout installmentBox = new LinearLayout(this); installmentBox.setOrientation(LinearLayout.VERTICAL);
@@ -6069,20 +6104,47 @@ public final class MainActivity extends Activity {
             String match = merchant.startsWith("TRU") ? "tru|ترو" : provider != null ? provider.keywords :
                     existing != null && merchant.equalsIgnoreCase(existing.merchant) ? existing.matchText :
                             merchant.toLowerCase(Locale.ROOT);
-            long id;
-            try{id = db.putCommitment(existing == null ? null : existing.id, merchant, minor,
-                    currency.getSelectedItem().toString(), due, cycleValue, kind[0], totalCount, paidCount, remind[0],
-                    match, selectedSource(account, sources));}
-            catch(IllegalArgumentException changed){toast("راجع تسويات الدورات قبل تغيير تاريخ الجدول؛ الدفعات والعمليات محفوظة");return;}
-            if (id == -1) { toast("الالتزام ده متسجل بالفعل"); return; }
-            if (!"weekly".equals(cycleValue)) db.setDueDay(id, dueDay[0]);
-            if (remind[0] >= 0) askNotificationPermission();
-            if(suggestion!=null) db.acceptSuggestion(suggestion.key,id);
-            editingSuggestion=null;
-            editingCommitment = null;
-            selectedCommitmentId = id;
-            selectedTab = 11;
-            render();
+            final Integer totalValue=totalCount; final int paidValue=paidCount;
+            final String currencyValue=currency.getSelectedItem().toString(); final Long sourceValue=selectedSource(account, sources);
+            int action = CommitmentEdit.action(existing != null, existing != null && !existing.isDone(),
+                    existing == null ? 0 : existing.amountMinor, existing == null ? null : existing.currency, minor, currencyValue);
+            // Price untouched: the plan keeps its own amount and currency for later installments (reviews of PR #52).
+            final CommitmentEdit.Price planPrice = futureTerms == null ? null : new CommitmentEdit.Price(futureTerms.amountMinor, futureTerms.currency);
+            final CommitmentEdit.Price typed = new CommitmentEdit.Price(minor, currencyValue);
+            final int saveAction = action;
+            // mode 0: plain save; 1: new amount for the due installment only; 2: for it and every one after it.
+            java.util.function.IntConsumer persist = mode -> {
+                long id;
+                CommitmentEdit.Price terms = CommitmentEdit.planTerms(saveAction, mode == 1, planPrice, typed);
+                try{id = mode == 0 ? db.putCommitment(existing == null ? null : existing.id, merchant, terms.amount,
+                        terms.currency, due, cycleValue, kind[0], totalValue, paidValue, remind[0], match, sourceValue)
+                        : db.putCommitmentWithCycleAmount(existing.id, merchant, terms.amount, terms.currency, due, cycleValue, kind[0],
+                        totalValue, paidValue, remind[0], match, sourceValue, minor, currencyValue, mode == 2);}
+                catch(IllegalArgumentException changed){
+                    toast(CommitmentPayments.BELOW_PAID.equals(changed.getMessage()) ? "المبلغ الجديد أقل من اللي اتدفع في القسط ده"
+                            : "راجع تسويات الدورات قبل تغيير تاريخ الجدول؛ الدفعات والعمليات محفوظة");
+                    return;
+                }
+                if (id == -1) { toast("الالتزام ده متسجل بالفعل"); return; }
+                if (!"weekly".equals(cycleValue)) db.setDueDay(id, dueDay[0]);
+                if (remind[0] >= 0) askNotificationPermission();
+                if(suggestion!=null) db.acceptSuggestion(suggestion.key,id);
+                editingSuggestion=null;
+                editingCommitment = null;
+                deletedCommitment = null; deletedCommitmentName = null; // a saved commitment retires the undo offer
+                selectedCommitmentId = id;
+                selectedTab = 11;
+                render();
+            };
+            // Owner, 30 Oct 2026: a card installment's amount drops every month; the edit must reach the due installment.
+            if (action == CommitmentEdit.ASK_SCOPE) {
+                new ChoiceDialogBuilder().setTitle("المبلغ الجديد " + money(minor, currencyValue))
+                        .setItems(new String[]{"للقسط الجاي بس · " + dayLabel(existing.nextDue), "للقسط الجاي وكل اللي بعده"},
+                                (d, choice) -> persist.accept(choice == 0 ? 1 : 2))
+                        .setNegativeButton("إلغاء", null).show();
+                return;
+            }
+            persist.accept(0);
         });
     }
 

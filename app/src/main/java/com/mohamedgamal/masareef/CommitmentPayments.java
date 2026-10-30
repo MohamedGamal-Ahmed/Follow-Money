@@ -69,8 +69,16 @@ final class CommitmentPayments {
         }
     }
     private static LocalDate day(long when){return Instant.ofEpochMilli(when).atZone(ZoneId.systemDefault()).toLocalDate();}
+    /**
+     * Money paid into one of the user's own credit cards (one row for the bank debit and the card receipt). Owner, 30 Oct
+     * 2026: card installments are paid by repaying the card, so that repayment is what settles a card commitment.
+     */
+    private boolean cardRepayment(Transaction tx){
+        return tx!=null&&("expense".equals(tx.kind)||"transfer".equals(tx.kind))&&tx.destinationSourceId!=null&&
+                "بطاقة ائتمان".equals(db.sourceKinds().get(tx.destinationSourceId));
+    }
     private boolean eligible(Transaction tx){
-        if(tx==null||tx.needsReview||!"expense".equals(tx.kind)||MoneyFlow.isCashWithdrawal(tx.kind,tx.category)||
+        if(tx==null||tx.needsReview||!"expense".equals(tx.kind)&&!cardRepayment(tx)||MoneyFlow.isCashWithdrawal(tx.kind,tx.category)||
                 MoneyFlow.BANK_FEE_CATEGORY.equals(tx.category)||"رسوم تحويل".equals(tx.category))return false;
         try(Cursor c=db.getReadableDatabase().rawQuery("SELECT 1 FROM transactions t WHERE t.id=? AND t.fee_parent_id IS NULL AND NOT EXISTS(SELECT 1 FROM card_settlements s WHERE s.transaction_id=t.id)",new String[]{Long.toString(tx.id)})){
             return c.moveToFirst();
@@ -200,6 +208,7 @@ final class CommitmentPayments {
     }
     /** Mohamed's decision: only unedited automatic unknown/transfer categories follow the commitment. */
     private void classifyPayment(Recurring plan,Transaction tx){
+        if(cardRepayment(tx))return; // a repayment stays a move into the card, never an installment expense
         String category="subscription".equals(plan.kind)?"اشتراكات":"bill".equals(plan.kind)?"فواتير":"أقساط";
         ContentValues v=new ContentValues();v.put("category",category);
         db.getWritableDatabase().update("transactions",v,"id=? AND unique_key=? AND user_edited=0 AND source NOT IN ('يدوي','CSV') AND category IN (?,?)",
@@ -248,6 +257,50 @@ final class CommitmentPayments {
             if(own)sql.setTransactionSuccessful();return changed;
         }finally{if(own)sql.endTransaction();}
     }
+    /**
+     * Owner, 30 Oct 2026: "علّمه مدفوع" settles the cycle the user picks, never silently the oldest one. Any open cycle on
+     * the schedule; the rest of it is confirmed without a new expense.
+     */
+    boolean confirmDue(long id,LocalDate due,String expectedKey,LocalDate at){
+        SQLiteDatabase sql=db.getWritableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransaction();
+        try{
+            db.normalizeEarlyPayments();
+            Recurring stored=db.storedRecurringById(id);
+            if(stored==null||expectedKey==null||!expectedKey.equals(key(id))||project(stored).isDone())return false;
+            Cycle cycle=materialize(stored,due);if(cycle.remaining()==0)return false;
+            ContentValues v=new ContentValues();v.put("cycle_id",cycle.id);v.put("confirmation_key","manual:"+java.util.UUID.randomUUID());
+            v.put("amount_minor",cycle.remaining());v.put("paid_date",at.toString());v.put("origin","manual");
+            sql.insertOrThrow("commitment_payments",null,v);
+            if(own)sql.setTransactionSuccessful();return true;
+        }finally{if(own)sql.endTransaction();}
+    }
+
+    static final String BELOW_PAID="amount-below-paid";
+    /**
+     * Owner, 30 Oct 2026: card installments shrink every month, so an edited amount must reach the cycle that is due, not
+     * only the plan. Sets the due cycle (stored or on the schedule) to the new amount; with forward, every later open stored
+     * cycle and the plan's amount for cycles not yet stored follow it too. Never below what the cycle already received.
+     * Runs inside the caller's transaction when there is one.
+     */
+    void setCycleAmount(long id,LocalDate due,long amount,String currency,boolean forward){
+        if(amount<=0)throw new IllegalArgumentException("Invalid amount");
+        SQLiteDatabase sql=db.getWritableDatabase();boolean own=!sql.inTransaction();if(own)sql.beginTransaction();
+        try{
+            Recurring plan=db.storedRecurringById(id);
+            if(plan==null||project(plan).isDone())throw new IllegalArgumentException("Commitment is closed");
+            Cycle cycle=materialize(plan,due);
+            if(!cycle.currency.equals(currency))throw new IllegalArgumentException("Cycle currency differs");
+            if(amount<cycle.paid)throw new IllegalArgumentException(BELOW_PAID);
+            ContentValues v=new ContentValues();v.put("amount_minor",amount);
+            sql.update("commitment_cycles",v,"id=?",new String[]{Long.toString(cycle.id)});
+            if(forward){
+                for(Cycle later:cycles(id))if(later.due.isAfter(due)&&later.remaining()>0&&later.paid<=amount&&later.currency.equals(currency))
+                    sql.update("commitment_cycles",v,"id=?",new String[]{Long.toString(later.id)});
+            }
+            if(own)sql.setTransactionSuccessful();
+        }finally{if(own)sql.endTransaction();}
+    }
+
     boolean undo(long paymentId){
         ContentValues v=new ContentValues();v.put("active",0);v.put("undone_at",System.currentTimeMillis());
         return db.getWritableDatabase().update("commitment_payments",v,"id=? AND active=1",new String[]{Long.toString(paymentId)})==1;
