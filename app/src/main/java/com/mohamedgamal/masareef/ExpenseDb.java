@@ -2552,6 +2552,12 @@ public final class ExpenseDb extends SQLiteOpenHelper {
                 report.mergedRows.put(duplicate.removeId,duplicate.keepId);report.duplicates++;
             }
         }
+        // A provider's payment receipt and the bank's debit for it (TRU 2438.00 + bank 2465.80): one payment, fee apart.
+        rows.clear();
+        for (RepairRules.Row row:repairRows(from,to)) if (!row.userEdited) rows.add(row);
+        for (RepairRules.ProviderPayment pair:RepairRules.providerReceipts(rows,ExpenseDb::installmentProvider)) {
+            if (joinProviderPayment(pair)) { report.mergedRows.put(pair.debitId,pair.receiptId); report.duplicates++; }
+        }
         // The receipt of an already settled own transfer, delivered again by a payment app: the settled transfer is
         // user-edited (reconciliation marks it so), so it is read here with every row and only the copy is removed.
         for (RepairRules.Duplicate again:RepairRules.lateReceiptDuplicates(repairRows(from,to))) {
@@ -2584,6 +2590,57 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         for (Recurring item:recurring())
             if (item.needsReview && ExpenseParser.genericMerchant(item.merchant) && debitAmounts.contains(item.amountMinor))
                 removeRecurring(item.id);
+    }
+
+    /** The installment provider a merchant name belongs to, by the same words the commitment tiles use; null when none. */
+    static String installmentProvider(String merchant) {
+        if (merchant == null) return null;
+        for (UiKit.Provider provider : UiKit.PROVIDERS) {
+            if (!"installment".equals(provider.kind)) continue;
+            for (String alias : provider.keywords.split("\\|")) {
+                String word = alias.trim(); if (word.length() < 3) continue;
+                if (java.util.regex.Pattern.compile("(?iu)(?<![\\p{L}\\p{N}])" + java.util.regex.Pattern.quote(word) + "(?![\\p{L}\\p{N}])").matcher(merchant).find())
+                    return provider.name;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Keeps the provider's receipt (the payment, as an installment and as any commitment links it already has), takes
+     * the bank debit's account into it, and records the difference as a fee under it, like a transfer fee. Anything that
+     * would lose a link (repayments, card settlements, a commitment link on the debit, an existing fee) is skipped.
+     */
+    private boolean joinProviderPayment(RepairRules.ProviderPayment pair) {
+        Transaction receipt=transactionById(pair.receiptId),debit=transactionById(pair.debitId);
+        if (receipt==null||debit==null||pair.fee<0) return false;
+        // Review of PR #54: the receipt must come from the provider itself (its SMS sender or app), not only name it.
+        String provider=installmentProvider(receipt.merchant);boolean fromProvider=false;
+        for (SourceEvidence evidence:sourceEvidence(receipt.id))
+            if (provider!=null&&(provider.equals(installmentProvider(evidence.sender))||provider.equals(installmentProvider(evidence.source)))) fromProvider=true;
+        if (!fromProvider) return false;
+        if (hasReimbursement(receipt.id)||hasReimbursement(debit.id)) return false;
+        if (new CardSettlements(this).related(receipt.id)||new CardSettlements(this).related(debit.id)) return false;
+        if (commitmentPayments.allocatedByTransaction(rowIdentityKey(debit.id))>0) return false;
+        if (transferFee(receipt.id)>0||transferFee(debit.id)>0) return false;
+        String key="fee:"+receipt.id;
+        if (pair.fee>0) try (Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM transactions WHERE unique_key=? UNION ALL SELECT 1 FROM excluded_messages WHERE unique_key=? LIMIT 1",new String[]{key,key})) {
+            if (c.moveToFirst()) return false;
+        }
+        SQLiteDatabase sql=getWritableDatabase();sql.beginTransaction();
+        try {
+            Long account=debit.paymentSourceId;
+            if (!mergeEntries(receipt.id,debit.id,"same payment: provider receipt and bank debit")) return false;
+            if (pair.fee>0) {
+                if (!insertEntry(key,receipt.when,pair.fee,receipt.currency,"رسوم سداد "+(provider==null?receipt.merchant:provider),"رسوم تحويل",
+                        "رسوم من العملية",null,null,account,"expense",null,"رسوم مؤكدة من فرق خصم البنك ومبلغ السداد"))
+                    throw new IllegalStateException("Provider fee could not be saved");
+                ContentValues related=new ContentValues();related.put("fee_parent_id",receipt.id);
+                if (sql.update("transactions",related,"unique_key=?",new String[]{key})!=1) throw new IllegalStateException("Provider fee could not be linked");
+            }
+            sql.setTransactionSuccessful();
+            return true;
+        } finally { sql.endTransaction(); }
     }
 
     private boolean canReconcile(RepairRules.OwnTransfer own) {
