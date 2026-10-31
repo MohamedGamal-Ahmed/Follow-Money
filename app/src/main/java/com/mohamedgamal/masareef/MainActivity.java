@@ -2878,16 +2878,16 @@ public final class MainActivity extends Activity {
                         row.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START); row.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
                         row.setPadding(dp(12), dp(10), dp(12), dp(10)); row.setMinHeight(dp(56));
                         row.setChecked(single ? index == selected : checked[index]);
-                        row.setBackground(ui.interactive(row.isChecked() ? ACCENT_PALE : SURFACE, BORDER, 12));
+                        row.setBackground(ui.interactive(row.isChecked() ? ACCENT_PALE : SURFACE, 0, 14));
                         row.setOnClickListener(v -> {
                             if (single) { if (picked != null) picked.onClick(dialog, index); }
-                            else { checked[index] = row.isChecked(); row.setBackground(ui.interactive(checked[index] ? ACCENT_PALE : SURFACE, BORDER, 12)); if (toggled != null) toggled.onClick(dialog, index, checked[index]); }
+                            else { checked[index] = row.isChecked(); row.setBackground(ui.interactive(checked[index] ? ACCENT_PALE : SURFACE, 0, 14)); if (toggled != null) toggled.onClick(dialog, index, checked[index]); }
                         });
                         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(6); rows.addView(row, lp);
                     } else {
                         LinearLayout row = new LinearLayout(MainActivity.this); row.setGravity(Gravity.CENTER_VERTICAL);
-                        row.setPadding(dp(12), dp(10), dp(12), dp(10)); row.setMinimumHeight(dp(56));
-                        row.setBackground(ui.interactive(SURFACE, BORDER, 12)); row.setFocusable(true);
+                        row.setPadding(dp(8), dp(10), dp(8), dp(10)); row.setMinimumHeight(dp(56));
+                        row.setBackground(ui.interactive(SURFACE, 0, 12)); row.setFocusable(true);
                         row.setContentDescription(text);
                         row.setAccessibilityDelegate(new View.AccessibilityDelegate() {
                             @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
@@ -2900,7 +2900,8 @@ public final class MainActivity extends Activity {
                         TextView name = label(text, 15, color, false); name.setPadding(dp(12), 0, dp(12), 0);
                         row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
                         row.setOnClickListener(v -> { if (picked != null) picked.onClick(dialog, index); dialog.dismiss(); });
-                        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(6); rows.addView(row, lp);
+                        if (rows.getChildCount() > 0) divider(rows);
+                        rows.addView(row, new LinearLayout.LayoutParams(-1, -2));
                     }
                 }
                 if (rows.getChildCount() == 0) rows.addView(label("مفيش نتائج للبحث", 15, MUTED, false));
@@ -6725,7 +6726,9 @@ public final class MainActivity extends Activity {
         row.setPadding(dp(16), dp(14), dp(16), dp(14));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.topMargin = dp(10);
-        row.setBackground(rounded(SURFACE, 20));
+        row.setBackground(rounded(SURFACE, 22));
+        // Redesign: a soft lift instead of a flat card (no shadow reads on the dark ground).
+        if (!dark) { row.setElevation(dp(1)); if (Build.VERSION.SDK_INT >= 28) { row.setOutlineSpotShadowColor(0x330b3d2e); row.setOutlineAmbientShadowColor(0x1a0b3d2e); } }
         container.addView(row, params);
         return row;
     }
@@ -7088,7 +7091,7 @@ public final class MainActivity extends Activity {
         if (selectedTab == 5) settingsGroup = null;
         LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(22); lp.bottomMargin = dp(2);
-        TextView title = label(name, 16, INK, true); line.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView title = label(name, 17, INK, true); line.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         if (link != null) {
             TextView more = label(link, 13, ACCENT, true); line.addView(more);
             more.setOnClickListener(v -> action.run());
@@ -7265,8 +7268,7 @@ public final class MainActivity extends Activity {
     private void markDetailActions(View view) {
         if (view.hasOnClickListeners()) {
             if (view instanceof TextView) {
-                if (!(view instanceof EditText) && view.getBackground()==null)
-                    ((TextView)view).setPaintFlags(((TextView)view).getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+                // Redesign (31 Oct 2026): links read by their bold brand color, without an underline.
             } else if (view instanceof android.view.ViewGroup && view.getForeground()==null
                     && (view.getBackground()==null || view.getBackground() instanceof GradientDrawable)) {
                 view.setForeground(new RippleDrawable(ColorStateList.valueOf((ACCENT & 0x00ffffff) | 0x24000000), null, view.getBackground()));

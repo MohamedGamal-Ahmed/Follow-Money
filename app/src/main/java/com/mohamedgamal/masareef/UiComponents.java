@@ -60,8 +60,8 @@ final class UiComponents {
             parent.addView(column, new LinearLayout.LayoutParams(0, -2, 1));
             parent = column;
         }
-        TextView caption = label(title, UiTheme.CAPTION, theme.muted);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2); cp.topMargin = dp(10);
+        TextView caption = label(title, 13, theme.muted); caption.setTypeface(font, Typeface.BOLD);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2); cp.topMargin = dp(14);
         parent.addView(caption, cp);
         EditText input = new EditText(context); input.setId(View.generateViewId()); input.setTag(title);
         // Page models own drafts; framework state restore could map stale text onto a regenerated id.
@@ -69,10 +69,10 @@ final class UiComponents {
         caption.setLabelFor(input.getId()); input.setHint(title); input.setSingleLine(true);
         input.setTypeface(font); input.setTextSize(UiTheme.BODY); input.setTextColor(theme.ink);
         input.setHintTextColor(theme.muted); input.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        input.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START); input.setMinHeight(dp(UiTheme.TOUCH));
+        input.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START); input.setMinHeight(dp(UiTheme.FIELD_HEIGHT));
         input.setPadding(dp(14), dp(12), dp(14), dp(12));
         input.setBackground(interactive(theme.surface, theme.fieldOutline, UiTheme.FIELD_RADIUS));
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, -2); ip.topMargin = dp(4);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, -2); ip.topMargin = dp(6);
         parent.addView(input, ip);
         return input;
     }
@@ -89,6 +89,8 @@ final class UiComponents {
         HorizontalScrollView scroll = new HorizontalScrollView(context); scroll.setHorizontalScrollBarEnabled(false);
         RadioGroup group = new RadioGroup(context); group.setOrientation(LinearLayout.HORIZONTAL);
         group.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); scroll.addView(group);
+        // Redesign: one rounded track; the chosen option is a raised pill inside it.
+        group.setPadding(dp(4), dp(4), dp(4), dp(4)); group.setBackground(shape(theme.segment, 0, 99));
         for (int i = 0; i < labels.length; i++) {
             RadioButton option = new RadioButton(context); option.setId(View.generateViewId()); option.setText(labels[i]); option.setSaveEnabled(false);
             option.setTag(i); option.setButtonDrawable(null); option.setTypeface(font); option.setTextSize(UiTheme.BODY);
@@ -98,14 +100,15 @@ final class UiComponents {
                 if (icon != null) { icon = icon.mutate(); icon.setBounds(0,0,dp(22),dp(22));
                     option.setCompoundDrawablesRelative(null,icon,null,null); option.setCompoundDrawablePadding(dp(6)); }
             }
-            RadioGroup.LayoutParams lp = new RadioGroup.LayoutParams(-2,-2); lp.setMargins(dp(3),dp(3),dp(3),dp(3));
+            RadioGroup.LayoutParams lp = new RadioGroup.LayoutParams(-2,-2); lp.setMargins(dp(2),0,dp(2),0);
             group.addView(option,lp);
         }
         Runnable style = () -> {
             for (int i = 0; i < group.getChildCount(); i++) {
                 RadioButton option = (RadioButton) group.getChildAt(i); boolean checked = option.isChecked();
-                int ink = checked ? theme.onPrimary : theme.ink;
-                option.setTextColor(ink); option.setBackground(interactive(checked ? theme.accent : theme.surface,theme.fieldOutline,UiTheme.BUTTON_RADIUS));
+                int ink = checked ? theme.segmentOnInk : theme.muted;
+                option.setTextColor(ink); option.setTypeface(font, checked ? Typeface.BOLD : Typeface.NORMAL);
+                option.setBackground(interactive(checked ? theme.segmentOn : theme.segment, 0, 99));
                 for (android.graphics.drawable.Drawable icon : option.getCompoundDrawablesRelative()) if (icon != null) icon.setTint(ink);
             }
         };
@@ -130,7 +133,7 @@ final class UiComponents {
     LinearLayout choiceCard(String title, String value, View badge, Runnable action, LinearLayout parent) {
         LinearLayout card = new LinearLayout(context); card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(14),dp(12),dp(14),dp(12)); card.setMinimumHeight(dp(UiTheme.TOUCH));
-        card.setBackground(interactive(theme.surface,theme.fieldOutline,UiTheme.BUTTON_RADIUS));
+        card.setBackground(interactive(theme.surface,theme.fieldOutline,UiTheme.FIELD_RADIUS));card.setMinimumHeight(dp(56));
         if(badge!=null){badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             card.addView(badge,new LinearLayout.LayoutParams(dp(40),dp(40)));}
         LinearLayout copy = new LinearLayout(context); copy.setOrientation(LinearLayout.VERTICAL); copy.setPadding(dp(10),0,dp(10),0);
@@ -154,15 +157,15 @@ final class UiComponents {
     }
 
     void styleButton(Button button, boolean primary, boolean destructive) {
-        int fill = primary ? destructive ? theme.danger : theme.accent : theme.surface;
+        int fill = primary ? destructive ? theme.danger : theme.accent : theme.soft;
         int ink = primary ? destructive ? theme.onDanger : theme.onPrimary : theme.ink;
-        button.setAllCaps(false); button.setTypeface(font, primary ? Typeface.BOLD : Typeface.NORMAL);
+        button.setAllCaps(false); button.setTypeface(font, Typeface.BOLD);
         button.setTextSize(UiTheme.BODY); button.setTextColor(new ColorStateList(
                 new int[][]{new int[]{-android.R.attr.state_enabled}, new int[]{}},
                 new int[]{theme.muted, ink}));
-        button.setSingleLine(false); button.setMinHeight(dp(UiTheme.TOUCH)); button.setMinimumHeight(dp(UiTheme.TOUCH));
+        button.setSingleLine(false); button.setMinHeight(dp(UiTheme.FIELD_HEIGHT)); button.setMinimumHeight(dp(UiTheme.FIELD_HEIGHT));
         button.setPadding(dp(16), dp(12), dp(16), dp(12)); button.setStateListAnimator(null); button.setElevation(0);
-        button.setBackground(interactive(fill, primary ? 0 : theme.fieldOutline, UiTheme.BUTTON_RADIUS));
+        button.setBackground(interactive(fill, 0, UiTheme.BUTTON_RADIUS));
         button.setFocusable(true);
     }
 
@@ -171,7 +174,7 @@ final class UiComponents {
         button.setImageTintList(ColorStateList.valueOf(theme.ink)); button.setContentDescription(description);
         button.setPadding(dp(12), dp(12), dp(12), dp(12)); button.setMinimumWidth(dp(UiTheme.TOUCH));
         button.setMinimumHeight(dp(UiTheme.TOUCH)); button.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
-        button.setBackground(interactive(theme.surface, theme.border, UiTheme.BUTTON_RADIUS));
+        button.setBackground(interactive(theme.surface, 0, 14));
         button.setOnClickListener(v -> action.run());
         return button;
     }

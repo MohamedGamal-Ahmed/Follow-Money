@@ -6,12 +6,14 @@ import android.content.res.Configuration;
 
 /** Runtime palette backed by the same resources as the framework widget themes. */
 final class UiTheme {
-    static final int TOUCH = 48, FIELD_RADIUS = 12, BUTTON_RADIUS = 14, SHEET_RADIUS = 26;
+    static final int TOUCH = 48, FIELD_RADIUS = 16, BUTTON_RADIUS = 16, SHEET_RADIUS = 28, FIELD_HEIGHT = 52;
     static final int BODY = 15, CAPTION = 12, TITLE = 20, AMOUNT = 36;
     static final int SPACE = 8, PAGE_PADDING = 20;
     final boolean dark;
     final int ink, muted, background, surface, accent, pale, border, fieldOutline, danger, income;
     final int brand, brandSoft, emerald, lime, indigo, gold, orange, onPrimary, onDanger;
+    /** Redesign (31 Oct 2026): soft fill for secondary buttons and the segmented-control track. */
+    final int soft, segment, segmentOn, segmentOnInk;
 
     /** "dark_mode" holds an explicit light/dark choice; without one the app follows the system's dark theme. */
     static boolean dark(Context context, SharedPreferences prefs) {
@@ -40,5 +42,9 @@ final class UiTheme {
         orange = context.getColor(R.color.ui_orange);
         onPrimary = dark ? background : surface;
         onDanger = dark ? background : surface;
+        soft = dark ? pale : 0xffeef1ec;
+        segment = dark ? background : 0xffe9eee8;
+        segmentOn = dark ? lime : surface;
+        segmentOnInk = dark ? background : brand;
     }
 }

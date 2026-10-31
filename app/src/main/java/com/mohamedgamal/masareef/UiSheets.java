@@ -32,17 +32,29 @@ final class UiSheets {
                     if (!dialog.isShowing()) return;
                     UiComponents ui = new UiComponents(activity, theme, font);
                     android.widget.FrameLayout content = decor.findViewById(android.R.id.content);
-                    if (content != null && content.getChildCount() == 1 && !(content.getChildAt(0) instanceof HeightLimit)) {
+                    if (content != null && content.getChildCount() == 1 && !(content.getChildAt(0) instanceof SheetFrame)) {
                         View original = content.getChildAt(0); ViewGroup.LayoutParams params = original.getLayoutParams();
                         content.removeView(original);
                         HeightLimit capped = new HeightLimit(activity); capped.addView(original, params);
-                        content.addView(capped, new android.widget.FrameLayout.LayoutParams(-1, -2));
+                        // Redesign: a grab handle on top, like every sheet in the app.
+                        SheetFrame frame = new SheetFrame(activity); frame.setOrientation(LinearLayout.VERTICAL);
+                        View handle = new View(activity); handle.setBackground(ui.shape(theme.fieldOutline, 0, 99));
+                        handle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(ui.dp(40), ui.dp(5)); hp.gravity = Gravity.CENTER_HORIZONTAL; hp.topMargin = ui.dp(10);
+                        frame.addView(handle, hp);
+                        frame.addView(capped, new LinearLayout.LayoutParams(-1, -2));
+                        content.addView(frame, new android.widget.FrameLayout.LayoutParams(-1, -2));
                     }
                     styleText(decor, theme, font);
                     int panelId = activity.getResources().getIdentifier("buttonPanel", "id", "android");
                     View oldPanel = decor.findViewById(panelId);
                     LinearLayout footer = new ActionFooter(activity); footer.setOrientation(LinearLayout.VERTICAL);
-                    footer.setPadding(ui.dp(12), ui.dp(4), ui.dp(12), ui.dp(12)); footer.setId(panelId);
+                    footer.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(16)); footer.setId(panelId);
+                    // Redesign: confirm and cancel side by side; a third (neutral) action gets its own row above them.
+                    boolean neutral = visible(dialog.getButton(AlertDialog.BUTTON_NEUTRAL));
+                    boolean pair = !neutral && visible(dialog.getButton(AlertDialog.BUTTON_POSITIVE)) && visible(dialog.getButton(AlertDialog.BUTTON_NEGATIVE));
+                    LinearLayout row = null;
+                    if (pair) { row = new LinearLayout(activity); row.setOrientation(LinearLayout.HORIZONTAL); row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); footer.addView(row, new LinearLayout.LayoutParams(-1, -2)); }
                     for (int which : new int[]{AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEUTRAL, AlertDialog.BUTTON_NEGATIVE}) {
                         Button button = dialog.getButton(which);
                         if (button == null) continue;
@@ -51,8 +63,14 @@ final class UiSheets {
                         ui.styleButton(button, primary, primary && (text.startsWith("حذف") || text.startsWith("أرشفة")));
                         if (oldPanel != null && button.getParent() instanceof ViewGroup) {
                             ((ViewGroup) button.getParent()).removeView(button);
-                            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = ui.dp(6);
-                            footer.addView(button, lp);
+                            if (row != null) {
+                                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1); lp.topMargin = ui.dp(6);
+                                if (row.getChildCount() > 0) lp.setMarginStart(ui.dp(10));
+                                row.addView(button, lp);
+                            } else {
+                                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = ui.dp(6);
+                                footer.addView(button, lp);
+                            }
                         }
                     }
                     if (oldPanel != null && oldPanel.getParent() instanceof ViewGroup) {
@@ -71,6 +89,15 @@ final class UiSheets {
             }
         });
         return dialog;
+    }
+
+    private static boolean visible(Button button) {
+        return button != null && button.getVisibility() == View.VISIBLE && button.getText() != null && button.getText().length() > 0;
+    }
+
+    /** The handle and the height-capped content, as one child of the dialog's content frame. */
+    private static final class SheetFrame extends LinearLayout {
+        SheetFrame(Activity activity) { super(activity); }
     }
 
     /** AlertDialogLayout must reserve every action before giving the remaining height to scrolling content. */
