@@ -3873,7 +3873,7 @@ public final class MainActivity extends Activity {
             banner.setBackground(rounded(dark ? 0x33d9a21b : 0xfffff6db, 99));
             int ink = dark ? 0xfff3d98a : 0xff5c4700;
             banner.addView(tintedIcon(R.drawable.ic_cat_other, ink), new LinearLayout.LayoutParams(dp(20), dp(20)));
-            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, -2, 1); textParams.setMarginStart(dp(10));
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(-2, -2); textParams.setMarginStart(dp(10));
             banner.addView(label(uncategorized == 1 ? "عملية محتاجة تصنيف" : uncategorized + " عمليات محتاجة تصنيف", 13, ink, true), textParams);
             banner.setOnClickListener(v -> {
                 // Uncategorized expenses and everything waiting for review (the new parser's REVIEW with its reason).
@@ -3893,8 +3893,11 @@ public final class MainActivity extends Activity {
             banner.setPadding(dp(12), dp(8), dp(12), dp(8)); banner.setMinimumHeight(dp(UiTheme.TOUCH));
             banner.setBackground(rounded(dark ? 0x40c25e0b : 0xfffff1e3, 99));
             banner.addView(tintedIcon(R.drawable.ic_cat_transfer, ORANGE), new LinearLayout.LayoutParams(dp(20), dp(20)));
-            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, -2, 1); textParams.setMarginStart(dp(10));
-            banner.addView(label(StatementRows.transfers(openTransfers) + " لناس من غير غرض", 13, ORANGE, true), textParams);
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(-2, -2); textParams.setMarginStart(dp(10));
+            banner.addView(label(StatementRows.transfers(openTransfers) + " لناس من غير غرض", 13, ORANGE, false), textParams);
+            // The chip's action word, so it reads as a tap target.
+            LinearLayout.LayoutParams actParams = new LinearLayout.LayoutParams(-2, -2); actParams.setMarginStart(dp(8));
+            banner.addView(label("حدد", 13, ORANGE, true), actParams);
             banner.setContentDescription(StatementRows.transfers(openTransfers) + " لناس غرضها مش محدد · " + money(openAmount, "EGP") + "، حدد");
             banner.setOnClickListener(v -> {
                 transactionCategoryFilter="";transactionKindFilter="";transactionCurrencyFilter="EGP";transactionSourceFilter=null;
