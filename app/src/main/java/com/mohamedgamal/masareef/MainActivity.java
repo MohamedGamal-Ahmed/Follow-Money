@@ -75,6 +75,8 @@ public final class MainActivity extends Activity {
     private boolean dark;
     private String commitmentFilter = "";
     private LocalDate commitmentMonth = LocalDate.now().withDayOfMonth(1);
+    /** Commitments page: the detected-items page is open; the month calendar is shown. */
+    private boolean commitmentsInbox, commitmentCalendarOpen;
     private ExpenseDb.Suggestion editingSuggestion;
     private LocalDate[] transactionPeriod;
     private boolean transactionExcludeTransfers;
@@ -3374,6 +3376,7 @@ public final class MainActivity extends Activity {
         if(bulkMode){bulkMode=false;bulkSelected.clear();render();return;}
         if(selectedTab==4&&!insightsSection.isEmpty()){insightsSection="";render();return;}
         if(selectedTab==5&&!settingsSection.isEmpty()){settingsSection="";render();return;}
+        if(selectedTab==2&&commitmentsInbox){commitmentsInbox=false;render();return;}
         if (selectedTab == 10) {
             returnFromTransaction();
         } else if (selectedTab == 11) {
@@ -5255,12 +5258,18 @@ public final class MainActivity extends Activity {
         container.addView(row);
     }
 
+    /**
+     * Redesign (31 Oct 2026, owner-approved): one card with what is left this month, one strip for everything
+     * that needs the user's say (detected plans, repeating payments, confirmations), the list, and the
+     * calendar behind «التقويم». The detected items open on their own page; nothing was removed.
+     */
     private void recurringScreen() {
+        if (commitmentsInbox) {
+            if (commitmentAsks() > 0) { commitmentsInboxScreen(); return; }
+            commitmentsInbox = false;
+        }
         LinearLayout bar = new LinearLayout(this); bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> { selectedTab = 0; render(); }),
-                new LinearLayout.LayoutParams(dp(48), dp(48)));
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1); titleParams.setMarginStart(dp(10));
-        bar.addView(label("الالتزامات", 24, INK, true), titleParams);
+        bar.addView(label("الالتزامات", 26, INK, true), new LinearLayout.LayoutParams(0, -2, 1));
         bar.addView(primaryIconButton(R.drawable.ic_plus, "إضافة التزام", () -> openCommitmentEditor(null)),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(bar);
@@ -5281,6 +5290,157 @@ public final class MainActivity extends Activity {
             dismiss.setOnClickListener(v -> { deletedCommitment = null; deletedCommitmentName = null; render(); });
             undoBox.addView(dismiss);
         }
+        List<ExpenseDb.Recurring> all = db.recurring();
+        LocalDate today = LocalDate.now();
+        LocalDate monthStart = commitmentMonth;
+        LocalDate monthEnd = monthStart.plusMonths(1);
+        Map<String, long[]> sums = new LinkedHashMap<>();
+        int activeCount = 0, monthCount = 0;
+        int reviewCount = 0, paidCount = 0;
+        for (ExpenseDb.Recurring item : all) {
+            if(!commitmentFilter.isEmpty() && !commitmentFilter.equals(item.kind)) continue;
+            if(item.needsReview) {
+                if(!item.isDone()) reviewCount++;
+                continue;
+            }
+            long[] sum = sums.computeIfAbsent(item.currency, ignored -> new long[2]);
+            boolean paidThisMonth = false;
+            if (item.lastPaidDate != null) {
+                LocalDate paid = LocalDate.parse(item.lastPaidDate);
+                paidThisMonth = !paid.isBefore(monthStart) && paid.isBefore(monthEnd);
+            }
+            if (paidThisMonth) { sum[0] += item.amountMinor; sum[1] += item.amountMinor; paidCount++; }
+            boolean inMonth = paidThisMonth;
+            if (!item.isDone()) {
+                activeCount++;
+                LocalDate due=item.nextDue;
+                int remaining=item.totalCount==null?Integer.MAX_VALUE:item.totalCount-item.paidCount;
+                // A monthly commitment already paid this month is not due again in the same month.
+                boolean monthlyPaid = paidThisMonth && "monthly".equals(item.cycle);
+                for(int payment=0;payment<remaining && due.isBefore(monthEnd);payment++,due=item.nextAfter(due))
+                    if(!due.isBefore(monthStart) && !monthlyPaid) { sum[0]+=item.amountMinor; inMonth = true; }
+            }
+            if (inMonth) monthCount++;
+        }
+        long[] egp = sums.getOrDefault("EGP", new long[2]);
+        LinearLayout hero = card(); hero.setTag("commitments_month");
+        LinearLayout heading = new LinearLayout(this); heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(label("فاضل عليك في " + monthStart.format(DateTimeFormatter.ofPattern("MMMM", new Locale("ar"))), 14, MUTED, false),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        if (monthCount > 0) heading.addView(pill(paidCount + " من " + monthCount + " اتدفعوا", ACCENT_PALE, ACCENT));
+        hero.addView(heading);
+        LinearLayout figure = new LinearLayout(this); figure.setGravity(Gravity.BOTTOM);
+        TextView left = label(AnalyticsMath.whole(Math.max(0, egp[0] - egp[1])), 40, INK, true);
+        left.setTextDirection(View.TEXT_DIRECTION_LTR); cappedTextSize(left, 40, 1.3f);
+        figure.addView(left);
+        LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(-2, -2); unitParams.setMarginStart(dp(8)); unitParams.bottomMargin = dp(6);
+        figure.addView(label("جنيه", 14, MUTED, false), unitParams);
+        LinearLayout.LayoutParams figureParams = new LinearLayout.LayoutParams(-1, -2); figureParams.topMargin = dp(6);
+        hero.addView(figure, figureParams);
+        hero.setContentDescription("فاضل عليك في الشهر ده " + money(Math.max(0, egp[0] - egp[1]), "EGP") + "، اتدفع " + money(egp[1], "EGP") + " من " + money(egp[0], "EGP"));
+        StringBuilder others = new StringBuilder();
+        for (Map.Entry<String, long[]> entry : sums.entrySet())
+            if (!"EGP".equals(entry.getKey()) && entry.getValue()[0] > 0)
+                others.append(others.length() == 0 ? "+ " : "  ·  ").append(money(Math.max(0, entry.getValue()[0] - entry.getValue()[1]), entry.getKey()));
+        if (others.length() > 0) {
+            TextView other = label(others.toString(), 14, ACCENT, true);
+            other.setTextDirection(View.TEXT_DIRECTION_LTR); other.setGravity(Gravity.START);
+            hero.addView(other);
+        }
+        View track = new View(this);
+        LinearLayout.LayoutParams trackParams = new LinearLayout.LayoutParams(-1, dp(8)); trackParams.topMargin = dp(12);
+        hero.addView(track, trackParams);
+        fillBar(track, egp[1], egp[0], EMERALD, uiTheme.segment);
+        if (egp[1] > 0) {
+            TextView paid = label("اتدفع " + money(egp[1], "EGP"), 12, MUTED, false);
+            LinearLayout.LayoutParams paidParams = new LinearLayout.LayoutParams(-2, -2); paidParams.topMargin = dp(6);
+            hero.addView(paid, paidParams);
+        }
+        if(reviewCount>0) note(reviewCount+" التزامات محتاجة تراجع الجهة والمبلغ.");
+
+        int asks = commitmentAsks();
+        if (asks > 0) {
+            LinearLayout strip = new LinearLayout(this); strip.setGravity(Gravity.CENTER_VERTICAL); strip.setTag("commitments_inbox");
+            strip.setPadding(dp(14), dp(10), dp(14), dp(10)); strip.setMinimumHeight(dp(UiTheme.TOUCH));
+            int violet = dark ? 0xffc9b5f2 : 0xff4b2c91;
+            strip.setBackground(rounded(dark ? 0x334b2c91 : 0xffeee6fa, 18));
+            strip.addView(tintedIcon(R.drawable.ic_sparkle, violet), new LinearLayout.LayoutParams(dp(20), dp(20)));
+            String copy = asks == 1 ? "حاجة واحدة محتاجة رأيك" : asks + " حاجات محتاجة رأيك";
+            LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(10));
+            strip.addView(label(copy, 14, violet, true), copyParams);
+            strip.addView(tintedIcon(R.drawable.ic_chevron_forward, violet), new LinearLayout.LayoutParams(dp(18), dp(18)));
+            strip.setContentDescription(copy + "، اعرضها");
+            strip.setOnClickListener(v -> { commitmentsInbox = true; render(); });
+            LinearLayout.LayoutParams stripParams = new LinearLayout.LayoutParams(-1, -2); stripParams.topMargin = dp(10);
+            page.addView(strip, stripParams);
+        }
+
+        LinearLayout segments = new LinearLayout(this);
+        segments.setPadding(dp(4), dp(4), dp(4), dp(4));
+        segments.setBackground(rounded(uiTheme.segment, 99));
+        String[][] filters = {{"الكل", ""}, {"أقساط", "installment"}, {"اشتراكات", "subscription"}, {"فواتير", "bill"}};
+        for (String[] filter : filters) {
+            boolean selected = commitmentFilter.equals(filter[1]);
+            TextView segment = label(filter[0], 13, selected ? uiTheme.segmentOnInk : MUTED, selected);
+            segment.setGravity(Gravity.CENTER);
+            if (selected) segment.setBackground(rounded(uiTheme.segmentOn, 99));
+            segment.setOnClickListener(v -> { commitmentFilter = filter[1]; render(); });
+            segment.setContentDescription(filter[0] + (selected ? "، مختار" : ""));
+            segments.addView(segment, new LinearLayout.LayoutParams(0, dp(40), 1));
+        }
+        LinearLayout.LayoutParams segmentParams = new LinearLayout.LayoutParams(-1, -2); segmentParams.topMargin = dp(16);
+        page.addView(segments, segmentParams);
+
+        LinearLayout calendarLink = new LinearLayout(this); calendarLink.setGravity(Gravity.CENTER_VERTICAL);
+        calendarLink.setMinimumHeight(dp(UiTheme.TOUCH)); calendarLink.setPadding(dp(4), 0, dp(4), 0); calendarLink.setTag("commitments_calendar");
+        calendarLink.addView(tintedIcon(R.drawable.ic_calendar, ACCENT), new LinearLayout.LayoutParams(dp(18), dp(18)));
+        String calendarText = commitmentCalendarOpen ? "اخفي التقويم" : "التقويم";
+        LinearLayout.LayoutParams calendarTextParams = new LinearLayout.LayoutParams(-2, -2); calendarTextParams.setMarginStart(dp(6));
+        calendarLink.addView(label(calendarText, 13, ACCENT, true), calendarTextParams);
+        calendarLink.setContentDescription(calendarText);
+        calendarLink.setOnClickListener(v -> { commitmentCalendarOpen = !commitmentCalendarOpen; render(); });
+        LinearLayout.LayoutParams linkParams = new LinearLayout.LayoutParams(-2, -2); linkParams.gravity = Gravity.END; linkParams.topMargin = dp(4);
+        page.addView(calendarLink, linkParams);
+        if(commitmentCalendarOpen && !all.isEmpty()) commitmentCalendar(all);
+        section("الجاية", null, null);
+        LinearLayout list = null;
+        int shown = 0;
+        for (ExpenseDb.Recurring item : all) {
+            if (item.isDone() || !commitmentFilter.isEmpty() && !commitmentFilter.equals(item.kind)) continue;
+            if (list == null) list = listCard(page);
+            commitmentRow(list, item);
+            shown++;
+        }
+        if (shown == 0) empty(all.isEmpty() ? "سجّل أول التزام" : "مفيش التزامات في النوع ده",
+                "أقساط فاليو أو ترو أو البنك، واشتراكات زي كلود وجوجل ون، وفواتير الموبايل. هنفكّرك قبل الميعاد بيوم.");
+
+        boolean anyDone = false;
+        for (ExpenseDb.Recurring item : all) if (item.isDone()) { anyDone = true; break; }
+        if (anyDone) {
+            section("خلصت", null, null);
+            LinearLayout done = listCard(page);
+            for (ExpenseDb.Recurring item : all) if (item.isDone()) commitmentRow(done, item);
+        }
+    }
+
+    /** What the commitments page asks the user about: confirmations, repeating payments and detected plans. */
+    private int commitmentAsks() {
+        int asks = db.pendingCommitmentConfirmations().isEmpty() ? 0 : 1;
+        asks += Math.min(2, db.repeatingTransferSuggestions().size());
+        asks += db.repeatingMerchantSuggestions().size();
+        asks += db.commitmentSuggestions().size();
+        asks += recurringSuggestions(recurringCandidates, recurringCandidateRows).size();
+        return asks;
+    }
+
+    /** The detected items, on their own page so the commitments list stays short. */
+    private void commitmentsInboxScreen() {
+        LinearLayout bar = new LinearLayout(this); bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع للالتزامات", () -> { commitmentsInbox = false; render(); }),
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1); titleParams.setMarginStart(dp(10));
+        bar.addView(label("محتاج رأيك", 22, INK, true), titleParams);
+        page.addView(bar);
         // Fixed monthly transfers (e.g. an apartment installment paid by instant transfer) are offered as installments.
         List<CommitmentPayments.ProviderNotice> pendingPayments=db.pendingCommitmentConfirmations();
         if(!pendingPayments.isEmpty()){
@@ -5304,87 +5464,6 @@ public final class MainActivity extends Activity {
             addChip(actions, "لأ", false, () -> { db.dismissRepeatingMerchant(m); render(); });
         }
 
-        List<ExpenseDb.Recurring> all = db.recurring();
-        LocalDate today = LocalDate.now();
-        LocalDate monthStart = commitmentMonth;
-        LocalDate monthEnd = monthStart.plusMonths(1);
-        Map<String, long[]> sums = new LinkedHashMap<>();
-        int activeCount = 0, monthCount = 0;
-        int reviewCount = 0;
-        for (ExpenseDb.Recurring item : all) {
-            if(!commitmentFilter.isEmpty() && !commitmentFilter.equals(item.kind)) continue;
-            if(item.needsReview) {
-                if(!item.isDone()) reviewCount++;
-                continue;
-            }
-            long[] sum = sums.computeIfAbsent(item.currency, ignored -> new long[2]);
-            boolean paidThisMonth = false;
-            if (item.lastPaidDate != null) {
-                LocalDate paid = LocalDate.parse(item.lastPaidDate);
-                paidThisMonth = !paid.isBefore(monthStart) && paid.isBefore(monthEnd);
-            }
-            if (paidThisMonth) { sum[0] += item.amountMinor; sum[1] += item.amountMinor; }
-            boolean inMonth = paidThisMonth;
-            if (!item.isDone()) {
-                activeCount++;
-                LocalDate due=item.nextDue;
-                int remaining=item.totalCount==null?Integer.MAX_VALUE:item.totalCount-item.paidCount;
-                // A monthly commitment already paid this month is not due again in the same month.
-                boolean monthlyPaid = paidThisMonth && "monthly".equals(item.cycle);
-                for(int payment=0;payment<remaining && due.isBefore(monthEnd);payment++,due=item.nextAfter(due))
-                    if(!due.isBefore(monthStart) && !monthlyPaid) { sum[0]+=item.amountMinor; inMonth = true; }
-            }
-            if (inMonth) monthCount++;
-        }
-        long[] egp = sums.getOrDefault("EGP", new long[2]);
-        LinearLayout hero = new LinearLayout(this); hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(dp(20), dp(18), dp(20), dp(18));
-        hero.setBackground(rounded(BRAND, 24));
-        LinearLayout heading = new LinearLayout(this); heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.addView(label("مخطط في " + monthStart.format(DateTimeFormatter.ofPattern("MMMM", new Locale("ar"))), 13, 0xffb9d3c8, false),
-                new LinearLayout.LayoutParams(0, -2, 1));
-        String what = "installment".equals(commitmentFilter) ? "أقساط" : "subscription".equals(commitmentFilter) ? "اشتراكات" :
-                "bill".equals(commitmentFilter) ? "فواتير" : "التزامات";
-        heading.addView(pill(monthCount + " من " + activeCount + " " + what + " في الشهر ده", BRAND_SOFT, 0xffe6efea));
-        hero.addView(heading);
-        hero.addView(label(money(egp[0], "EGP"), 30, Color.WHITE, true));
-        StringBuilder others = new StringBuilder();
-        for (Map.Entry<String, long[]> entry : sums.entrySet())
-            if (!"EGP".equals(entry.getKey()) && entry.getValue()[0] > 0)
-                others.append(others.length() == 0 ? "+ " : "  ·  ").append(money(entry.getValue()[0], entry.getKey()));
-        if (others.length() > 0) {
-            TextView other = label(others.toString(), 14, LIME, true);
-            other.setTextDirection(View.TEXT_DIRECTION_LTR); other.setGravity(Gravity.START);
-            hero.addView(other);
-        }
-        View track = new View(this);
-        LinearLayout.LayoutParams trackParams = new LinearLayout.LayoutParams(-1, dp(8)); trackParams.topMargin = dp(10);
-        hero.addView(track, trackParams);
-        fillBar(track, egp[1], egp[0], LIME, BRAND_SOFT);
-        LinearLayout split = new LinearLayout(this);
-        split.addView(label("اتدفع " + money(egp[1], "EGP"), 12, 0xffb9d3c8, false), new LinearLayout.LayoutParams(0, -2, 1));
-        split.addView(label("باقي " + money(Math.max(0, egp[0] - egp[1]), "EGP"), 12, 0xffb9d3c8, false));
-        hero.addView(split);
-        LinearLayout.LayoutParams heroParams = new LinearLayout.LayoutParams(-1, -2); heroParams.topMargin = dp(14);
-        page.addView(hero, heroParams);
-        if(reviewCount>0) note(reviewCount+" التزامات تحتاج مراجعة الجهة والمبلغ قبل دخول الحساب والكالندر والتنبيهات.");
-
-        LinearLayout segments = new LinearLayout(this);
-        segments.setPadding(dp(4), dp(4), dp(4), dp(4));
-        segments.setBackground(rounded(dark ? SURFACE : 0xffe8ebe4, 14));
-        String[][] filters = {{"الكل", ""}, {"أقساط", "installment"}, {"اشتراكات", "subscription"}, {"فواتير", "bill"}};
-        for (String[] filter : filters) {
-            boolean selected = commitmentFilter.equals(filter[1]);
-            TextView segment = label(filter[0], 13, selected ? INK : MUTED, selected);
-            segment.setGravity(Gravity.CENTER);
-            if (selected) segment.setBackground(rounded(dark ? BACKGROUND : Color.WHITE, 11));
-            segment.setOnClickListener(v -> { commitmentFilter = filter[1]; render(); });
-            segments.addView(segment, new LinearLayout.LayoutParams(0, dp(38), 1));
-        }
-        LinearLayout.LayoutParams segmentParams = new LinearLayout.LayoutParams(-1, -2); segmentParams.topMargin = dp(14);
-        page.addView(segments, segmentParams);
-
-        if(!all.isEmpty()) commitmentCalendar(all);
         if(!db.commitmentSuggestions().isEmpty()) section("مكتشفة من رسائلك · تحتاج تأكيدك",null,null);
         int proposalCount=0;
         for(ExpenseDb.Suggestion suggestion:db.commitmentSuggestions()) {
@@ -5424,18 +5503,6 @@ public final class MainActivity extends Activity {
                 }).show();
             });
         }
-        section("الجاية", null, null);
-        LinearLayout list = null;
-        int shown = 0;
-        for (ExpenseDb.Recurring item : all) {
-            if (item.isDone() || !commitmentFilter.isEmpty() && !commitmentFilter.equals(item.kind)) continue;
-            if (list == null) list = listCard(page);
-            commitmentRow(list, item);
-            shown++;
-        }
-        if (shown == 0) empty(all.isEmpty() ? "سجّل أول التزام" : "مفيش التزامات في النوع ده",
-                "أقساط فاليو أو ترو أو البنك، واشتراكات زي كلود وجوجل ون، وفواتير الموبايل. هنفكّرك قبل الميعاد بيوم.");
-
         // F-07: read the suggestions from the twelve-month candidate scan, not from the capped 500-row page list,
         // so a payment older than the newest 500 rows still produces its suggestion. Both come from the cache.
         for (ExpenseDb.Transaction item : recurringSuggestions(recurringCandidates, recurringCandidateRows)) {
@@ -5462,13 +5529,6 @@ public final class MainActivity extends Activity {
             page.addView(suggestion, params);
         }
 
-        boolean anyDone = false;
-        for (ExpenseDb.Recurring item : all) if (item.isDone()) { anyDone = true; break; }
-        if (anyDone) {
-            section("خلصت", null, null);
-            LinearLayout done = listCard(page);
-            for (ExpenseDb.Recurring item : all) if (item.isDone()) commitmentRow(done, item);
-        }
     }
 
     private void dismissCommitmentSuggestion(ExpenseDb.Suggestion suggestion) {
@@ -5577,10 +5637,10 @@ public final class MainActivity extends Activity {
     private void commitmentRow(LinearLayout container, ExpenseDb.Recurring item) {
         if (container.getChildCount() > 0) divider(container);
         LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(10), 0, dp(10));
-        row.addView(merchantBadge(item.merchant, kindCategory(item.kind), 40), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.setPadding(0, dp(12), 0, dp(12)); row.setMinimumHeight(dp(64));
+        row.addView(merchantBadge(item.merchant, kindCategory(item.kind), 44), new LinearLayout.LayoutParams(dp(44), dp(44)));
         LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
-        TextView name = label(item.merchant, 14, INK, true);
+        TextView name = label(item.merchant, 15, INK, true);
         name.setSingleLine(true); name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         copy.addView(name);
         if(item.needsReview) copy.addView(label("راجع الجهة والمبلغ · اسم البنك غير كافٍ",11,ORANGE,true));
@@ -5591,22 +5651,25 @@ public final class MainActivity extends Activity {
             fillBar(bar, item.paidCount, item.totalCount, EMERALD, BORDER);
             LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(-2, -2); textParams.setMarginStart(dp(8));
             meta.addView(label(item.isDone() ? "انتهى · اتدفع " + item.paidCount + " من " + item.totalCount :
-                    "اتدفع " + item.paidCount + " من " + item.totalCount + " · الجاي " + (item.paidCount + 1), 11, MUTED, false), textParams);
+                    item.paidCount + " من " + item.totalCount, 12, MUTED, false), textParams);
         } else {
-            meta.addView(label(kindLabel(item.kind) + " " + cycleLabel(item.cycle) + " · " +
-                    item.nextDue.format(DateTimeFormatter.ofPattern("EEEE d MMMM", new Locale("ar"))), 11, MUTED, false));
+            meta.addView(label(kindLabel(item.kind) + " " + cycleLabel(item.cycle), 12, MUTED, false));
         }
         copy.addView(meta);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(12));
         row.addView(copy, copyParams);
         LinearLayout end = new LinearLayout(this); end.setOrientation(LinearLayout.VERTICAL); end.setGravity(Gravity.END);
-        TextView amount = label(money(item.amountMinor, item.currency), 14, INK, true);
+        TextView amount = label(money(item.amountMinor, item.currency), 15, INK, true);
         amount.setTextDirection(View.TEXT_DIRECTION_LTR);
         end.addView(amount);
         if (!item.isDone()) {
             long days = ChronoUnit.DAYS.between(LocalDate.now(), item.nextDue);
-            if (days <= 1) end.addView(pill(dueWord(item.nextDue), dark ? 0x55a82c2c : 0xfffde8e8, dark ? 0xffffb4b4 : 0xffa82c2c));
-            else end.addView(label(dueWord(item.nextDue), 11, MUTED, false));
+            // Soon (today, tomorrow or late) stands out in lime; later dates sit in a quiet chip.
+            boolean soon = days <= 1;
+            TextView when = label(dueWord(item.nextDue), 11, soon ? 0xff06120d : MUTED, true);
+            when.setPadding(dp(9), dp(2), dp(9), dp(2)); when.setBackground(rounded(soon ? LIME : uiTheme.segment, 99));
+            LinearLayout.LayoutParams whenParams = new LinearLayout.LayoutParams(-2, -2); whenParams.topMargin = dp(4); whenParams.gravity = Gravity.END;
+            end.addView(when, whenParams);
         }
         row.addView(end);
         row.setOnClickListener(v -> { selectedCommitmentId = item.id; selectedTab = 11; render(); });
@@ -5621,81 +5684,58 @@ public final class MainActivity extends Activity {
         LinearLayout toolbar = new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", () -> { selectedTab = 2; render(); }),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView title = label("تفاصيل " + kindLabel(item.kind), 15, INK, true); title.setGravity(Gravity.CENTER);
-        toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView title = label(item.merchant, 18, INK, true); title.setSingleLine(true); title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1); titleParams.setMarginStart(dp(8));
+        toolbar.addView(title, titleParams);
         toolbar.addView(iconButton(R.drawable.ic_edit, "تعديل", () -> openCommitmentEditor(item)),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(toolbar);
 
-        LinearLayout summary = card();
-        summary.setOrientation(LinearLayout.HORIZONTAL);
-        summary.setGravity(Gravity.CENTER_VERTICAL);
-        summary.setPadding(dp(18), dp(18), dp(18), dp(18));
-        ((LinearLayout.LayoutParams) summary.getLayoutParams()).topMargin = dp(16);
-        if (installment && item.totalCount != null && item.totalCount > 0) {
-            FrameLayout ringBox = new FrameLayout(this);
-            UiKit.Ring ring = new UiKit.Ring(this, BORDER, EMERALD);
-            ring.setFraction(item.paidCount / (float) item.totalCount);
-            ring.setContentDescription("اتدفع " + item.paidCount + " من " + item.totalCount);
-            ringBox.addView(ring, new FrameLayout.LayoutParams(-1, -1));
-            LinearLayout center = new LinearLayout(this); center.setOrientation(LinearLayout.VERTICAL);
-            center.setGravity(Gravity.CENTER);
-            TextView count = label(item.paidCount + "/" + item.totalCount, 24, INK, true);
-            count.setTextDirection(View.TEXT_DIRECTION_LTR);
-            count.setGravity(Gravity.CENTER);
-            center.addView(count,new LinearLayout.LayoutParams(-1,-2));
-            TextView paidCaption=label("قسط مدفوع",11,MUTED,false);
-            paidCaption.setGravity(Gravity.CENTER);
-            center.addView(paidCaption,new LinearLayout.LayoutParams(-1,-2));
-            ringBox.addView(center, new FrameLayout.LayoutParams(-1, -1));
-            summary.addView(ringBox, new LinearLayout.LayoutParams(dp(118), dp(118)));
-        } else {
-            summary.addView(merchantBadge(item.merchant, kindCategory(item.kind), 64), new LinearLayout.LayoutParams(dp(64), dp(64)));
-        }
-        LinearLayout info = new LinearLayout(this); info.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout name = new LinearLayout(this); name.setGravity(Gravity.CENTER_VERTICAL);
-        if (installment) {
-            name.addView(merchantBadge(item.merchant, kindCategory(item.kind), 30), new LinearLayout.LayoutParams(dp(30), dp(30)));
-            LinearLayout.LayoutParams nameText = new LinearLayout.LayoutParams(0, -2, 1); nameText.setMarginStart(dp(8));
-            name.addView(label(item.merchant + " · " + money(item.amountMinor, item.currency), 17, INK, true), nameText);
-        } else name.addView(label(item.merchant, 18, INK, true));
-        info.addView(name);
-        info.addView(label(kindLabel(item.kind) + " " + cycleLabel(item.cycle), 13, MUTED, false));
-        if (installment && item.totalCount != null) {
-            info.addView(label("اتدفع " + item.paidCount + " قسط · باقي " + Math.max(0,item.totalCount-item.paidCount)+" قسط",13,INK,false));
-            if (!item.isDone()) {
-                LocalDate last = item.nextDue;
-                for (int i = item.paidCount + 1; i < item.totalCount; i++) last = item.nextAfter(last);
-                info.addView(label("آخر قسط: " + last.format(DateTimeFormatter.ofPattern("MMMM yyyy", new Locale("ar"))), 12, MUTED, false));
-            }
-        }
-        if (item.paymentSourceId != null)
-            for (ExpenseDb.PaymentSource source : db.paymentSources())
-                if (source.id == item.paymentSourceId)
-                    info.addView(label("من " + source.name + (source.last4 == null ? "" : " •••• " + source.last4), 12, MUTED, false));
-        LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(0, -2, 1); infoParams.setMarginStart(dp(16));
-        summary.addView(info, infoParams);
-
-        LinearLayout next = new LinearLayout(this); next.setOrientation(LinearLayout.VERTICAL);
-        next.setPadding(dp(18), dp(16), dp(18), dp(16));
-        next.setBackground(rounded(BRAND, 22));
-        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(-1, -2); nextParams.topMargin = dp(12);
+        // Redesign (31 Oct 2026, owner-approved): one hero — the next payment, the progress and «علّمه مدفوع».
+        int heroInk = dark ? INK : Color.WHITE, heroMuted = dark ? MUTED : 0xffcfe3d8;
+        LinearLayout next = new LinearLayout(this); next.setOrientation(LinearLayout.VERTICAL); next.setTag("commitment_hero");
+        next.setPadding(dp(18), dp(18), dp(18), dp(18));
+        next.setBackground(rounded(dark ? SURFACE : BRAND, 28));
+        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(-1, -2); nextParams.topMargin = dp(8);
         page.addView(next, nextParams);
+        boolean counted = installment && item.totalCount != null && item.totalCount > 0;
         if (item.isDone()) {
             next.addView(label(installment && item.totalCount != null && item.paidCount >= item.totalCount ?
-                    "خلصت كل الأقساط" : "الالتزام ده انتهى", 17, Color.WHITE, true));
-            next.addView(label(item.lastPaidDate == null ? "" : "آخر دفعة " + item.lastPaidDate, 12, 0xffb9d3c8, false));
+                    "خلصت كل الأقساط" : "الالتزام ده انتهى", 18, heroInk, true));
+            next.addView(label(item.lastPaidDate == null ? kindLabel(item.kind) + " " + cycleLabel(item.cycle) : "آخر دفعة " + item.lastPaidDate, 13, heroMuted, false));
         } else {
             LinearLayout heading = new LinearLayout(this); heading.setGravity(Gravity.CENTER_VERTICAL);
-            heading.addView(label(installment ? "القسط الجاي" : "الدفعة الجاية", 13, 0xffb9d3c8, false), new LinearLayout.LayoutParams(0, -2, 1));
-            heading.addView(pill(dueWord(item.nextDue), LIME, BRAND));
+            heading.addView(label(installment ? "القسط الجاي" : "الدفعة الجاية", 13, heroMuted, false), new LinearLayout.LayoutParams(0, -2, 1));
+            heading.addView(pill(dueWord(item.nextDue), LIME, 0xff06120d));
             next.addView(heading);
-            LinearLayout amountRow = new LinearLayout(this); amountRow.setGravity(Gravity.CENTER_VERTICAL);
-            amountRow.addView(label(money(item.amountMinor, item.currency), 26, Color.WHITE, true), new LinearLayout.LayoutParams(0, -2, 1));
-            amountRow.addView(label(item.nextDue.format(DateTimeFormatter.ofPattern("EEEE d MMMM", new Locale("ar"))), 13, 0xffe6efea, false));
-            next.addView(amountRow);
-            TextView paid = label("علّمه مدفوع", 14, Color.WHITE, true);
-            paid.setGravity(Gravity.CENTER); paid.setBackground(rounded(0x1fffffff, 14));
+            LinearLayout amountRow = new LinearLayout(this); amountRow.setGravity(Gravity.BOTTOM);
+            TextView amount = label(AnalyticsMath.whole(item.amountMinor), 40, heroInk, true);
+            amount.setTextDirection(View.TEXT_DIRECTION_LTR); cappedTextSize(amount, 40, 1.3f);
+            amountRow.addView(amount);
+            String unit = ("EGP".equals(item.currency) ? "جنيه" : item.currency) + " · " +
+                    item.nextDue.format(DateTimeFormatter.ofPattern("EEEE d MMMM", new Locale("ar")));
+            LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(0, -2, 1); unitParams.setMarginStart(dp(8)); unitParams.bottomMargin = dp(6);
+            amountRow.addView(label(unit, 14, heroMuted, false), unitParams);
+            amountRow.setContentDescription(money(item.amountMinor, item.currency) + "، " + item.nextDue.format(DateTimeFormatter.ofPattern("EEEE d MMMM", new Locale("ar"))));
+            LinearLayout.LayoutParams amountParams = new LinearLayout.LayoutParams(-1, -2); amountParams.topMargin = dp(8);
+            next.addView(amountRow, amountParams);
+        }
+        if (counted) {
+            LinearLayout progress = new LinearLayout(this);
+            progress.addView(label("اتدفع " + item.paidCount + " من " + item.totalCount, 12, heroMuted, false), new LinearLayout.LayoutParams(0, -2, 1));
+            int left = Math.max(0, item.totalCount - item.paidCount);
+            if (left > 0) progress.addView(label("فاضل " + money(item.amountMinor * left, item.currency), 12, heroMuted, false));
+            LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, -2); progressParams.topMargin = dp(12);
+            next.addView(progress, progressParams);
+            View bar = new View(this);
+            LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(-1, dp(8)); barParams.topMargin = dp(6);
+            next.addView(bar, barParams);
+            fillBar(bar, item.paidCount, item.totalCount, LIME, dark ? BACKGROUND : 0xff14533f);
+            bar.setContentDescription("اتدفع " + item.paidCount + " من " + item.totalCount);
+        }
+        if (!item.isDone()) {
+            TextView paid = label("علّمه مدفوع", 15, dark ? 0xff06120d : BRAND, true);
+            paid.setGravity(Gravity.CENTER); paid.setBackground(rounded(dark ? LIME : Color.WHITE, 16));
             paid.setOnClickListener(v -> {
                 String key=db.commitmentIdentity(item.id);
                 new ChoiceDialogBuilder().setTitle("سداد "+item.merchant)
@@ -5704,31 +5744,19 @@ public final class MainActivity extends Activity {
                             else confirmCommitmentDialog(item,key);
                         }).show();
             });
-            LinearLayout.LayoutParams paidParams = new LinearLayout.LayoutParams(-1, dp(46)); paidParams.topMargin = dp(10);
+            LinearLayout.LayoutParams paidParams = new LinearLayout.LayoutParams(-1, dp(50)); paidParams.topMargin = dp(14);
             next.addView(paid, paidParams);
         }
 
-        if (!item.isDone()) finishCommitmentAction(item, installment);
-        else if (item.totalCount == null || item.paidCount < item.totalCount) {
-            TextView reopen = label("إعادة تفعيل الالتزام", 14, ACCENT, true);
-            reopen.setGravity(Gravity.CENTER);
-            reopen.setPadding(0, dp(12), 0, dp(12));
-            reopen.setOnClickListener(v -> new ChoiceDialogBuilder()
-                    .setTitle("إعادة تفعيل " + item.merchant + "؟")
-                    .setMessage("هيرجع للكالندر والتنبيهات من موعد الاستحقاق المحفوظ. راجع الموعد لو اتغير.")
-                    .setPositiveButton("تفعيل", (dialog, which) -> { db.reopenRecurring(item.id); render(); })
-                    .setNegativeButton("إلغاء", null).show());
-            page.addView(reopen);
-        }
-
+        section("الدفعات", null, null);
         LinearLayout settlements=card();
-        settlements.addView(label("السداد بيتحدّث تلقائيًا عند تطابق الجهة والمبلغ والعملة والدورة. الاختلاف فقط يحتاج مراجعة.",12,MUTED,false));
         for(CommitmentPayments.Cycle cycle:db.commitmentCycles(item.id))if(cycle.due.equals(item.nextDue)&&cycle.remaining()>0){
             settlements.addView(label("دورة "+cycle.due+" · المسدد "+money(cycle.paid,cycle.currency)+" · المتبقي "+money(cycle.remaining(),cycle.currency),13,INK,true));
             if(cycle.invalid>0)settlements.addView(label("دفع مرتبط اتغيّر أو اتحذف أو رجع منه مبلغ؛ راجع التسويات.",12,ORANGE,false));
         }
         TextView settlementHistory=label("عرض التسويات وفك الربط",13,ACCENT,true);settlements.addView(settlementHistory);
         settlementHistory.setOnClickListener(v->commitmentPaymentsDialog(item.id));
+        section("الإعدادات", null, null);
         LinearLayout settings = card();
         LinearLayout reminder = new LinearLayout(this); reminder.setGravity(Gravity.CENTER_VERTICAL);
         reminder.setPadding(0, dp(4), 0, dp(4));
@@ -5756,6 +5784,28 @@ public final class MainActivity extends Activity {
         source.addView(label("بيتعلم مدفوع لوحده من رسائل " + item.merchant, 13, INK, false), sourceText);
         source.addView(label(item.isDone() || item.needsReview?"متوقف":"شغال",12,item.isDone() || item.needsReview?MUTED:INCOME,true));
         settings.addView(source);
+        if (item.paymentSourceId != null)
+            for (ExpenseDb.PaymentSource paymentSource : db.paymentSources())
+                if (paymentSource.id == item.paymentSourceId) {
+                    divider(settings);
+                    LinearLayout from = new LinearLayout(this); from.setGravity(Gravity.CENTER_VERTICAL); from.setPadding(0, dp(8), 0, dp(8));
+                    from.addView(tintedIcon(R.drawable.ic_wallet, INK), new LinearLayout.LayoutParams(dp(20), dp(20)));
+                    LinearLayout.LayoutParams fromText = new LinearLayout.LayoutParams(0, -2, 1); fromText.setMarginStart(dp(10));
+                    from.addView(label("بيتدفع من", 14, INK, false), fromText);
+                    from.addView(label(paymentSource.name + (paymentSource.last4 == null ? "" : " · " + paymentSource.last4), 13, MUTED, false));
+                    settings.addView(from);
+                }
+        if (counted && !item.isDone()) {
+            LocalDate last = item.nextDue;
+            for (int k = item.paidCount + 1; k < item.totalCount; k++) last = item.nextAfter(last);
+            divider(settings);
+            LinearLayout end = new LinearLayout(this); end.setGravity(Gravity.CENTER_VERTICAL); end.setPadding(0, dp(8), 0, dp(8));
+            end.addView(tintedIcon(R.drawable.ic_calendar, INK), new LinearLayout.LayoutParams(dp(20), dp(20)));
+            LinearLayout.LayoutParams endText = new LinearLayout.LayoutParams(0, -2, 1); endText.setMarginStart(dp(10));
+            end.addView(label("آخر قسط", 14, INK, false), endText);
+            end.addView(label(last.format(DateTimeFormatter.ofPattern("MMMM yyyy", new Locale("ar"))), 13, MUTED, false));
+            settings.addView(end);
+        }
         List<ExpenseDb.SourceEvidence> commitmentHistory=db.commitmentHistoryFor(item.id);
         if(!commitmentHistory.isEmpty()) {
             TextView history=label("عرض رسائل الالتزام ومبالغ الشهور السابقة",13,ACCENT,true);
@@ -5785,6 +5835,19 @@ public final class MainActivity extends Activity {
                 scheduleRow(schedule, false, name1, i == 0 ? dueWord(due) : money(item.amountMinor, item.currency));
                 due = item.nextAfter(due);
             }
+        }
+
+        if (!item.isDone()) finishCommitmentAction(item, installment);
+        else if (item.totalCount == null || item.paidCount < item.totalCount) {
+            TextView reopen = label("إعادة تفعيل الالتزام", 14, ACCENT, true);
+            reopen.setGravity(Gravity.CENTER);
+            reopen.setPadding(0, dp(12), 0, dp(12));
+            reopen.setOnClickListener(v -> new ChoiceDialogBuilder()
+                    .setTitle("إعادة تفعيل " + item.merchant + "؟")
+                    .setMessage("هيرجع للكالندر والتنبيهات من موعد الاستحقاق المحفوظ. راجع الموعد لو اتغير.")
+                    .setPositiveButton("تفعيل", (dialog, which) -> { db.reopenRecurring(item.id); render(); })
+                    .setNegativeButton("إلغاء", null).show());
+            page.addView(reopen);
         }
 
         TextView delete = label("حذف الالتزام", 14, CORAL, true);
@@ -6077,9 +6140,9 @@ public final class MainActivity extends Activity {
         LocalDate[] chosenDue={suggestion!=null?suggestion.date:existing!=null?existing.nextDue:nextDueForDay(LocalDate.now().getDayOfMonth())};
         LinearLayout toolbar = new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.addView(iconButton(R.drawable.ic_chevron_back, "رجوع", this::onBackPressed), new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView title = label(existing == null ? "التزام جديد" : "تعديل الالتزام", 16, INK, true); title.setGravity(Gravity.CENTER);
-        toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        toolbar.addView(new View(this), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView title = label(existing == null ? "التزام جديد" : "تعديل الالتزام", 18, INK, true);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1); titleParams.setMarginStart(dp(8));
+        toolbar.addView(title, titleParams);
         page.addView(toolbar);
 
         String[] kind = {existing == null ? suggestion==null?"installment":suggestion.kind : existing.kind};
@@ -6088,7 +6151,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout segments = new LinearLayout(this);
         segments.setPadding(dp(4), dp(4), dp(4), dp(4));
-        segments.setBackground(rounded(dark ? SURFACE : 0xffe8ebe4, 14));
+        segments.setBackground(rounded(uiTheme.segment, 99));
         LinearLayout.LayoutParams segmentParams = new LinearLayout.LayoutParams(-1, -2); segmentParams.topMargin = dp(14);
         page.addView(segments, segmentParams);
 
@@ -6236,16 +6299,16 @@ public final class MainActivity extends Activity {
 
         LinearLayout hint = new LinearLayout(this); hint.setGravity(Gravity.CENTER_VERTICAL);
         hint.setPadding(dp(14), dp(12), dp(14), dp(12));
-        hint.setBackground(outlined(SURFACE, BORDER, 16));
+        hint.setBackground(rounded(uiTheme.soft, 16));
         hint.addView(tintedIcon(R.drawable.ic_message, EMERALD), new LinearLayout.LayoutParams(dp(20), dp(20)));
         LinearLayout.LayoutParams hintText = new LinearLayout.LayoutParams(0, -2, 1); hintText.setMarginStart(dp(10));
-        hint.addView(label("لما رسالة الدفع من الجهة دي توصل، حتى لو بتفتحها من تروكولر، الدفعة هتتعلم مدفوعة لوحدها.", 12, MUTED, false), hintText);
+        hint.addView(label("الدفعة بتتعلم مدفوعة لوحدها لما رسالة الدفع توصل.", 12, MUTED, false), hintText);
         LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2); hintParams.topMargin = dp(16);
         page.addView(hint, hintParams);
 
         TextView save = label("احفظ الالتزام", 16, onPrimary(), true);
-        save.setGravity(Gravity.CENTER); save.setBackground(rounded(primaryFill(), 18));
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(56)); saveParams.topMargin = dp(20);
+        save.setGravity(Gravity.CENTER); save.setBackground(rounded(primaryFill(), 16));
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(UiTheme.FIELD_HEIGHT)); saveParams.topMargin = dp(20);
         page.addView(save, saveParams);
 
         String[][] kinds = {{"قسط", "installment"}, {"اشتراك", "subscription"}, {"فاتورة", "bill"}};
@@ -6254,11 +6317,12 @@ public final class MainActivity extends Activity {
             segments.removeAllViews();
             for (String[] option : kinds) {
                 boolean selected = kind[0].equals(option[1]);
-                TextView segment = label(option[0], 13, selected ? INK : MUTED, selected);
+                TextView segment = label(option[0], 14, selected ? uiTheme.segmentOnInk : MUTED, selected);
                 segment.setGravity(Gravity.CENTER);
-                if (selected) segment.setBackground(rounded(dark ? BACKGROUND : Color.WHITE, 11));
+                if (selected) segment.setBackground(rounded(uiTheme.segmentOn, 99));
+                segment.setContentDescription(option[0] + (selected ? "، مختار" : ""));
                 segment.setOnClickListener(v -> { kind[0] = option[1]; paintKind[0].run(); });
-                segments.addView(segment, new LinearLayout.LayoutParams(0, dp(38), 1));
+                segments.addView(segment, new LinearLayout.LayoutParams(0, dp(42), 1));
             }
             installmentBox.setVisibility("installment".equals(kind[0]) ? View.VISIBLE : View.GONE);
             cycle.setVisibility("installment".equals(kind[0]) ? View.GONE : View.VISIBLE);
@@ -6278,10 +6342,12 @@ public final class MainActivity extends Activity {
                 boolean selected = provider.name.equalsIgnoreCase(name.getText().toString().trim());
                 LinearLayout tile = new LinearLayout(this); tile.setOrientation(LinearLayout.VERTICAL);
                 tile.setGravity(Gravity.CENTER);
-                tile.setBackground(selected ? outlined(SURFACE, EMERALD, 16) : outlined(SURFACE, BORDER, 16));
-                if (selected) ((GradientDrawable) tile.getBackground()).setStroke(dp(2), EMERALD);
+                // Selected: a 2dp brand outline; the rest are plain soft tiles.
+                tile.setBackground(selected ? outlined(SURFACE, ACCENT, 18) : rounded(uiTheme.soft, 18));
+                if (selected) ((GradientDrawable) tile.getBackground()).setStroke(dp(2), ACCENT);
+                tile.setContentDescription(provider.name + (selected ? "، مختار" : ""));
                 tile.addView(merchantBadge(provider.name, kindCategory(provider.kind), 32), new LinearLayout.LayoutParams(dp(32), dp(32)));
-                TextView caption = label(provider.name, 11, INK, false); caption.setGravity(Gravity.CENTER);
+                TextView caption = label(provider.name, 12, INK, selected); caption.setGravity(Gravity.CENTER);
                 caption.setSingleLine(true);
                 tile.addView(caption);
                 tile.setOnClickListener(v -> {
@@ -7393,6 +7459,7 @@ public final class MainActivity extends Activity {
             destinationParams.setMargins(dp(3),0,dp(3),0);nav.addView(item,destinationParams);
             item.setOnClickListener(v -> {
                 if (tab == 4) insightsSection="";
+                if (tab == 2) commitmentsInbox = false;
                 transactionsReturnDialog="";transactionsPointsCurrency="";transactionJourney.clear();
                 if (tab == 6) { transactionStatementList=false;transactionStatementIds=null;transactionBucketFilter = ""; transactionPeriod = null; transactionCurrencyFilter = ""; transactionsBackTab = 0; }
                 selectedTab = tab; render();
