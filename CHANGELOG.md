@@ -1,5 +1,12 @@
 # Change log
 
+## Unreleased — 31 October 2026 · home, transactions, details, add (redesign step 2 of 3)
+
+- Home: one dark hero (what left since pay day, with «دخل» and «الفرق» tiles; tapping «خرج»/«دخل» still opens what each is made of, under the hero); several small notices (what's new, recovered messages, month summary, backup) become one «N حاجات محتاجة منك نظرة» line that lists them, a single one keeps its own strip; the next commitment is one clean card; accounts are small tiles (bank color, name, last balance) instead of full card faces.
+- Transactions: the search box is always shown with the filters button beside it; «الكل · خرج · دخل» segmented control beside the period; the two banners become compact chips; day headers are stronger and show only the totals that exist; the statement list drops its second explanation line.
+- Transaction details: a hero card (badge, name, amount, date) and three actions — تعديل، الرسالة، خيارات أكتر — instead of the ⋯ icon; the «رجوع إلى …» line and the redundant «النوع» row are gone.
+- Add / edit transaction: no «نوع العملية» caption over the segmented control; categories are a 4-column grid of icon tiles (the most used seven and «كل التصنيفات»).
+
 ## Unreleased — 31 October 2026 · provider receipt + bank debit
 
 - An installment provider's payment receipt (e.g. TRU «تم سداد مبلغ 2438.00») and the bank's debit to that provider («تم خصم 2465.8 … لدى ترو») are one payment instead of two installments: same provider (by the commitment tiles' words, so TRU = ترو), same currency, within 12 hours, the debit equal to the receipt or up to 3% (and 100.00) more. The receipt stays the installment (keeping any commitment link) and takes the bank account; the difference is a fee under it, like a transfer fee. Two candidates on either side, a repayment, a card settlement, an existing fee or a commitment link on the debit: no join. Runs after each capture and in «فحص البيانات وإصلاحها».
