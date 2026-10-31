@@ -3874,7 +3874,9 @@ public final class MainActivity extends Activity {
             int ink = dark ? 0xfff3d98a : 0xff5c4700;
             banner.addView(tintedIcon(R.drawable.ic_cat_other, ink), new LinearLayout.LayoutParams(dp(20), dp(20)));
             LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(-2, -2); textParams.setMarginStart(dp(10));
-            banner.addView(label(uncategorized == 1 ? "عملية محتاجة تصنيف" : uncategorized + " عمليات محتاجة تصنيف", 13, ink, true), textParams);
+            banner.addView(label(uncategorized == 1 ? "عملية محتاجة تصنيف" : uncategorized + " عمليات محتاجة تصنيف", 13, ink, false), textParams);
+            LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(-2, -2); allParams.setMarginStart(dp(8));
+            banner.addView(label("عرض الكل", 13, ink, true), allParams);
             banner.setOnClickListener(v -> {
                 // Uncategorized expenses and everything waiting for review (the new parser's REVIEW with its reason).
                 transactionCategoryFilter = NEEDS_ATTENTION_FILTER; transactionKindFilter = "";
