@@ -8253,6 +8253,8 @@ public final class MainActivity extends Activity {
         transactionBucketFilter = bucket == null ? "" : bucket.name();
         transactionCategoryFilter = category;
         transactionKindFilter = "";
+        // Review of PR #53: a list opened from the home statement left its row ids behind; analytics lists never use them.
+        transactionStatementList = false; transactionStatementIds = null;
         transactionSourceFilter = null;
         transactionPeriod = insightsPeriod(); transactionCurrencyFilter = "EGP";
         transactionExcludeTransfers = false;
