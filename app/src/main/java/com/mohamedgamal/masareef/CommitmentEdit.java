@@ -37,4 +37,20 @@ final class CommitmentEdit {
         if (plan != null && (action == KEEP_PLAN || action == ASK_SCOPE && onlyThisInstallment)) return plan;
         return typed;
     }
+
+    /**
+     * Review of PR #57: what is left on a plan, per currency. Each remaining installment counts its stored cycle's
+     * remaining amount (expected minus what was paid, so a partial payment is deducted) when the cycle exists, and the
+     * plan's own price otherwise. Never the due installment's amount times the count.
+     */
+    static java.util.Map<String, Long> left(java.util.List<java.time.LocalDate> dues,
+                                            java.util.Map<java.time.LocalDate, Price> stored, Price plan) {
+        java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
+        for (java.time.LocalDate due : dues) {
+            Price p = stored.containsKey(due) ? stored.get(due) : plan;
+            if (p == null || p.amount <= 0) continue;
+            out.merge(p.currency, p.amount, Math::addExact);
+        }
+        return out;
+    }
 }

@@ -407,13 +407,19 @@ public final class MainActivity extends Activity {
         List<ExpenseDb.PaymentSource> sources = db.accountSources(true);
         if (sources.isEmpty()) { empty("ضيف أول وسيلة دفع", "حدد نوع الوسيلة والبنك، وسمّيها باسم تعرفه. ربط الكارت بحسابه يحتاج تأكيدك."); return; }
         long total = 0; int counted = 0; boolean estimated = false;
+        Map<String, Long> otherTotals = new LinkedHashMap<>();
         for (ExpenseDb.PaymentSource source : sources) {
             if (source.archived || sourceGroup(source) != 0) continue;
+            for (String currency : CURRENCIES) {
+                if ("EGP".equals(currency)) continue;
+                ExpenseDb.BalanceSnapshot other = db.currentBalance(source.id, currency);
+                if (other != null) otherTotals.merge(currency, other.amountMinor, Math::addExact);
+            }
             ExpenseDb.BalanceSnapshot balance = db.currentBalance(source.id, "EGP");
             if (balance == null) continue;
             total += balance.amountMinor; counted++; estimated |= balance.estimated;
         }
-        if (counted > 0) {
+        if (counted > 0 || !otherTotals.isEmpty()) {
             LinearLayout sum = card(); sum.setTag("accounts_total");
             sum.addView(label("كل اللي معاك", 13, MUTED, false));
             LinearLayout figure = new LinearLayout(this); figure.setGravity(Gravity.BOTTOM);
@@ -422,6 +428,10 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams unit = new LinearLayout.LayoutParams(-2, -2); unit.setMarginStart(dp(8)); unit.bottomMargin = dp(6);
             figure.addView(label("جنيه", 14, MUTED, false), unit);
             sum.addView(figure);
+            // Other currencies stay apart, never added to the pounds.
+            StringBuilder others = new StringBuilder();
+            for (Map.Entry<String, Long> entry : otherTotals.entrySet()) others.append(others.length() == 0 ? "+ " : "  ·  ").append(money(entry.getValue(), entry.getKey()));
+            if (others.length() > 0) { TextView other = label(others.toString(), 14, ACCENT, true); other.setTextDirection(View.TEXT_DIRECTION_LTR); other.setGravity(Gravity.START); sum.addView(other); }
             sum.addView(label((counted == 1 ? "من حساب واحد" : "من " + counted + " حسابات") + (estimated ? " · تقديري من آخر رصيد" : ""), 12, MUTED, false));
             sum.setContentDescription("كل اللي معاك " + money(total, "EGP"));
         }
@@ -450,8 +460,15 @@ public final class MainActivity extends Activity {
         TextView name = label(db.sourceLabel(source.id), 15, INK, true); name.setSingleLine(true); name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         copy.addView(name);
         boolean noBank = bankSource(source.kind) && !usableBank(source.name) && !appSource(source);
-        ExpenseDb.BalanceSnapshot balance = null; String balanceCurrency = "EGP";
-        for (String currency : CURRENCIES) { balance = db.currentBalance(source.id, currency); if (balance != null) { balanceCurrency = currency; break; } }
+        // Review of PR #57: every currency with a balance, not only the first one.
+        List<String> balanceCurrencies = balanceCurrencies(source.id);
+        ExpenseDb.BalanceSnapshot balance = balanceCurrencies.isEmpty() ? null : db.currentBalance(source.id, balanceCurrencies.get(0));
+        StringBuilder balances = new StringBuilder(), spoken = new StringBuilder();
+        for (String currency : balanceCurrencies) {
+            ExpenseDb.BalanceSnapshot each = db.currentBalance(source.id, currency);
+            balances.append(balances.length() == 0 ? "" : "\n").append(money(each.amountMinor, currency));
+            spoken.append("، ").append(money(each.amountMinor, currency));
+        }
         String sub; int subColor = MUTED;
         if (source.archived) sub = "مؤرشف · التاريخ محفوظ";
         else if (noBank) { sub = "حدد البنك"; subColor = ORANGE; }
@@ -469,11 +486,12 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(12)); copyParams.setMarginEnd(dp(8));
         row.addView(copy, copyParams);
         if (balance != null) {
-            TextView amount = label(money(balance.amountMinor, balanceCurrency), 15, INK, true); amount.setTextDirection(View.TEXT_DIRECTION_LTR);
+            TextView amount = label(balances.toString(), 15, INK, true); amount.setTextDirection(View.TEXT_DIRECTION_LTR);
+            amount.setGravity(Gravity.END); amount.setTag("account_balances:" + source.id);
             row.addView(amount);
         }
         row.addView(tintedIcon(R.drawable.ic_chevron_forward, MUTED), new LinearLayout.LayoutParams(dp(18), dp(18)));
-        row.setContentDescription(db.sourceLabel(source.id) + "، " + sub + (balance == null ? "" : "، " + money(balance.amountMinor, balanceCurrency)));
+        row.setContentDescription(db.sourceLabel(source.id) + "، " + sub + spoken);
         row.setOnClickListener(v -> {
             if (noBank) sourceBankPage(source);
             else if (source.archived) sourceOptions(source);
@@ -625,14 +643,28 @@ public final class MainActivity extends Activity {
         @Override boolean restoreAfterRecreation(){return true;}
     }
 
+    /** Currencies the source has a balance in, in the app's currency order (review of PR #57: never only the first). */
+    private List<String> balanceCurrencies(long sourceId) {
+        List<String> out = new ArrayList<>();
+        for (String currency : CURRENCIES) if (db.currentBalance(sourceId, currency) != null) out.add(currency);
+        return out;
+    }
+
     private void balanceHistoryDialog(ExpenseDb.PaymentSource source) {
-        List<ExpenseDb.BalanceSnapshot> history = db.balanceHistory(source.id, "EGP", 50);
+        List<String> currencies = balanceCurrencies(source.id);
+        if (currencies.size() <= 1) { balanceHistoryDialog(source, currencies.isEmpty() ? "EGP" : currencies.get(0)); return; }
+        new ChoiceDialogBuilder().setTitle("سجل الأرصدة · اختار العملة").setItems(currencies.toArray(new String[0]),
+                (d, which) -> balanceHistoryDialog(source, currencies.get(which))).show();
+    }
+
+    private void balanceHistoryDialog(ExpenseDb.PaymentSource source, String currency) {
+        List<ExpenseDb.BalanceSnapshot> history = db.balanceHistory(source.id, currency, 50);
         if (history.isEmpty()) { toast("لسه مفيش أرصدة مسجلة للحساب"); return; }
         long accountId = db.accountId(source.id);
         savePageScroll();
         formPages.push(new UiPages.Page("balance_history", "سجل الأرصدة", new Bundle(), new Bundle()) {
             @Override void build(LinearLayout body, UiComponents components) {
-                body.addView(components.label(db.sourceLabel(accountId) + " · EGP · أحدث 50", UiTheme.BODY, MUTED));
+                body.addView(components.label(db.sourceLabel(accountId) + " · " + currency + " · أحدث 50", UiTheme.BODY, MUTED));
                 LinearLayout list = listCard(body);
                 DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT);
                 for (ExpenseDb.BalanceSnapshot snapshot : history) {
@@ -644,7 +676,7 @@ public final class MainActivity extends Activity {
                     stamp.setTextDirection(View.TEXT_DIRECTION_LTR); copy.addView(stamp);
                     copy.addView(components.label(snapshot.source, UiTheme.CAPTION, MUTED));
                     row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-                    TextView amount = label(money(snapshot.amountMinor, "EGP"), 15, INK, true); amount.setTextDirection(View.TEXT_DIRECTION_LTR);
+                    TextView amount = label(money(snapshot.amountMinor, currency), 15, INK, true); amount.setTextDirection(View.TEXT_DIRECTION_LTR);
                     row.addView(amount); list.addView(row);
                 }
             }
@@ -5749,7 +5781,22 @@ public final class MainActivity extends Activity {
             LinearLayout progress = new LinearLayout(this);
             progress.addView(label("اتدفع " + item.paidCount + " من " + item.totalCount, 12, heroMuted, false), new LinearLayout.LayoutParams(0, -2, 1));
             int left = Math.max(0, item.totalCount - item.paidCount);
-            if (left > 0) progress.addView(label("فاضل " + money(item.amountMinor * left, item.currency), 12, heroMuted, false));
+            if (left > 0 && !item.isDone()) {
+                // Review of PR #57: from the stored cycles (partial payments deducted) and the plan, per currency.
+                List<LocalDate> dues = new ArrayList<>(); LocalDate due = item.nextDue;
+                for (int k = 0; k < left; k++) { dues.add(due); due = item.nextAfter(due); }
+                Map<LocalDate, CommitmentEdit.Price> stored = new java.util.HashMap<>();
+                for (CommitmentPayments.Cycle cycle : db.commitmentCycles(item.id)) stored.put(cycle.due, new CommitmentEdit.Price(cycle.remaining(), cycle.currency));
+                ExpenseDb.Recurring plan = db.storedRecurringById(item.id);
+                Map<String, Long> owed = CommitmentEdit.left(dues, stored,
+                        plan == null ? new CommitmentEdit.Price(item.amountMinor, item.currency) : new CommitmentEdit.Price(plan.amountMinor, plan.currency));
+                StringBuilder owedText = new StringBuilder();
+                for (Map.Entry<String, Long> entry : owed.entrySet()) owedText.append(owedText.length() == 0 ? "" : " + ").append(money(entry.getValue(), entry.getKey()));
+                if (owedText.length() > 0) {
+                    TextView owedLabel = label("فاضل " + owedText, 12, heroMuted, false); owedLabel.setTag("commitment_left");
+                    progress.addView(owedLabel);
+                }
+            }
             LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, -2); progressParams.topMargin = dp(12);
             next.addView(progress, progressParams);
             View bar = new View(this);
@@ -8607,6 +8654,29 @@ public final class MainActivity extends Activity {
         LinearLayout face = bankCard(account);
         LinearLayout.LayoutParams faceParams = new LinearLayout.LayoutParams(-1, dp(176)); faceParams.topMargin = dp(14);
         page.addView(face, faceParams);
+        // Review of PR #57: every currency's balance lives here, each opening its own history.
+        List<String> heldCurrencies = balanceCurrencies(account.id);
+        if (heldCurrencies.size() > 1 || heldCurrencies.size() == 1 && !"EGP".equals(heldCurrencies.get(0))) {
+            section("الأرصدة", null, null);
+            LinearLayout held = listCard(page); held.setTag("account_balances");
+            for (String currency : heldCurrencies) {
+                ExpenseDb.BalanceSnapshot each = db.currentBalance(account.id, currency);
+                if (held.getChildCount() > 0) divider(held);
+                LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(0, dp(12), 0, dp(12)); row.setMinimumHeight(dp(UiTheme.TOUCH));
+                LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
+                copy.addView(label(currency, 15, INK, true));
+                copy.addView(label((each.estimated ? "تقديري · " : "آخر رصيد · ") + sourceDate(each.estimated ? each.updatedAt : each.occurredAt), 12, MUTED, false));
+                row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+                TextView value = label(money(each.amountMinor, currency), 16, INK, true); value.setTextDirection(View.TEXT_DIRECTION_LTR);
+                row.addView(value);
+                row.addView(tintedIcon(R.drawable.ic_chevron_forward, MUTED), new LinearLayout.LayoutParams(dp(18), dp(18)));
+                row.setContentDescription(currency + "، " + money(each.amountMinor, currency) + "، سجل الأرصدة");
+                final ExpenseDb.PaymentSource historyOf = account;
+                row.setOnClickListener(v -> balanceHistoryDialog(historyOf, currency));
+                held.addView(row);
+            }
+        }
 
         LocalDate[] period = flowPeriod();
         int days = (int) Math.min(31, ChronoUnit.DAYS.between(period[0], period[1]));
