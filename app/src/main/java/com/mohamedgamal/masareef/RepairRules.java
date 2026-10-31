@@ -56,6 +56,60 @@ final class RepairRules {
         Duplicate(long keepId, long removeId) { this.keepId = keepId; this.removeId = removeId; }
     }
 
+    /** How far apart a provider's payment receipt and the bank's debit for it may arrive. */
+    static final long PROVIDER_RECEIPT_WINDOW_MS = 12 * 60 * 60 * 1000L;
+    /** The largest difference read as a fee: 3% of the payment and never more than 100.00. */
+    static final long PROVIDER_FEE_MAX_MINOR = 10_000L;
+
+    /** Which installment provider a merchant name belongs to (e.g. «TRU» and «ترو» are one), or null. */
+    interface ProviderOf { String of(String merchant); }
+
+    /** A bank debit and the provider's receipt of the same payment; {@code fee} = debit − receipt (0 when equal). */
+    static final class ProviderPayment {
+        final long receiptId, debitId, fee;
+        ProviderPayment(long receiptId, long debitId, long fee) { this.receiptId = receiptId; this.debitId = debitId; this.fee = fee; }
+    }
+
+    /**
+     * Owner report, 31 Oct 2026: «تم سداد مبلغ 2438.00» from TRU and «تم خصم 2465.8 … لدى ترو» from the bank are one
+     * payment, counted twice. A receipt (an expense with no account of its own, from an installment provider) pairs with
+     * the one bank debit (an expense from an account) to the same provider, in the same currency, within 12 hours, for
+     * the same amount or up to 3% (and 100.00) more; the difference is the payment's fee. Two candidates on either
+     * side: no guess.
+     */
+    static List<ProviderPayment> providerReceipts(List<Row> rows, ProviderOf providerOf) {
+        List<ProviderPayment> result = new ArrayList<>();
+        Set<Long> used = new HashSet<>();
+        for (Row receipt : rows) {
+            if (!"expense".equals(receipt.kind) || receipt.from != null || receipt.userEdited || used.contains(receipt.id)) continue;
+            String provider = providerOf.of(receipt.merchant);
+            if (provider == null) continue;
+            Row debit = null; boolean ambiguous = false;
+            for (Row other : rows) {
+                if (!providerDebitFor(receipt, other, provider, providerOf)) continue;
+                if (debit != null) { ambiguous = true; break; }
+                debit = other;
+            }
+            if (ambiguous || debit == null || used.contains(debit.id)) continue;
+            int receipts = 0;
+            for (Row other : rows)
+                if ("expense".equals(other.kind) && other.from == null && !other.userEdited && provider.equals(providerOf.of(other.merchant))
+                        && providerDebitFor(other, debit, provider, providerOf)) receipts++;
+            if (receipts != 1) continue;
+            used.add(receipt.id); used.add(debit.id);
+            result.add(new ProviderPayment(receipt.id, debit.id, debit.amountMinor - receipt.amountMinor));
+        }
+        return result;
+    }
+
+    private static boolean providerDebitFor(Row receipt, Row debit, String provider, ProviderOf providerOf) {
+        if (debit.id == receipt.id || !"expense".equals(debit.kind) || debit.from == null || debit.userEdited) return false;
+        if (!debit.currency.equals(receipt.currency) || !provider.equals(providerOf.of(debit.merchant))) return false;
+        long fee = debit.amountMinor - receipt.amountMinor;
+        if (fee < 0 || fee > PROVIDER_FEE_MAX_MINOR || fee * 100 > receipt.amountMinor * 3) return false;
+        return Math.abs(debit.receivedAt - receipt.receivedAt) <= PROVIDER_RECEIPT_WINDOW_MS;
+    }
+
     static List<Duplicate> crossChannelDuplicates(List<Row> rows) {
         List<Duplicate> result = new ArrayList<>();
         Set<Long> used = new HashSet<>();

@@ -181,6 +181,33 @@ public final class RepairRulesTest {
         check(RepairRules.trailingSignFix(named, "HSBC", debit) == null, "already correct row is left alone");
         RepairRules.Row explicit = new RepairRules.Row(907, oct, oct, 10000, "EGP", "expense", "تسوق", "SMS", "expense", 6L, null, false, "STORE");
         check(RepairRules.trailingSignFix(explicit, "BANK", "Your account was debited with EGP 100.00+ at STORE") == null, "explicit debit wording is never flipped");
+        // Owner report, 31 Oct 2026: TRU «تم سداد مبلغ 2438.00» + bank «خصم 2465.8 … لدى ترو» four minutes apart.
+        RepairRules.ProviderOf providers = m -> m == null ? null : m.matches("(?iu).*\\b(tru)\\b.*|.*ترو.*") ? "TRU" : m.matches("(?iu).*valu.*") ? "valU" : null;
+        long tru = at("2026-10-31T05:23:00");
+        List<RepairRules.Row> pay = new ArrayList<>();
+        pay.add(new RepairRules.Row(10, tru, tru, 246580, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "ترو"));
+        pay.add(new RepairRules.Row(11, tru + 240000, tru + 240000, 243800, "EGP", "expense", "أقساط", "SMS", "expense", null, null, false, "TRU"));
+        List<RepairRules.ProviderPayment> paid = RepairRules.providerReceipts(pay, providers);
+        check(paid.size() == 1 && paid.get(0).receiptId == 11 && paid.get(0).debitId == 10 && paid.get(0).fee == 2780, "TRU receipt + bank debit = one payment, 27.80 fee");
+        // Same amount: one payment, no fee.
+        List<RepairRules.Row> equal = new ArrayList<>();
+        equal.add(new RepairRules.Row(20, tru, tru, 243800, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "ترو"));
+        equal.add(new RepairRules.Row(21, tru, tru, 243800, "EGP", "expense", "أقساط", "SMS", "expense", null, null, false, "TRU"));
+        check(RepairRules.providerReceipts(equal, providers).size() == 1 && RepairRules.providerReceipts(equal, providers).get(0).fee == 0, "equal amounts join without a fee");
+        // Never: a bigger gap than 3%, another provider, a debit smaller than the receipt, two days apart, two debits.
+        List<RepairRules.Row> far = new ArrayList<>(equal); far.set(0, new RepairRules.Row(20, tru, tru, 260000, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "ترو"));
+        check(RepairRules.providerReceipts(far, providers).isEmpty(), "a 6.6% difference is two payments");
+        List<RepairRules.Row> other = new ArrayList<>(equal); other.set(0, new RepairRules.Row(20, tru, tru, 243800, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "valU"));
+        check(RepairRules.providerReceipts(other, providers).isEmpty(), "different providers never join");
+        List<RepairRules.Row> smaller = new ArrayList<>(equal); smaller.set(0, new RepairRules.Row(20, tru, tru, 240000, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "ترو"));
+        check(RepairRules.providerReceipts(smaller, providers).isEmpty(), "a debit below the receipt is not this payment");
+        List<RepairRules.Row> apart = new ArrayList<>(equal); apart.set(0, new RepairRules.Row(20, tru + 2 * 86_400_000L, tru + 2 * 86_400_000L, 243800, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "ترو"));
+        check(RepairRules.providerReceipts(apart, providers).isEmpty(), "two days apart never join");
+        List<RepairRules.Row> twice = new ArrayList<>(pay);
+        twice.add(new RepairRules.Row(12, tru, tru, 245000, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "ترو"));
+        check(RepairRules.providerReceipts(twice, providers).isEmpty(), "two possible debits: no guess");
+        List<RepairRules.Row> bothBank = new ArrayList<>(equal); bothBank.set(1, new RepairRules.Row(21, tru, tru, 243800, "EGP", "expense", "أقساط", "SMS", "expense", 7L, null, false, "TRU"));
+        check(RepairRules.providerReceipts(bothBank, providers).isEmpty(), "two account debits are two payments");
         System.out.println("Repair rule checks passed: " + checked);
     }
 }

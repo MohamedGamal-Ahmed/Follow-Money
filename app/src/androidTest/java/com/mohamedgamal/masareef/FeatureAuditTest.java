@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /** Independent verification fixtures. Live fixture mode is explicitly emulator-only. */
@@ -440,6 +441,21 @@ final class FeatureAuditTest {
         ok(db.restoreCommitment(row));ExpenseDb.Recurring back=db.recurringById(plan);
         ok(back!=null);eq(before.paidCount,back.paidCount);ok(before.nextDue.equals(back.nextDue));eq(1,db.commitmentPayments(plan).size());
         ok(!db.restoreCommitment(null));
+    }
+    /** Owner report, 31 Oct 2026: the bank's TRU debit and TRU's own receipt are one installment payment plus a fee. */
+    public void testProviderReceiptAndBankDebitAreOnePaymentWithAFee() {
+        LocalDate day = LocalDate.now().minusDays(1); long t = at(day);
+        String ymd = day.toString(), dmy = day.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        long account = db.addPaymentSource("Banque Misr", "حساب", "7392");
+        ok(db.addSms("Banque Misr", "عميلنا العزيز، تم خصم مبلغ 2465.8 جم من حسابكم رقم xxx7392 لإتمام عملية شراء لحظي لدى ترو في تاريخ " + ymd + " برقم مرجعي 763605577565 للمزيد، برجاء الاتصال ب 19888", t));
+        ok(db.addSms("TRU", "عميل ترو العزيز، تم سداد مبلغ 2438.00 ج.م بتاريخ " + dmy + " بنجاح.", t + 240000));
+        List<ExpenseDb.Transaction> rows = db.transactionsBetween(day, day.plusDays(1));
+        ExpenseDb.Transaction payment = null, fee = null;
+        for (ExpenseDb.Transaction row : rows) if (row.amountMinor == 243800) payment = row; else if (row.amountMinor == 2780) fee = row;
+        ok(payment != null && fee != null); eq(2, rows.size());
+        ok(payment.paymentSourceId != null && payment.paymentSourceId == account);
+        eq("رسوم تحويل", fee.category); eq(2780, db.transferFee(payment.id));
+        long spent = 0; for (ExpenseDb.Transaction row : rows) spent += row.amountMinor; eq(246580, spent);
     }
     public void testSupportFormEncodesOnlyEnvironmentMetadata() {
         android.net.Uri uri = GitHubSupport.bugUri(context);

@@ -1,5 +1,10 @@
 # Change log
 
+## Unreleased — 31 October 2026 · provider receipt + bank debit
+
+- An installment provider's payment receipt (e.g. TRU «تم سداد مبلغ 2438.00») and the bank's debit to that provider («تم خصم 2465.8 … لدى ترو») are one payment instead of two installments: same provider (by the commitment tiles' words, so TRU = ترو), same currency, within 12 hours, the debit equal to the receipt or up to 3% (and 100.00) more. The receipt stays the installment (keeping any commitment link) and takes the bank account; the difference is a fee under it, like a transfer fee. Two candidates on either side, a repayment, a card settlement, an existing fee or a commitment link on the debit: no join. Runs after each capture and in «فحص البيانات وإصلاحها».
+- Tests: `RepairRulesTest` provider cases (JVM); `FeatureAuditTest.testProviderReceiptAndBankDebitAreOnePaymentWithAFee` (emulator) with the owner's two messages.
+
 ## Unreleased — 29 October 2026
 
 From an owner report (salary month, HSBC → Banque Misr transfer, credit-card repayment).
