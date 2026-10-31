@@ -120,6 +120,18 @@ public final class MoneyFlowTest {
         check(f.of("OPEN_TRANSFER") == 55000 && f.of("COMMITMENT") == 50000 && f.of("LIVING") == 7000 && f.of("INFLOW") == 109000, "one header figure per bucket");
         check(f.of(MoneyFlow.SPENDING_FILTER) == 57000 && f.of("") == f.expense, "spending list header = living + commitments; plain list keeps «خرج»");
         check(f.of(MoneyFlow.OUT_FILTER) == 112000 + 25000, "statement «خرج» list header = spending + open transfers + cash withdrawals");
+        // Review of PR #53: the analytics total lists exactly what it adds. Spending 100 + salary 1,000 + cash 200 -> 100.
+        check(f.of(MoneyFlow.OUTFLOW_FILTER) == f.living + f.commitment + f.openTransfer, "analytics total list header = its rows");
+        check(MoneyFlow.matchesFilter(MoneyFlow.OUTFLOW_FILTER, MoneyFlow.Bucket.LIVING) && MoneyFlow.matchesFilter(MoneyFlow.OUTFLOW_FILTER, MoneyFlow.Bucket.COMMITMENT)
+                && MoneyFlow.matchesFilter(MoneyFlow.OUTFLOW_FILTER, MoneyFlow.Bucket.OPEN_TRANSFER)
+                && !MoneyFlow.matchesFilter(MoneyFlow.OUTFLOW_FILTER, MoneyFlow.Bucket.INFLOW) && !MoneyFlow.matchesFilter(MoneyFlow.OUTFLOW_FILTER, MoneyFlow.Bucket.INTERNAL)
+                && !MoneyFlow.matchesFilter(MoneyFlow.OUTFLOW_FILTER, MoneyFlow.Bucket.CASH_WITHDRAWAL), "analytics total list: no income, own moves or cash");
+        MoneyTotals review = new MoneyTotals();
+        review.add("EGP", "expense", "بقالة", 10000);
+        review.add("EGP", "income", "دخل", 100000);
+        review.add("EGP", "expense", "سحب نقدي", 20000);
+        check(review.currencies.get("EGP").of(MoneyFlow.OUTFLOW_FILTER) == 10000, "100 spent + 1,000 salary + 200 cash -> the list shows 100");
+        check("إجمالي المصروف".equals(MoneyFlow.filterLabel(MoneyFlow.OUTFLOW_FILTER)) && !MoneyFlow.listsCaptureHistory(MoneyFlow.OUTFLOW_FILTER), "label, transactions only");
         // Home «مصروفاتك آخر 7 أيام»: grocery 100 (30 refunded -> 70 effective) + fee 20 + paid bill 500 = 590.
         LocalDate weekToday = LocalDate.of(2026, 10, 19);
         List<MoneyFlow.Item> wk = new ArrayList<>();
