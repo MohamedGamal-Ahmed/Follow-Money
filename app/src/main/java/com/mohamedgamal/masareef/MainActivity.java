@@ -4244,7 +4244,6 @@ public final class MainActivity extends Activity {
         toolbar.addView(new View(this), new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(toolbar);
         // Redesign: the back arrow says where it goes; no extra «رجوع إلى» line.
-                "رجوع إلى "+(transactionReturnTab==0?"الرئيسية":transactionReturnTab==4?"التحليلات":transactionReturnTab==11?"تفاصيل الالتزام":"العمليات والبحث"),12,MUTED,false));
 
         // Redesign: one hero card — who, how much, what and when — then three actions.
         LinearLayout hero = new LinearLayout(this); hero.setOrientation(LinearLayout.VERTICAL);
