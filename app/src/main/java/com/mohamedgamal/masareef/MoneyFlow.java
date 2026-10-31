@@ -69,6 +69,12 @@ final class MoneyFlow {
         return bucket == Bucket.LIVING || bucket == Bucket.COMMITMENT;
     }
 
+    /**
+     * Pseudo-filter for the list behind the analytics «إجمالي المصروف» (review of PR #53): exactly the buckets
+     * {@code Summary.totalOut()} adds, so the list adds up to the number that opened it.
+     */
+    static final String OUTFLOW_FILTER = "OUTFLOW";
+
     /** Pseudo-filter for the list behind the statement's «خرج»: the four buckets isStatementOut() names. */
     static final String OUT_FILTER = "OUT";
 
@@ -85,11 +91,13 @@ final class MoneyFlow {
         if (filter == null || filter.isEmpty()) return true;
         if (SPENDING_FILTER.equals(filter)) return isSpending(bucket);
         if (OUT_FILTER.equals(filter)) return isStatementOut(bucket);
+        if (OUTFLOW_FILTER.equals(filter)) return isOutflow(bucket);
         return bucket.name().equals(filter);
     }
 
     static String filterLabel(String filter) {
-        return SPENDING_FILTER.equals(filter) ? "مصروفات" : OUT_FILTER.equals(filter) ? "خرج" : label(Bucket.valueOf(filter));
+        return SPENDING_FILTER.equals(filter) ? "مصروفات" : OUT_FILTER.equals(filter) ? "خرج" :
+                OUTFLOW_FILTER.equals(filter) ? "إجمالي المصروف" : label(Bucket.valueOf(filter));
     }
 
     /**
@@ -97,7 +105,7 @@ final class MoneyFlow {
      * The list behind a home number must add up to that number, so it shows transactions only.
      */
     static boolean listsCaptureHistory(String filter) {
-        return !SPENDING_FILTER.equals(filter) && !OUT_FILTER.equals(filter);
+        return !SPENDING_FILTER.equals(filter) && !OUT_FILTER.equals(filter) && !OUTFLOW_FILTER.equals(filter);
     }
 
     /** The buckets the home card lists under «حركات غير داخلة في المصروفات», in display order. */

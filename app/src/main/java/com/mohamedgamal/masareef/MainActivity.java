@@ -736,7 +736,9 @@ public final class MainActivity extends Activity {
         });
         boolean secure=appLock.deviceSecure();
         settingSwitch("قفل التطبيق",secure?"ببصمتك أو قفل الموبايل":"فعّل قفل الشاشة في الموبايل الأول",R.drawable.ic_lock,"purple",appLock.enabled(),secure,on->{
-            if(!on){appLock.disable();render();}else appLock.enable(this::render);
+            // Review of PR #53: the switch moves before the prompt answers. Redraw now from the real state, so a
+            // cancelled prompt leaves it off; a confirmed one redraws it on.
+            if(!on){appLock.disable();render();}else{appLock.enable(this::render);render();}
         });
         if(appLock.enabled()) {
             String timeout=appLock.timeoutSeconds()==0?"فورًا":appLock.timeoutSeconds()==60?"دقيقة":"5 دقائق";
@@ -3819,7 +3821,7 @@ public final class MainActivity extends Activity {
             for(TransactionTimelineRow entry:timeline){
                 ExpenseDb.Transaction tx=entry.transaction;
                 if(tx==null?!matchesCaptureFilters(entry.event,text):!matchesTransactionFilters(tx,text))continue;
-                if(tx!=null&&MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)&&ExpenseDb.effectiveAmount(tx,dayOffsets)==0)continue;
+                if(tx!=null&&(MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)||MoneyFlow.OUTFLOW_FILTER.equals(transactionBucketFilter))&&ExpenseDb.effectiveAmount(tx,dayOffsets)==0)continue;
                 matching.add(entry);
                 LocalDate day=Instant.ofEpochMilli(entry.when()).atZone(ZoneId.systemDefault()).toLocalDate();
                 MoneyTotals total=dayTotals.computeIfAbsent(day,key->new MoneyTotals());
@@ -4117,7 +4119,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(12));
         line.addView(copy, copyParams);
         // In the home «مصروفات» list a refunded purchase shows what it contributes (net), so the rows add up to the header.
-        long repaid = (statementRows || MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)) && "expense".equals(item.kind) ? db.reimbursedOf(item.id) : 0;
+        long repaid = (statementRows || MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter) || MoneyFlow.OUTFLOW_FILTER.equals(transactionBucketFilter)) && "expense".equals(item.kind) ? db.reimbursedOf(item.id) : 0;
         String shownAmount = statementRows ? ("income".equals(item.kind) ? "+" : "expense".equals(item.kind) ? "−" : "")
                 + money(statementContribution(item), item.currency)
                 : repaid > 0 ? "−" + money(Math.max(0, item.amountMinor - repaid), item.currency) : signedMoney(item);
@@ -7573,7 +7575,8 @@ public final class MainActivity extends Activity {
             totalTile.addView(spark, sp);
         }
         totalTile.setContentDescription("إجمالي المصروف " + money(total, "EGP") + (delta == null ? "" : "، " + (delta < 0 ? "أقل " : "أكتر ") + Math.abs(delta) + "% من " + versus));
-        totalTile.setOnClickListener(v -> openBucket(null, "", false));
+        // Review of PR #53: the list behind the total holds exactly what the total adds up (no income, own moves or cash).
+        totalTile.setOnClickListener(v -> openTotalOut());
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2); tp.topMargin = dp(14);
         page.addView(totalTile, tp);
 
@@ -7617,6 +7620,12 @@ public final class MainActivity extends Activity {
         page.addView(everything, ep);
         otherCurrencies(all);
         analyticsMoreLink();
+    }
+
+    private void openTotalOut() {
+        openBucket(null, "", false);
+        transactionBucketFilter = MoneyFlow.OUTFLOW_FILTER;
+        render();
     }
 
     private void spendRow(SpendRow item, long total, long largest) {
