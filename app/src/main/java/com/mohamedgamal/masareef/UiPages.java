@@ -77,18 +77,19 @@ final class UiPages {
         layout.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); layout.setBackgroundColor(ui.theme.background);
         layout.setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12));
         layout.setTag("ui_form_page:" + page.route);
-        LinearLayout header = ui.header(page.title, this::back, page.readOnly() ? null : this::save);
-        if (!page.readOnly()) header.getChildAt(header.getChildCount()-1).setContentDescription(page.saveLabel());
+        // Redesign: one save action, the button at the bottom; the header only goes back.
+        LinearLayout header = ui.header(page.title, this::back, null);
         layout.addView(header);
         scroller = new ScrollView(activity); scroller.setFillViewport(true);
         LinearLayout body = new LinearLayout(activity); body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding(ui.dp(4), ui.dp(8), ui.dp(4), ui.dp(16)); scroller.addView(body);
         page.build(body, ui);
-        LinearLayout.LayoutParams footer = new LinearLayout.LayoutParams(-1, -2); footer.topMargin = ui.dp(20);
+        LinearLayout.LayoutParams footer = new LinearLayout.LayoutParams(-1, -2); footer.topMargin = ui.dp(10);
         android.widget.Button submit = ui.button(page.saveLabel(), true, false, this::save);
         submit.setId(android.R.id.button1); submit.setTag("ui_page_save");
-        body.addView(submit, footer);
         layout.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1));
+        // The save button stays at the bottom while the form scrolls.
+        layout.addView(submit, footer);
         activity.setContentView(layout); root = layout; SystemUi.apply(activity, layout);
         if (android.os.Build.VERSION.SDK_INT >= 28) layout.setAccessibilityPaneTitle(page.title);
         ScrollView currentScroller = scroller;
