@@ -110,6 +110,7 @@ jobs:
             bash -o pipefail -c "pwsh -NoProfile -File tools/run-resource-lifetime.ps1 -Online -Device emulator-5554 2>&1 | tee .tmp/ci/lifetime.txt"
             bash -o pipefail -c "pwsh -NoProfile -File tools/run-unified-ui.ps1 -Device emulator-5554 2>&1 | tee .tmp/ci/unified-ui.txt"
             bash -o pipefail -c "pwsh -NoProfile -File tools/run-notification-capture.ps1 -Device emulator-5554 2>&1 | tee .tmp/ci/notification-capture.txt"
+            bash -o pipefail -c "pwsh -NoProfile -File tools/run-review-alerts.ps1 -Online -Device emulator-5554 2>&1 | tee .tmp/ci/review-alerts.txt"
       - name: Upload instrumentation output
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -122,4 +123,6 @@ jobs:
             .tmp/ci/lifetime.txt
             .tmp/ci/unified-ui.txt
             .tmp/ci/notification-capture.txt
+            .tmp/ci/review-alerts.txt
+            .tmp/review-alerts/*.log
             app/build/reports/lint-results-debug.*
