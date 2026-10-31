@@ -1,6 +1,10 @@
 # Change log
 
-## Unreleased — 31 October 2026 · commitments, accounts, intro, monthly summary (redesign step 3 of 3)
+## 0.5.0 — 31 October 2026 (versionCode 16, schema 28)
+
+Redesign from user feedback (too much text, analytics hard to read, no icons, settings dated), owner-approved, plus the fixes since 0.4.5.
+
+### Commitments, accounts, first run, monthly summary (redesign step 3 of 3)
 
 - Commitments: one card with what is left this month and a progress bar; everything detected (plans from messages, repeating payments, confirmations) behind one «محتاجة رأيك» strip that opens its own page; the kind filter is a segmented control; the calendar opens from «التقويم»; rows show the progress count and a due chip (lime when it is today or tomorrow).
 - Commitment details: the merchant is the title; one hero with the next payment, its date, the progress and «علّمه مدفوع»; «الدفعات» and «الإعدادات» sections (reminder, auto-match, paid from, last installment); end and delete actions at the bottom. The long explanation line is gone.
@@ -11,18 +15,18 @@
 - Tests: instrumentation tests open «محتاجة رأيك» and the calendar first; `AuditStructureTest` follows the detected items to their page.
 - Review of PR #57: the commitment hero's «فاضل» adds each remaining installment from its stored cycle (partial payments deducted) or the plan price, per currency (`CommitmentEdit.left`, 6 new checks): it walks the schedule, skips cycles already settled early or out of order, and never multiplies the due amount by the count. Accounts show every currency's balance (row, total and a «الأرصدة» list on the account page); «سجل الأرصدة» asks which currency when there is more than one.
 
-## Unreleased — 31 October 2026 · home, transactions, details, add (redesign step 2 of 3)
+### Home, transactions, details, add (redesign step 2 of 3)
 
 - Home: one dark hero (what left since pay day, with «دخل» and «الفرق» tiles; tapping «خرج»/«دخل» still opens what each is made of, under the hero); several small notices (what's new, recovered messages, month summary, backup) become one «N حاجات محتاجة منك نظرة» line that lists them, a single one keeps its own strip; the next commitment is one clean card; accounts are small tiles (bank color, name, last balance) instead of full card faces.
 - Transactions: the search box is always shown with the filters button beside it; «الكل · خرج · دخل» segmented control beside the period; the two banners become compact chips; day headers are stronger and show only the totals that exist; the statement list drops its second explanation line.
 - Transaction details: a hero card (badge, name, amount, date) and three actions — تعديل، الرسالة، خيارات أكتر — instead of the ⋯ icon; the «رجوع إلى …» line and the redundant «النوع» row are gone.
 - Add / edit transaction: no «نوع العملية» caption over the segmented control; categories are a 4-column grid of icon tiles (the most used seven and «كل التصنيفات»).
 
-## Unreleased — 31 October 2026 · provider receipt + bank debit
+### Provider receipt + bank debit
 
 - An installment provider's payment receipt (e.g. TRU «تم سداد مبلغ 2438.00») and the bank's debit to that provider («تم خصم 2465.8 … لدى ترو») are one payment instead of two installments: same provider (by the commitment tiles' words, so TRU = ترو), same currency, within 12 hours, the debit equal to the receipt or up to 3% (and 100.00) more. The receipt stays the installment (keeping any commitment link) and takes the bank account; the difference is a fee under it, like a transfer fee. Two candidates on either side, a repayment, a card settlement, an existing fee or a commitment link on the debit: no join. Runs after each capture and in «فحص البيانات وإصلاحها».
 - Tests: `RepairRulesTest` provider cases (JVM); `FeatureAuditTest.testProviderReceiptAndBankDebitAreOnePaymentWithAFee` (emulator) with the owner's two messages.
-## Unreleased — 31 October 2026 · shared components (redesign step 1 of 3)
+### Shared components (redesign step 1 of 3)
 
 Owner-approved redesign, applied through the parts every screen is built from, so no screen keeps the old look.
 
@@ -31,7 +35,7 @@ Owner-approved redesign, applied through the parts every screen is built from, s
 - Option pickers (`UiComponents.choices`) are a segmented control: one rounded track, the chosen option a raised pill.
 - Form pages: the header only goes back (the duplicate ✓ save icon is gone); the save button stays at the bottom while the form scrolls.
 - Cards: 22dp corners and a soft lift in light mode; section titles 17sp. Inline links lose the underline (bold brand color marks them).
-## Unreleased — 31 October 2026 · analytics and settings redesign
+### Analytics and settings
 
 From user feedback (too much text, analytics hard to read, settings look dated, switches unclear), owner-approved designs.
 
@@ -40,7 +44,7 @@ From user feedback (too much text, analytics hard to read, settings look dated, 
 - «منع لقطات الشاشة» is removed: it only worked with the app lock on. The window flag is still cleared for windows that had it.
 - The GitHub developer link and the long support/e-mail notes left settings.
 
-## Unreleased — 29 October 2026
+### Fixes — 29–30 October 2026
 
 From an owner report (salary month, HSBC → Banque Misr transfer, credit-card repayment).
 
