@@ -98,7 +98,7 @@ final class CommitmentPaymentUiTest {
             finally{release.countDown();}
             waitPaid(plan,1);ok(db.transactionCount()==2,"Link duplicated spending");screen("03-paid");
             click("عرض التسويات وفك الربط");click("ربط راجعته");click("فك الربط");waitPaid(plan,0);ok(db.transactionCount()==2,"Undo deleted the payment");screen("04-undo");
-            show(plan,2);click("راجع التأكيدات");click("Netflix");
+            show(plan,2);click("رأيك");click("راجع التأكيدات");click("Netflix");
             ok(node("Netflix bill paid successfully")!=null,"Saved provider source not shown");ok(db.pendingCommitmentConfirmations().size()==1,"Ambiguous confirmation disappeared");screen("05-provider-review");
             click("مش متعلق بالتزاماتي");for(int i=0;i<100&&!db.pendingCommitmentConfirmations().isEmpty();i++)pause();
             ok(db.pendingCommitmentConfirmations().isEmpty(),"Review dismissal did not persist");ok(db.transactionCount()==2,"Provider review invented an expense");

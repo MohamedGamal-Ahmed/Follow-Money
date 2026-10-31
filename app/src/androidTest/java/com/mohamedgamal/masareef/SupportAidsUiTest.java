@@ -76,10 +76,10 @@ final class SupportAidsUiTest {
         throw new AssertionError("Cannot click "+action+" next to "+anchor+"; active="+dump());
     }
     private String dump(){StringBuilder out=new StringBuilder();texts(runner.getUiAutomation().getRootInActiveWindow(),out);return out.toString();}
-    /** The commitments tab after the ledger snapshot (and its recurring candidates) is rebuilt. */
+    /** The commitments tab (its «محتاجة رأيك» page) after the ledger snapshot (and its recurring candidates) is rebuilt. */
     private void recurringTab(){
         runner.runOnMainSync(()->{try{Method refresh=MainActivity.class.getDeclaredMethod("refreshLedger",boolean.class);refresh.setAccessible(true);refresh.invoke(main,true);
-            set(main,"selectedTab",2);call(main,"render");}catch(Exception error){throw new RuntimeException(error);}});
+            set(main,"selectedTab",2);set(main,"commitmentsInbox",true);call(main,"render");}catch(Exception error){throw new RuntimeException(error);}});
         for(int i=0;i<40;i++){android.os.SystemClock.sleep(150);idle();runner.runOnMainSync(()->{try{call(main,"render");}catch(Exception error){throw new RuntimeException(error);}});if(has("لقينا خصم متكرر")||i>10)break;}
         idle();
     }
@@ -130,7 +130,7 @@ final class SupportAidsUiTest {
             if("support_battery_allowed".equals(mode)){
                 android.os.PowerManager power=(android.os.PowerManager)target.getSystemService(Context.POWER_SERVICE);
                 ok(power.isIgnoringBatteryOptimizations(target.getPackageName()),"QA battery exemption not active");
-                settings("capture");ok(!has("إعدادات البطارية"),"Battery card stayed after exemption");shot(target,"03-battery-exempt");
+                settings("capture");ok(!has("التسجيل في الخلفية"),"Battery row stayed after exemption");shot(target,"03-battery-exempt");
             }else{
                 String crash=CrashLog.latest(target);ok(crash!=null&&crash.contains("IllegalStateException"),"Actual debug crash was not persisted");
                 ok(!crash.contains("Synthetic debug crash"),"Exception message leaked");
@@ -148,7 +148,7 @@ final class SupportAidsUiTest {
                 for(int i=0;i<4;i++){CrashLog.save(target,new NumberFormatException("SECRET SMS EGP 1250.00 card 1234567890"));android.os.SystemClock.sleep(5);}
                 File[] files=new File(target.getFilesDir(),"crashes").listFiles();ok(files!=null&&files.length==3,"Crash retention did not keep exactly three files");
                 String latest=CrashLog.latest(target);ok(!latest.contains("SECRET")&&!latest.contains("1250")&&!latest.contains("1234567890"),"Crash log contains a financial exception message");
-                settings("capture");ok(has("إعدادات البطارية"),"Battery card absent before exemption");shot(target,"02-battery-restricted");
+                settings("capture");ok(has("التسجيل في الخلفية"),"Battery row absent before exemption");shot(target,"02-battery-restricted");
                 sms=(SmsImportActivity)runner.startActivitySync(new Intent(target,SmsImportActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));idle();
                 Object session=get(sms,"session");runner.runOnMainSync(()->{try{
                     set(session,"reviewBeforeImport",true);
