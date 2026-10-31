@@ -4,6 +4,15 @@
 
 - An installment provider's payment receipt (e.g. TRU «تم سداد مبلغ 2438.00») and the bank's debit to that provider («تم خصم 2465.8 … لدى ترو») are one payment instead of two installments: same provider (by the commitment tiles' words, so TRU = ترو), same currency, within 12 hours, the debit equal to the receipt or up to 3% (and 100.00) more. The receipt stays the installment (keeping any commitment link) and takes the bank account; the difference is a fee under it, like a transfer fee. Two candidates on either side, a repayment, a card settlement, an existing fee or a commitment link on the debit: no join. Runs after each capture and in «فحص البيانات وإصلاحها».
 - Tests: `RepairRulesTest` provider cases (JVM); `FeatureAuditTest.testProviderReceiptAndBankDebitAreOnePaymentWithAFee` (emulator) with the owner's two messages.
+## Unreleased — 31 October 2026 · shared components (redesign step 1 of 3)
+
+Owner-approved redesign, applied through the parts every screen is built from, so no screen keeps the old look.
+
+- Sheets (all ~89 choice and confirm dialogs): grab handle on top; confirm and cancel side by side (a third action gets its own row); cancel is a soft filled button; choice lists are plain rows with dividers instead of outlined boxes.
+- Fields: bold caption above, 52dp tall, 16dp corners. Buttons: bold, 52dp, 16dp corners; secondary buttons are a soft fill without an outline. Icon buttons lose their outline.
+- Option pickers (`UiComponents.choices`) are a segmented control: one rounded track, the chosen option a raised pill.
+- Form pages: the header only goes back (the duplicate ✓ save icon is gone); the save button stays at the bottom while the form scrolls.
+- Cards: 22dp corners and a soft lift in light mode; section titles 17sp. Inline links lose the underline (bold brand color marks them).
 ## Unreleased — 31 October 2026 · analytics and settings redesign
 
 From user feedback (too much text, analytics hard to read, settings look dated, switches unclear), owner-approved designs.
