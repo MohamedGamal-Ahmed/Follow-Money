@@ -1,5 +1,16 @@
 # Change log
 
+## Unreleased — 31 October 2026 · commitments, accounts, intro, monthly summary (redesign step 3 of 3)
+
+- Commitments: one card with what is left this month and a progress bar; everything detected (plans from messages, repeating payments, confirmations) behind one «محتاجة رأيك» strip that opens its own page; the kind filter is a segmented control; the calendar opens from «التقويم»; rows show the progress count and a due chip (lime when it is today or tomorrow).
+- Commitment details: the merchant is the title; one hero with the next payment, its date, the progress and «علّمه مدفوع»; «الدفعات» and «الإعدادات» sections (reminder, auto-match, paid from, last installment); end and delete actions at the bottom. The long explanation line is gone.
+- Commitment editor: segmented kind control, soft provider tiles with a brand outline on the chosen one, a shorter auto-match hint.
+- Accounts: one total («كل اللي معاك») and one row per account with its balance; a row opens the account page; a card with no bank opens the bank picker. The two long notes are gone. The account page keeps its numbers with shorter notes and goes back where it came from.
+- First run: three full-color slides (one title, one line, one example, «التالي»), then the optional profile step.
+- Monthly summary: a page of التحليلات with a month switcher, a hero total and the same report; two long notes are gone.
+- Tests: instrumentation tests open «محتاجة رأيك» and the calendar first; `AuditStructureTest` follows the detected items to their page.
+- Review of PR #57: the commitment hero's «فاضل» adds each remaining installment from its stored cycle (partial payments deducted) or the plan price, per currency (`CommitmentEdit.left`, 6 new checks): it walks the schedule, skips cycles already settled early or out of order, and never multiplies the due amount by the count. Accounts show every currency's balance (row, total and a «الأرصدة» list on the account page); «سجل الأرصدة» asks which currency when there is more than one.
+
 ## Unreleased — 31 October 2026 · home, transactions, details, add (redesign step 2 of 3)
 
 - Home: one dark hero (what left since pay day, with «دخل» and «الفرق» tiles; tapping «خرج»/«دخل» still opens what each is made of, under the hero); several small notices (what's new, recovered messages, month summary, backup) become one «N حاجات محتاجة منك نظرة» line that lists them, a single one keeps its own strip; the next commitment is one clean card; accounts are small tiles (bank color, name, last balance) instead of full card faces.

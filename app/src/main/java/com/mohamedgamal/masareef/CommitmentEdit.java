@@ -37,4 +37,25 @@ final class CommitmentEdit {
         if (plan != null && (action == KEEP_PLAN || action == ASK_SCOPE && onlyThisInstallment)) return plan;
         return typed;
     }
+
+    /**
+     * Review of PR #57: what is left on a plan, per currency. Walks the schedule from the next due date and counts the
+     * {@code open} installments still owed. A stored cycle that is fully paid (paid early or out of order) is skipped and
+     * does not use up one of the open installments; a stored cycle with money left counts its remaining amount (so a
+     * partial payment is deducted); a date with no stored cycle counts the plan price. Currencies are never added.
+     * {@code schedule} must be long enough: open installments plus the stored cycles that may be settled.
+     */
+    static java.util.Map<String, Long> left(java.util.List<java.time.LocalDate> schedule, int open,
+                                            java.util.Map<java.time.LocalDate, Price> stored, Price plan) {
+        java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
+        int counted = 0;
+        for (java.time.LocalDate due : schedule) {
+            if (counted >= open) break;
+            Price p = stored.containsKey(due) ? stored.get(due) : plan;
+            if (p == null || p.amount <= 0) continue;   // settled cycle: skipped, not counted
+            out.merge(p.currency, p.amount, Math::addExact);
+            counted++;
+        }
+        return out;
+    }
 }

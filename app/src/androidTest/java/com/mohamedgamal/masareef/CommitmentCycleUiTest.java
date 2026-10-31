@@ -89,6 +89,8 @@ final class CommitmentCycleUiTest {
             target.getSharedPreferences("notification_settings",0).edit().putBoolean("access_prompted",true).commit();
             activity=(MainActivity)runner.startActivitySync(new android.content.Intent(target,MainActivity.class)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));idle();show(2);
+            // Detected items live behind the «محتاجة رأيك» strip.
+            click("رأيك");
             ok(node("مكتشفة من رسائلك")!=null,"Detected-from-SMS section not visible");
             screen("01-suggestion");click("راجع المصدر وأضفه للكالندر");
             ok(node("التزام جديد")!=null,"Suggestion did not open the commitment editor");

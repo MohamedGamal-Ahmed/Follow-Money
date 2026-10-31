@@ -63,13 +63,15 @@ public final class AuditStructureTest {
                 "render() must reload the cache once the ledger moved, so a manual edit cannot leave it stale");
         check(!main.contains("EARLY_PAYMENT_QUEUE") && !daily.contains("NORMALIZE_QUEUE"),
                 "no extra writer thread may be created beside the capture worker");
-        check(body(main, "private void recurringScreen()").contains("recurringCandidates"),
+        // Redesign (31 Oct 2026): detected items moved to the commitments «محتاجة رأيك» page and its counter.
+        check(body(main, "private int commitmentAsks()").contains("recurringCandidates")
+                        && body(main, "private void commitmentsInboxScreen()").contains("recurringCandidates"),
                 "the commitment page must read the cached suggestion set");
         check(!body(main, "private void render()").contains("recurringCandidateTransactions"),
                 "render() must not run the twelve-month candidate query");
         for (String page : new String[]{"private void homeScreen()", "private void sourcesScreen()",
                 "private void transactionsScreen()", "private void transactionDetailsScreen(ExpenseDb.Transaction item)",
-                "private void recurringScreen()", "private void commitmentDetailsScreen()",
+                "private void recurringScreen()", "private void commitmentsInboxScreen()", "private void commitmentDetailsScreen()",
                 "private void commitmentEditorScreen()", "private void insightsScreen()",
                 "private void settingsScreen()", "private void merchantRulesScreen()", "private void assetsScreen()",
                 "private void debtsScreen()", "private void monthlyReportScreen()", "private void flowAccountScreen()",
