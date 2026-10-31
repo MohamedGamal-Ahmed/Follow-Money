@@ -457,6 +457,16 @@ final class FeatureAuditTest {
         eq("رسوم تحويل", fee.category); eq(2780, db.transferFee(payment.id));
         long spent = 0; for (ExpenseDb.Transaction row : rows) spent += row.amountMinor; eq(246580, spent);
     }
+    /** Review of PR #54: a manual TRU payment next to a separate bank payment stays two payments. */
+    public void testManualProviderPaymentNeverJoinsABankDebit() {
+        LocalDate day = LocalDate.now().minusDays(1); long t = at(day);
+        String ymd = day.toString();
+        db.addPaymentSource("Banque Misr", "حساب", "7392");
+        ok(db.addManual(t, 10000, "EGP", "TRU", "أقساط"));
+        ok(db.addSms("Banque Misr", "عميلنا العزيز، تم خصم مبلغ 102 جم من حسابكم رقم xxx7392 لإتمام عملية شراء لحظي لدى ترو في تاريخ " + ymd + " برقم مرجعي 763605577566", t + 60000));
+        long spent = 0; for (ExpenseDb.Transaction row : db.transactionsBetween(day, day.plusDays(1))) spent += row.amountMinor;
+        eq(20200, spent); eq(2, db.transactionsBetween(day, day.plusDays(1)).size());
+    }
     public void testSupportFormEncodesOnlyEnvironmentMetadata() {
         android.net.Uri uri = GitHubSupport.bugUri(context);
         ok("https".equals(uri.getScheme()));

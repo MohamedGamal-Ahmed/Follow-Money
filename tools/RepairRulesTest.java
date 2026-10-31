@@ -208,6 +208,18 @@ public final class RepairRulesTest {
         check(RepairRules.providerReceipts(twice, providers).isEmpty(), "two possible debits: no guess");
         List<RepairRules.Row> bothBank = new ArrayList<>(equal); bothBank.set(1, new RepairRules.Row(21, tru, tru, 243800, "EGP", "expense", "أقساط", "SMS", "expense", 7L, null, false, "TRU"));
         check(RepairRules.providerReceipts(bothBank, providers).isEmpty(), "two account debits are two payments");
+        // Review of PR #54: a manual cash payment of 100 to TRU and a separate bank payment of 102 are 202, not 100 + fee.
+        List<RepairRules.Row> manual = new ArrayList<>();
+        manual.add(new RepairRules.Row(30, tru, tru, 10200, "EGP", "expense", "أقساط", "SMS", "expense", 6L, null, false, "ترو"));
+        manual.add(new RepairRules.Row(31, tru, tru, 10000, "EGP", "expense", "أقساط", "يدوي", "expense", null, null, false, "TRU"));
+        check(RepairRules.providerReceipts(manual, providers).isEmpty(), "a manual row is never a provider receipt");
+        List<RepairRules.Row> csv = new ArrayList<>(manual);
+        csv.set(1, new RepairRules.Row(31, tru, tru, 10000, "EGP", "expense", "أقساط", "CSV", "expense", null, null, false, "TRU"));
+        check(RepairRules.providerReceipts(csv, providers).isEmpty(), "a CSV row is never a provider receipt");
+        List<RepairRules.Row> csvDebit = new ArrayList<>(manual);
+        csvDebit.set(0, new RepairRules.Row(30, tru, tru, 10200, "EGP", "expense", "أقساط", "CSV", "expense", 6L, null, false, "ترو"));
+        csvDebit.set(1, new RepairRules.Row(31, tru, tru, 10000, "EGP", "expense", "أقساط", "SMS", "expense", null, null, false, "TRU"));
+        check(RepairRules.providerReceipts(csvDebit, providers).isEmpty(), "a CSV row is never the bank debit");
         System.out.println("Repair rule checks passed: " + checked);
     }
 }

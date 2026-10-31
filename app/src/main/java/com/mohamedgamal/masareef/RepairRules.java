@@ -81,7 +81,7 @@ final class RepairRules {
         List<ProviderPayment> result = new ArrayList<>();
         Set<Long> used = new HashSet<>();
         for (Row receipt : rows) {
-            if (!"expense".equals(receipt.kind) || receipt.from != null || receipt.userEdited || used.contains(receipt.id)) continue;
+            if (!"expense".equals(receipt.kind) || receipt.from != null || receipt.userEdited || !captured(receipt) || used.contains(receipt.id)) continue;
             String provider = providerOf.of(receipt.merchant);
             if (provider == null) continue;
             Row debit = null; boolean ambiguous = false;
@@ -93,7 +93,7 @@ final class RepairRules {
             if (ambiguous || debit == null || used.contains(debit.id)) continue;
             int receipts = 0;
             for (Row other : rows)
-                if ("expense".equals(other.kind) && other.from == null && !other.userEdited && provider.equals(providerOf.of(other.merchant))
+                if ("expense".equals(other.kind) && other.from == null && !other.userEdited && captured(other) && provider.equals(providerOf.of(other.merchant))
                         && providerDebitFor(other, debit, provider, providerOf)) receipts++;
             if (receipts != 1) continue;
             used.add(receipt.id); used.add(debit.id);
@@ -102,8 +102,16 @@ final class RepairRules {
         return result;
     }
 
+    /**
+     * Review of PR #54: only captured messages are receipts or bank debits. A manual or CSV row is the user's own record
+     * (a cash payment of 100 next to a separate bank payment of 102 is 202, not 100 + a fee of 2).
+     */
+    private static boolean captured(Row row) {
+        return row.source != null && !"يدوي".equals(row.source) && !"CSV".equals(row.source);
+    }
+
     private static boolean providerDebitFor(Row receipt, Row debit, String provider, ProviderOf providerOf) {
-        if (debit.id == receipt.id || !"expense".equals(debit.kind) || debit.from == null || debit.userEdited) return false;
+        if (debit.id == receipt.id || !"expense".equals(debit.kind) || debit.from == null || debit.userEdited || !captured(debit)) return false;
         if (!debit.currency.equals(receipt.currency) || !provider.equals(providerOf.of(debit.merchant))) return false;
         long fee = debit.amountMinor - receipt.amountMinor;
         if (fee < 0 || fee > PROVIDER_FEE_MAX_MINOR || fee * 100 > receipt.amountMinor * 3) return false;

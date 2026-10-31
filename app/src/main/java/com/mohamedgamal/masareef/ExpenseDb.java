@@ -2614,6 +2614,11 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private boolean joinProviderPayment(RepairRules.ProviderPayment pair) {
         Transaction receipt=transactionById(pair.receiptId),debit=transactionById(pair.debitId);
         if (receipt==null||debit==null||pair.fee<0) return false;
+        // Review of PR #54: the receipt must come from the provider itself (its SMS sender or app), not only name it.
+        String provider=installmentProvider(receipt.merchant);boolean fromProvider=false;
+        for (SourceEvidence evidence:sourceEvidence(receipt.id))
+            if (provider!=null&&(provider.equals(installmentProvider(evidence.sender))||provider.equals(installmentProvider(evidence.source)))) fromProvider=true;
+        if (!fromProvider) return false;
         if (hasReimbursement(receipt.id)||hasReimbursement(debit.id)) return false;
         if (new CardSettlements(this).related(receipt.id)||new CardSettlements(this).related(debit.id)) return false;
         if (commitmentPayments.allocatedByTransaction(rowIdentityKey(debit.id))>0) return false;
@@ -2627,7 +2632,6 @@ public final class ExpenseDb extends SQLiteOpenHelper {
             Long account=debit.paymentSourceId;
             if (!mergeEntries(receipt.id,debit.id,"same payment: provider receipt and bank debit")) return false;
             if (pair.fee>0) {
-                String provider=installmentProvider(receipt.merchant);
                 if (!insertEntry(key,receipt.when,pair.fee,receipt.currency,"رسوم سداد "+(provider==null?receipt.merchant:provider),"رسوم تحويل",
                         "رسوم من العملية",null,null,account,"expense",null,"رسوم مؤكدة من فرق خصم البنك ومبلغ السداد"))
                     throw new IllegalStateException("Provider fee could not be saved");
