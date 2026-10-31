@@ -665,194 +665,263 @@ public final class MainActivity extends Activity {
     }
 
     private void settingsScreen() {
-        String title=settingsSection.isEmpty()?"الإعدادات":
-                "budget".equals(settingsSection)?"الميزانية والويدجت":
-                "capture".equals(settingsSection)?"التقاط العمليات":
-                "appearance".equals(settingsSection)?"المظهر والملف الشخصي":
-                "alerts".equals(settingsSection)?"الإشعارات والتذكير":
-                "data".equals(settingsSection)?"البيانات والخصوصية":
-                "missed".equals(settingsSection)?"رسائل من بنوكك ما اتسجلتش":"المساعدة وعن التطبيق";
+        String title="missed".equals(settingsSection)?"رسائل من بنوكك ما اتسجلتش":"الإعدادات";
         LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.addView(iconButton(R.drawable.ic_chevron_back,"رجوع",this::backFromSettings),new LinearLayout.LayoutParams(dp(44),dp(44)));
         LinearLayout.LayoutParams heading=new LinearLayout.LayoutParams(0,-2,1);heading.setMarginStart(dp(10));
         bar.addView(label(title,22,INK,true),heading);page.addView(bar);settingsGroup=null;
-        if(settingsSection.isEmpty()) {
-            LinearLayout profile=card();
-            LinearLayout identity=new LinearLayout(this);identity.setGravity(Gravity.CENTER_VERTICAL);
-            identity.addView(profileAvatar(48),new LinearLayout.LayoutParams(dp(48),dp(48)));
-            LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);
-            String name=getPreferences(MODE_PRIVATE).getString("profile_name","").trim();
-            copy.addView(label(name.isEmpty()?"ملفك الشخصي":name,18,INK,true));
-            copy.addView(label("محفوظ على جهازك · اضغط لتخصيصه",12,MUTED,false));
-            LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.setMarginStart(dp(12));identity.addView(copy,cp);
-            profile.addView(identity);profile.setOnClickListener(v->{settingsSection="appearance";render();});
-            settingsGroup=null;
-            settingsSearch();
-            note("بياناتك المالية محفوظة محليًا. اختار المجموعة اللي محتاجها.");
-            settingsCategory("الميزانية والويدجت","حد اليوم، العملة، ومقاسات الشاشة الرئيسية",R.drawable.ic_nav_budget,"budget");
-            settingsCategory("التقاط العمليات","رسائل البنك، تطبيقات الدفع، والتصنيف",R.drawable.ic_message,"capture");
-            settingsCategory("المظهر والملف الشخصي","الوضع الليلي، الاسم، وافتتاحية التطبيق",R.drawable.ic_settings,"appearance");
-            settingsCategory("الإشعارات والتذكير","إشعار العملية والتذكير اليومي",R.drawable.ic_bell,"alerts");
-            settingsCategory("البيانات والخصوصية","CSV، مراجعة البيانات، وخيارات الحذف",R.drawable.ic_filter,"data");
-            settingsCategory("المساعدة وعن التطبيق","الإبلاغ عن مشكلة، الاقتراحات، والإصدار",R.drawable.ic_cat_other,"help");
-            LinearLayout signature=new LinearLayout(this);signature.setOrientation(LinearLayout.VERTICAL);
-            signature.setGravity(Gravity.CENTER_HORIZONTAL);signature.setPadding(0,dp(28),0,dp(18));
-            signature.addView(centered(label("بكل فخر، صُنع في مصر 🇪🇬",14,ACCENT,true)));
-            TextView credit=label("Developed by Mohamed Gamal",12,MUTED,false);
-            credit.setTextDirection(View.TEXT_DIRECTION_LTR);signature.addView(centered(credit));
-            signature.addView(centered(label("Follow Money · "+GitHubSupport.version(this),11,MUTED,false)));
-            page.addView(signature);return;
-        }
-        section("الخيارات",null,null);
-        switch(settingsSection) {
-            case "budget":
-        setting("الميزانية اليومية والراتب",this::dailyBudgetDialog);
-        setting("أضف ويدجت الشاشة الرئيسية", this::pinWidget);
+        if("missed".equals(settingsSection)) { missedBankMessages(); return; }
+        // Links that still name an old settings sub-page land on the one page, scrolled to that group.
+        String legacy=settingsLegacyFocus(settingsSection);
+        if(legacy!=null){settingsSection="";if(settingsFocus==null)settingsFocus=legacy;}
+        settingsHome();
+    }
+
+    /** Owner-approved settings page (31 Oct 2026): one page in groups, real switches, advanced tools folded away. */
+    private void settingsHome() {
+        LinearLayout hero=new LinearLayout(this);hero.setGravity(Gravity.CENTER_VERTICAL);hero.setPadding(dp(16),dp(16),dp(16),dp(16));
+        hero.setBackground(rounded(dark?SURFACE:BRAND,24));
+        hero.addView(profileAvatar(52),new LinearLayout.LayoutParams(dp(52),dp(52)));
+        LinearLayout who=new LinearLayout(this);who.setOrientation(LinearLayout.VERTICAL);
+        String name=getPreferences(MODE_PRIVATE).getString("profile_name","").trim();
+        who.addView(label(name.isEmpty()?"ملفك الشخصي":name,17,dark?INK:Color.WHITE,true));
+        who.addView(label("بياناتك محفوظة على موبايلك بس",12,dark?MUTED:0xffcfe3d8,false));
+        LinearLayout.LayoutParams wp=new LinearLayout.LayoutParams(0,-2,1);wp.setMarginStart(dp(14));hero.addView(who,wp);
+        hero.addView(tintedIcon(R.drawable.ic_edit,dark?MUTED:0xffcfe3d8),new LinearLayout.LayoutParams(dp(20),dp(20)));
+        hero.setContentDescription("تعديل الاسم والصورة");hero.setTag("setting:الملف الشخصي");
+        hero.setOnClickListener(v->profileDialog());
+        LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2);hp.topMargin=dp(10);page.addView(hero,hp);
+        settingsGroup=null;
+        settingsSearch();
+
+        settingsGroupTitle("التسجيل");
+        android.os.PowerManager power=(android.os.PowerManager)getSystemService(POWER_SERVICE);
+        boolean throttled=power!=null&&!power.isIgnoringBatteryOptimizations(getPackageName());
+        settingRow("الوصول للإشعارات",hasNotificationAccess()?"شغال":"مقفول · بيسجل عمليات تطبيقات الدفع",R.drawable.ic_bell,"green",this::openNotificationSettings);
+        settingRow("تطبيقات الدفع",null,R.drawable.ic_message,"green",this::chooseNotificationApps);
+        settingRow("حساباتك واسمك في التحويلات",null,R.drawable.ic_cat_transfer,"green",this::ownHandlesDialog);
+        if(throttled)settingRow("التسجيل في الخلفية","الموبايل ممكن يوقفه لتوفير البطارية",R.drawable.ic_warning,"amber",()->{
+            try{startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+            catch(android.content.ActivityNotFoundException unavailable){toast("إعدادات تحسين البطارية غير متاحة على الجهاز");}
+        });
+
+        settingsGroupTitle("الميزانية والويدجت");
+        settingRow("الميزانية اليومية والراتب",null,R.drawable.ic_wallet,"amber",this::dailyBudgetDialog);
         String widgetCurrency=getSharedPreferences("widget_settings",MODE_PRIVATE).getString("currency","EGP");
-        setting("عملة الويدجت والملخص: "+widgetCurrency,()->new ChoiceDialogBuilder().setTitle("اختر عملة واحدة للملخص")
+        settingRow("عملة الملخص",widgetCurrency,R.drawable.ic_coin,"amber",()->new ChoiceDialogBuilder().setTitle("اختر عملة واحدة للملخص")
                 .setItems(CURRENCIES,(d,w)->{getSharedPreferences("widget_settings",MODE_PRIVATE).edit().putString("currency",CURRENCIES[w]).apply();render();}).show());
-        setting(DailyRefreshReceiver.precise(this)?"تحديث منتصف الليل: دقيق":"تحديث منتصف الليل: قد يتأخر",()->{
-            if(Build.VERSION.SDK_INT>=31&&!DailyRefreshReceiver.precise(this))new ChoiceDialogBuilder().setTitle("تحديث اليوم في موعده")
-                    .setMessage("اسمح بالمنبهات والتذكيرات لتحديث الويدجت عند منتصف الليل. من غير الإذن Android ممكن يؤخر التحديث.")
-                    .setPositiveButton("افتح إعدادات الإذن",(d,w)->startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:"+getPackageName()))))
-                    .setNegativeButton("لاحقًا",null).show();else toast("التحديث المجدول عند منتصف الليل بالتوقيت المحلي");
-        });
+        settingRow("أضف ويدجت الشاشة الرئيسية",null,R.drawable.ic_nav_home,"amber",this::pinWidget);
         boolean widgetHidden=getSharedPreferences("widget_settings",MODE_PRIVATE).getBoolean("hide_amounts",false);
-        setting(widgetHidden?"أرقام الويدجت: مخفية":"أرقام الويدجت: ظاهرة",()->{
-            getSharedPreferences("widget_settings",MODE_PRIVATE).edit().putBoolean("hide_amounts",!widgetHidden).apply();render();
+        settingSwitch("إخفاء أرقام الويدجت",null,R.drawable.ic_lock,"amber",widgetHidden,true,on->{
+            getSharedPreferences("widget_settings",MODE_PRIVATE).edit().putBoolean("hide_amounts",on).apply();render();
         });
-        note(getString(R.string.widget_lock_privacy_notice));
-                break;
-            case "capture":
-                note("الرسائل والإشعارات الجديدة تُقرأ بعد منح الإذن. اختيار فترة الرسائل القديمة يبدأ الاستيراد مباشرة، والمراجعة قبل الحفظ اختيارية.");
-                android.os.PowerManager power=(android.os.PowerManager)getSystemService(POWER_SERVICE);
-                if(power!=null&&!power.isIgnoringBatteryOptimizations(getPackageName())) {
-                    settingsGroup=null;
-                    tipCard("⚡","التقاط العمليات في الخلفية",
-                            "بعض الأجهزة، زي Samsung وXiaomi، ممكن توقف الالتقاط في الخلفية لتوفير البطارية. لو رسائل جديدة مش بتتسجل، راجع استثناء Follow Money من تحسين البطارية.",
-                            "إعدادات البطارية",()->{
-                                try{startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
-                                catch(android.content.ActivityNotFoundException unavailable){toast("إعدادات تحسين البطارية غير متاحة على الجهاز");}
-                            });
-                }
-                setting("استيراد رسائل SMS القديمة",this::requestSmsImport);
-                setting("تطبيقات الدفع والإشعارات",this::chooseNotificationApps);
-                note("العمليات المسجلة تفضل محفوظة بعد مسح الإشعار. لو عملية ما ظهرتش، سيب إشعارها ظاهر وافتح Follow Money لإعادة فحص إشعارات التطبيقات المختارة؛ الإشعارات الممسوحة قبل التقاطها مش متاحة للاسترجاع.");
-                setting(hasNotificationAccess()?"الوصول للإشعارات: مفعل":"تفعيل الوصول للإشعارات",this::openNotificationSettings);
-                setting("حساباتك واسمك في التحويلات",this::ownHandlesDialog);
-                setting("قواعد التجار والتصنيف",()->{selectedTab=7;render();});
-                setting("رسائل من بنوكك ما اتسجلتش",()->{settingsSection="missed";render();});
-                break;
-            case "missed":
-                missedBankMessages();
-                break;
-            case "appearance":
-        setting("اسم العرض على الرئيسية", this::displayNamePage);
-        SharedPreferences appearance = getPreferences(MODE_PRIVATE);
-        int appearanceChoice = !appearance.contains("dark_mode") ? 0 : appearance.getBoolean("dark_mode", false) ? 2 : 1;
-        String[] appearanceNames = {"تلقائي مع الجهاز", "فاتح", "ليلي"};
-        setting("المظهر: " + appearanceNames[appearanceChoice], () ->
-            new ChoiceDialogBuilder().setTitle("مظهر التطبيق").setItems(appearanceNames, (d, w) -> {
-                if (w == 0) appearance.edit().remove("dark_mode").apply();
-                else appearance.edit().putBoolean("dark_mode", w == 2).apply();
-                recreate();
-            }).show());
-        setting("الصورة الشخصية (اختيارية)",this::chooseProfilePhoto);
-        if(new java.io.File(getFilesDir(),"profile-avatar.png").exists())setting("حذف الصورة الشخصية",()->{new java.io.File(getFilesDir(),"profile-avatar.png").delete();render();});
-        String openingMode=getPreferences(MODE_PRIVATE).getString("opening_mode","first");
-        setting("الافتتاحية: "+("off".equals(openingMode)?"متوقفة":"first".equals(openingMode)?"أول مرة بس":"مع كل فتح"),()->{
-            String[] modes={"every","first","off"};
-            new ChoiceDialogBuilder().setTitle("افتتاحية التطبيق").setItems(new String[]{"مع كل فتح (٣ ثواني)","أول مرة بس","متوقفة"},(d,w)->{
-                getPreferences(MODE_PRIVATE).edit().putString("opening_mode",modes[w]).apply();render();
-            }).setNeutralButton("شغّلها دلوقتي",(d,w)->playOpening(true)).show();
+
+        settingsGroupTitle("الإشعارات");
+        notificationSwitch("إشعار بكل عملية",R.drawable.ic_bell,CaptureNotifier.enabled(this),"captured_transactions",enable->{
+            CaptureNotifier.setEnabled(this,enable);if(enable)askNotificationPermission();render();
         });
-                break;
-            case "alerts":
-        notificationSetting("إشعار فوري بكل عملية", "عند تسجيل عملية جديدة أو إلغائها", CaptureNotifier.enabled(this), "captured_transactions", enable -> {
-            CaptureNotifier.setEnabled(this, enable);
-            if (enable) askNotificationPermission();
-            render();
-        });
-        notificationSetting("تذكير يومي بالمصاريف", "ملخص مصروف اليوم والميزانية", getSharedPreferences("reminder_settings", MODE_PRIVATE).getBoolean("daily_enabled", false), "daily_summary", this::setDailyReminder);
-        boolean monthlyEnabled=MonthlySummaryReceiver.settings(this).getBoolean("enabled",true);
-        notificationSetting("تنبيه ملخص الشهر", "أول الشهر من 9 صباحًا", monthlyEnabled, MonthlySummaryReceiver.CHANNEL, enable -> {
+        notificationSwitch("تذكير يومي بالمصاريف",R.drawable.ic_calendar,getSharedPreferences("reminder_settings",MODE_PRIVATE).getBoolean("daily_enabled",false),"daily_summary",this::setDailyReminder);
+        notificationSwitch("ملخص أول الشهر",R.drawable.ic_nav_insights,MonthlySummaryReceiver.settings(this).getBoolean("enabled",true),MonthlySummaryReceiver.CHANNEL,enable->{
             MonthlySummaryReceiver.settings(this).edit().putBoolean("enabled",enable).apply();
             if(enable)askNotificationPermission();MonthlySummaryReceiver.refresh(this);render();
         });
-        setting("إعدادات إشعارات الجهاز", () -> startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())));
-        note("تنبيه واحد أول الشهر من 9 صباحًا؛ ممكن يتأخر بسبب البطارية أو إغلاق الجهاز. الملخص يفضل متاح في التحليلات.");
-                break;
-            case "data":
-                note("مصادر العمليات محفوظة مشفرة. CSV يحتوي على معاملاتك، ويحتاج مشاركة واعية منك.");
-                section("قفل التطبيق",null,null);
-                setting(appLock.enabled()?"قفل التطبيق: مفعل":"قفل التطبيق: متوقف",()->{
-                    if(appLock.enabled()){appLock.disable();render();}else appLock.enable(this::render);
-                });
-                String timeout=appLock.timeoutSeconds()==0?"فورًا":appLock.timeoutSeconds()==60?"دقيقة":"5 دقائق";
-                setting("القفل بعد: "+timeout,()->new ChoiceDialogBuilder().setTitle("اقفل التطبيق بعد")
-                        .setItems(new String[]{"فورًا","بعد دقيقة","بعد 5 دقائق"},(d,which)->{
-                            appLock.setTimeoutSeconds(new int[]{0,60,300}[which]);render();
-                        }).show());
-                setting("منع لقطات الشاشة: "+(appLock.securePreview()?"مفعّل":"متوقف"),()->{appLock.setSecurePreview(!appLock.securePreview());render();});
-                if (!appLock.deviceSecure()) {
-                    for(int i=0;i<settingsGroup.getChildCount();i++){
-                        View lockRow=settingsGroup.getChildAt(i);if(!(lockRow.getTag() instanceof String))continue;
-                        lockRow.setEnabled(false);lockRow.setAlpha(0.5f);lockRow.setOnClickListener(null);
-                    }
-                    note("فعّل قفل الشاشة في إعدادات الجهاز أولًا لاستخدام قفل التطبيق.");
-                }
-                section("الخصوصية والملفات",null,null);
-                setting("سياسة الخصوصية",this::privacyPolicyDialog);
-                setting("استيراد معاملات CSV",this::chooseCsvImport);
-                setting("تصدير معاملات "+selectedMonth.toString().substring(0,7)+" CSV",this::exportCsv);
-                setting("فحص البيانات وإصلاحها",()->runRepair(true));
-                note("يلاقي الإعلانات اللي اتسجلت عمليات، والعمليات والإيصالات المكررة، والتحويلات بين حساباتك اللي اتسجلت صرف ودخل، ويصلحها.");
-                section("نسخة احتياطية",null,null);
-                long lastBackup=LocalBackup.lastBackupAt(this);
-                note(lastBackup==0?"لسه ما عملتش نسخة. ملف واحد مشفر بكلمة سر تختارها، يتحفظ في المكان اللي تختاره ويرجع على أي جهاز."
-                        :"آخر نسخة: "+Instant.ofEpochMilli(lastBackup).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL));
-                setting("نسخة احتياطية",this::backupDialog);
-                setting("استعادة نسخة",this::chooseRestore);
-                // Keep access to existing records without promoting unused financial modules.
-                if(!db.assets().isEmpty())setting("الأصول المسجلة",()->{selectedTab=8;render();});
-                if(!db.debts().isEmpty())setting("الديون المسجلة",()->{selectedTab=9;render();});
-                section("حذف البيانات",null,null);
-        setting("حذف كل البيانات المحلية", () -> new ChoiceDialogBuilder()
+
+        settingsGroupTitle("المظهر والأمان");
+        SharedPreferences appearance=getPreferences(MODE_PRIVATE);
+        int appearanceChoice=!appearance.contains("dark_mode")?0:appearance.getBoolean("dark_mode",false)?2:1;
+        settingSegments("المظهر",R.drawable.ic_moon,"purple",new String[]{"تلقائي","فاتح","داكن"},appearanceChoice,w->{
+            if(w==appearanceChoice)return;
+            if(w==0)appearance.edit().remove("dark_mode").apply();else appearance.edit().putBoolean("dark_mode",w==2).apply();
+            recreate();
+        });
+        boolean secure=appLock.deviceSecure();
+        settingSwitch("قفل التطبيق",secure?"ببصمتك أو قفل الموبايل":"فعّل قفل الشاشة في الموبايل الأول",R.drawable.ic_lock,"purple",appLock.enabled(),secure,on->{
+            // Review of PR #53: the switch moves before the prompt answers. Redraw now from the real state, so a
+            // cancelled prompt leaves it off; a confirmed one redraws it on.
+            if(!on){appLock.disable();render();}else{appLock.enable(this::render);render();}
+        });
+        if(appLock.enabled()) {
+            String timeout=appLock.timeoutSeconds()==0?"فورًا":appLock.timeoutSeconds()==60?"دقيقة":"5 دقائق";
+            settingRow("القفل بعد",timeout,R.drawable.ic_timer,"purple",()->new ChoiceDialogBuilder().setTitle("اقفل التطبيق بعد")
+                    .setItems(new String[]{"فورًا","بعد دقيقة","بعد 5 دقائق"},(d,which)->{appLock.setTimeoutSeconds(new int[]{0,60,300}[which]);render();}).show());
+        }
+
+        settingsGroupTitle("بياناتك");
+        long lastBackup=LocalBackup.lastBackupAt(this);
+        settingRow("نسخة احتياطية",lastBackup==0?"لسه ما عملتش نسخة":"آخر نسخة "+Instant.ofEpochMilli(lastBackup).atZone(ZoneId.systemDefault()).toLocalDate().format(DATE_LABEL),
+                R.drawable.ic_backup,"green",this::backupDialog);
+        settingRow("استعادة نسخة",null,R.drawable.ic_restore,"green",this::chooseRestore);
+        settingExpand("أدوات متقدمة","قواعد التجار، الرسائل، وملفات CSV",R.drawable.ic_tools);
+        if(settingsAdvanced) {
+            settingRow("قواعد التجار والتصنيف",null,R.drawable.ic_tag,"gray",()->{selectedTab=7;render();});
+            if(!db.assets().isEmpty())settingRow("الأصول المسجلة",null,R.drawable.ic_nav_insights,"gray",()->{selectedTab=8;render();});
+            if(!db.debts().isEmpty())settingRow("الديون المسجلة",null,R.drawable.ic_cat_transfer,"gray",()->{selectedTab=9;render();});
+            settingRow("فحص البيانات وإصلاحها",null,R.drawable.ic_shield,"gray",()->runRepair(true));
+            settingRow("استيراد رسائل SMS القديمة",null,R.drawable.ic_message,"gray",this::requestSmsImport);
+            settingRow("رسائل من بنوكك ما اتسجلتش",null,R.drawable.ic_warning,"gray",()->{settingsSection="missed";render();});
+            settingRow("استيراد معاملات CSV",null,R.drawable.ic_import,"gray",this::chooseCsvImport);
+            settingRow("تصدير معاملات "+selectedMonth.toString().substring(0,7)+" CSV",null,R.drawable.ic_export,"gray",this::exportCsv);
+            settingRow("تحديث منتصف الليل",DailyRefreshReceiver.precise(this)?"دقيق":"قد يتأخر",R.drawable.ic_timer,"gray",()->{
+                if(Build.VERSION.SDK_INT>=31&&!DailyRefreshReceiver.precise(this))new ChoiceDialogBuilder().setTitle("تحديث اليوم في موعده")
+                        .setMessage("اسمح بالمنبهات والتذكيرات لتحديث الويدجت عند منتصف الليل.")
+                        .setPositiveButton("افتح إعدادات الإذن",(d,w)->startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:"+getPackageName()))))
+                        .setNegativeButton("لاحقًا",null).show();else toast("التحديث المجدول عند منتصف الليل بالتوقيت المحلي");
+            });
+            String openingMode=getPreferences(MODE_PRIVATE).getString("opening_mode","first");
+            settingRow("الافتتاحية","off".equals(openingMode)?"متوقفة":"first".equals(openingMode)?"أول مرة بس":"مع كل فتح",R.drawable.ic_sparkle,"gray",()->{
+                String[] modes={"every","first","off"};
+                new ChoiceDialogBuilder().setTitle("افتتاحية التطبيق").setItems(new String[]{"مع كل فتح (٣ ثواني)","أول مرة بس","متوقفة"},(d,w)->{
+                    getPreferences(MODE_PRIVATE).edit().putString("opening_mode",modes[w]).apply();render();
+                }).setNeutralButton("شغّلها دلوقتي",(d,w)->playOpening(true)).show();
+            });
+            settingRow("إعدادات إشعارات الجهاز",null,R.drawable.ic_settings,"gray",()->startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName())));
+            settingRow("نسخ بيانات التشخيص",null,R.drawable.ic_filter,"gray",this::copySupportDetails);
+        }
+
+        settingsGroupTitle("المساعدة");
+        settingRow("الإبلاغ عن مشكلة",null,R.drawable.ic_bug,"pink",this::reportProblem);
+        settingRow("اقتراح تحسين",null,R.drawable.ic_idea,"pink",()->supportDialog(true));
+        settingRow("ما الجديد",null,R.drawable.ic_sparkle,"pink",this::whatsNewDialog);
+        settingRow("سياسة الخصوصية",null,R.drawable.ic_shield,"pink",this::privacyPolicyDialog);
+
+        settingsGroup=null;
+        LinearLayout danger=new LinearLayout(this);danger.setGravity(Gravity.CENTER_VERTICAL);danger.setPadding(dp(14),dp(10),dp(14),dp(10));
+        danger.setMinimumHeight(dp(60));danger.setBackground(rounded(SURFACE,22));
+        ImageView trash=tintedIcon(R.drawable.ic_trash,CORAL);trash.setPadding(dp(9),dp(9),dp(9),dp(9));trash.setBackground(rounded(dark?0x40c23a3a:0xfffde8e8,12));
+        danger.addView(trash,new LinearLayout.LayoutParams(dp(38),dp(38)));
+        TextView dangerText=label("حذف كل البيانات المحلية",15,CORAL,true);
+        LinearLayout.LayoutParams dt=new LinearLayout.LayoutParams(0,-2,1);dt.setMarginStart(dp(12));danger.addView(dangerText,dt);
+        danger.setTag("setting:حذف كل البيانات المحلية");danger.setContentDescription("حذف كل البيانات المحلية");
+        danger.setOnClickListener(v->new ChoiceDialogBuilder()
                 .setTitle("حذف كل البيانات؟")
-                .setMessage("سيتم حذف العمليات والأرصدة والحسابات والميزانيات والديون والأصول والقواعد. لا يمكن التراجع. رسائل SMS على الهاتف لن تُحذف، ولن تُستورد تلقائيًا من جديد.")
-                .setPositiveButton("حذف البيانات", (dialog, which) -> {
+                .setMessage("سيتم حذف العمليات والأرصدة والحسابات والميزانيات والديون والأصول والقواعد. لا يمكن التراجع. رسائل SMS على الهاتف لن تُحذف.")
+                .setPositiveButton("حذف البيانات",(dialog,which)->{
                     db.clearAllData();
                     getSharedPreferences(DailySummary.SETTINGS,MODE_PRIVATE).edit().clear().apply();
                     getSharedPreferences(DailyPointsStore.SETTINGS,MODE_PRIVATE).edit().clear().apply();
-                    getPreferences(MODE_PRIVATE).edit().putBoolean("initial_sms_import_done", true).apply();
-                    selectedTab = 0; render();
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("initial_sms_import_done",true).apply();
+                    selectedTab=0;render();
                     toast("تم حذف البيانات المحلية");
-                }).setNegativeButton("إلغاء", null).show());
-                break;
-            default:
-                note("Follow Money · "+GitHubSupport.version(this));
-                setting("ما الجديد",this::whatsNewDialog);
-                setting("سياسة الخصوصية",this::privacyPolicyDialog);
-                setting("الإبلاغ عن مشكلة",this::reportProblem);
-                setting("اقتراح تحسين",()->supportDialog(true));
-                setting("نسخ بيانات التشخيص",this::copySupportDetails);
-                setting("للمطورين: متابعة على GitHub",()->openGitHub(Uri.parse(GitHubSupport.REPOSITORY+"/issues")));
-                note("الدعم بالإيميل: "+EmailSupport.ADDRESS+". التطبيق بيضيف بيانات النسخة والجهاز والنظام واللغة، وتقدر تختار إرفاق آخر عطل بعد معاينته؛ إنت بتراجع المسودة وبتضغط إرسال في تطبيق الإيميل. بلاغات GitHub عامة وتحتاج حسابًا.");
-                break;
+                }).setNegativeButton("إلغاء",null).show());
+        LinearLayout.LayoutParams dp1=new LinearLayout.LayoutParams(-1,-2);dp1.topMargin=dp(20);page.addView(danger,dp1);
+
+        LinearLayout signature=new LinearLayout(this);signature.setOrientation(LinearLayout.VERTICAL);
+        signature.setGravity(Gravity.CENTER_HORIZONTAL);signature.setPadding(0,dp(22),0,dp(18));
+        signature.addView(centered(label("بكل فخر، صُنع في مصر",13,ACCENT,true)));
+        signature.addView(centered(label("Follow Money · "+GitHubSupport.version(this),11,MUTED,false)));
+        page.addView(signature);
+    }
+
+    /** Name and photo, from the profile card. */
+    private void profileDialog() {
+        boolean photo=new java.io.File(getFilesDir(),"profile-avatar.png").exists();
+        String[] items=photo?new String[]{"اسم العرض","تغيير الصورة","حذف الصورة"}:new String[]{"اسم العرض","إضافة صورة"};
+        new ChoiceDialogBuilder().setTitle("ملفك الشخصي").setItems(items,(d,w)->{
+            if(w==0)displayNamePage();
+            else if(w==1)chooseProfilePhoto();
+            else {new java.io.File(getFilesDir(),"profile-avatar.png").delete();render();}
+        }).show();
+    }
+
+    private boolean settingsAdvanced;
+
+    private static String settingsLegacyFocus(String section) {
+        switch(section) {
+            case "capture": return "الوصول للإشعارات";
+            case "budget": return "الميزانية اليومية";
+            case "alerts": return "إشعار بكل عملية";
+            case "appearance": return "المظهر";
+            case "data": return "نسخة احتياطية";
+            case "help": return "الإبلاغ عن مشكلة";
+            default: return null;
         }
     }
 
-    private void settingsCategory(String title,String subtitle,int icon,String section) {
-        if(settingsGroup==null)settingsGroup=listCard(page);else divider(settingsGroup);
-        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(0,dp(12),0,dp(12));
-        ImageView image=tintedIcon(icon,ACCENT);image.setPadding(dp(7),dp(7),dp(7),dp(7));image.setBackground(rounded(ACCENT_PALE,10));
-        row.addView(image,new LinearLayout.LayoutParams(dp(34),dp(34)));
+    /** Icon ink and chip background for a settings group's tone, light and dark. */
+    private int[] settingTone(String tone) {
+        switch(tone) {
+            case "amber": return dark?new int[]{0xffffc233,0xff3a3114}:new int[]{0xffa66f00,0xfffbf0d6};
+            case "blue": return dark?new int[]{0xff6ea8ff,0xff16294a}:new int[]{0xff2f6fde,0xffe3ecfb};
+            case "purple": return dark?new int[]{0xffb48cff,0xff2c2147}:new int[]{0xff8355d0,0xffeee6fa};
+            case "pink": return dark?new int[]{0xffff7aa2,0xff40192a}:new int[]{0xffc93c63,0xfffbe4ea};
+            case "gray": return dark?new int[]{0xffb9ccc2,0xff1c3a2c}:new int[]{0xff4e5c55,0xffebefea};
+            default: return dark?new int[]{0xff4ade94,0xff14392b}:new int[]{0xff1f8a5b,0xffe3f3ea};
+        }
+    }
+
+    private void settingsGroupTitle(String title) {
+        TextView heading=label(title,13,MUTED,true);
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.topMargin=dp(20);params.setMarginStart(dp(6));
+        page.addView(heading,params);
+        settingsGroup=listCard(page);settingsGroup.setBackground(rounded(SURFACE,22));
+        ((LinearLayout.LayoutParams)settingsGroup.getLayoutParams()).topMargin=dp(8);
+    }
+
+    private LinearLayout settingRowBase(String title,String sub,int icon,String tone) {
+        if(settingsGroup==null)settingsGroup=listCard(page);else if(settingsGroup.getChildCount()>0)divider(settingsGroup);
+        int[] colors=settingTone(tone);
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);row.setMinimumHeight(dp(60));row.setPadding(0,dp(10),0,dp(10));
+        ImageView chip=tintedIcon(icon,colors[0]);chip.setPadding(dp(9),dp(9),dp(9),dp(9));chip.setBackground(rounded(colors[1],12));
+        row.addView(chip,new LinearLayout.LayoutParams(dp(38),dp(38)));
         LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);
-        copy.addView(label(title,15,INK,true));copy.addView(label(subtitle,11,MUTED,false));
-        LinearLayout.LayoutParams space=new LinearLayout.LayoutParams(0,-2,1);space.setMarginStart(dp(12));row.addView(copy,space);
+        copy.addView(label(title,15,INK,false));
+        if(sub!=null&&!sub.isEmpty())copy.addView(label(sub,12,MUTED,false));
+        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.setMarginStart(dp(12));cp.setMarginEnd(dp(10));row.addView(copy,cp);
+        row.setTag("setting:"+title);row.setContentDescription(sub==null||sub.isEmpty()?title:title+"، "+sub);
+        settingsGroup.addView(row);
+        return row;
+    }
+
+    private void settingRow(String title,String sub,int icon,String tone,Runnable action) {
+        LinearLayout row=settingRowBase(title,sub,icon,tone);
         row.addView(tintedIcon(R.drawable.ic_chevron_forward,MUTED),new LinearLayout.LayoutParams(dp(18),dp(18)));
-        row.setContentDescription(title+"، "+subtitle);row.setOnClickListener(v->{settingsSection=section;render();});settingsGroup.addView(row);
+        row.setOnClickListener(v->action.run());
+    }
+
+    /** A real on/off switch; the whole row toggles it. Disabled rows stay readable and explain why in their subtitle. */
+    private void settingSwitch(String title,String sub,int icon,String tone,boolean checked,boolean enabled,java.util.function.Consumer<Boolean> change) {
+        LinearLayout row=settingRowBase(title,sub,icon,tone);
+        android.widget.Switch toggle=new android.widget.Switch(this);
+        toggle.setChecked(checked);toggle.setShowText(false);toggle.setMinHeight(dp(48));toggle.setContentDescription(title);
+        int[][] states={new int[]{android.R.attr.state_checked},new int[]{}};
+        toggle.setTrackTintList(new ColorStateList(states,new int[]{primaryFill(),BORDER}));
+        toggle.setThumbTintList(new ColorStateList(states,new int[]{onPrimary(),dark?MUTED:Color.WHITE}));
+        toggle.setEnabled(enabled);
+        toggle.setOnCheckedChangeListener((button,on)->change.accept(on));
+        row.addView(toggle);
+        if(enabled)row.setOnClickListener(v->toggle.toggle());else row.setAlpha(0.6f);
+    }
+
+    /** Notification switches keep telling when the device itself blocks a channel the app has on. */
+    private void notificationSwitch(String title,int icon,boolean enabled,String channel,java.util.function.Consumer<Boolean> change) {
+        String status=notificationStatus(enabled,channel);
+        settingSwitch(title,"شغال".equals(status)||"متوقف".equals(status)?null:status,icon,"blue",enabled,true,change);
+    }
+
+    private void settingSegments(String title,int icon,String tone,String[] names,int selected,java.util.function.IntConsumer pick) {
+        LinearLayout row=settingRowBase(title,null,icon,tone);
+        LinearLayout group=new LinearLayout(this);group.setPadding(dp(4),dp(4),dp(4),dp(4));
+        group.setBackground(rounded(dark?BACKGROUND:0xffe9eee8,99));
+        for(int i=0;i<names.length;i++) {
+            final int index=i;boolean on=i==selected;
+            TextView option=label(names[i],13,on?(dark?BACKGROUND:BRAND):MUTED,on);
+            option.setGravity(Gravity.CENTER);option.setPadding(dp(12),0,dp(12),0);option.setMinHeight(dp(36));
+            if(on)option.setBackground(rounded(dark?LIME:Color.WHITE,99));
+            option.setContentDescription(title+": "+names[i]+(on?"، مختار":""));
+            option.setOnClickListener(v->pick.accept(index));
+            group.addView(option,new LinearLayout.LayoutParams(-2,dp(36)));
+        }
+        row.addView(group);
+    }
+
+    private void settingExpand(String title,String sub,int icon) {
+        LinearLayout row=settingRowBase(title,sub,icon,"gray");
+        ImageView chevron=tintedIcon(settingsAdvanced?R.drawable.ic_chevron_down:R.drawable.ic_chevron_forward,MUTED);
+        row.addView(chevron,new LinearLayout.LayoutParams(dp(18),dp(18)));
+        row.setContentDescription(title+(settingsAdvanced?"، مفتوحة":"، مقفولة"));
+        row.setOnClickListener(v->{settingsAdvanced=!settingsAdvanced;render();});
     }
 
     private static final class SettingEntry {
@@ -865,49 +934,53 @@ public final class MainActivity extends Activity {
     /** Every reachable row by title and Arabic/English keywords; visibility follows settingsScreen's own rules. */
     private List<SettingEntry> settingsIndex() {
         List<SettingEntry> all = new ArrayList<>();
-        all.add(new SettingEntry("الميزانية اليومية والراتب", "budget daily salary حد اليوم مرتب", "budget", "الميزانية اليومية"));
-        all.add(new SettingEntry("أضف ويدجت الشاشة الرئيسية", "widget home size حجم ويدجيت", "budget", "أضف ويدجت"));
-        all.add(new SettingEntry("عملة الويدجت والملخص", "widget currency summary عملة", "budget", "عملة الويدجت"));
-        all.add(new SettingEntry("تحديث منتصف الليل", "midnight refresh alarm exact منبه", "budget", "تحديث منتصف الليل"));
-        all.add(new SettingEntry("أرقام الويدجت", "widget hide amounts privacy إخفاء", "budget", "أرقام الويدجت"));
-        all.add(new SettingEntry("استيراد رسائل SMS القديمة", "sms import messages bank رسائل البنك", "capture", "استيراد رسائل SMS"));
-        all.add(new SettingEntry("تطبيقات الدفع والإشعارات", "payment apps notifications instapay", "capture", "تطبيقات الدفع"));
-        all.add(new SettingEntry("الوصول للإشعارات", "notification access listener إذن", "capture", hasNotificationAccess() ? "الوصول للإشعارات" : "تفعيل الوصول للإشعارات"));
+        all.add(new SettingEntry("الملف الشخصي: الاسم والصورة", "name profile display photo avatar اسم صورة", "profile", "الملف الشخصي"));
+        all.add(new SettingEntry("الوصول للإشعارات", "notification access listener إذن", "capture", "الوصول للإشعارات"));
+        all.add(new SettingEntry("تطبيقات الدفع", "payment apps notifications instapay", "capture", "تطبيقات الدفع"));
         all.add(new SettingEntry("حساباتك واسمك في التحويلات", "instapay handles ipa تحويل اسمي اسم حسابي", "capture", "حساباتك واسمك في التحويلات"));
-        all.add(new SettingEntry("قواعد التجار والتصنيف", "merchant rules category تصنيف تاجر", "capture", "قواعد التجار"));
-        all.add(new SettingEntry("رسائل من بنوكك ما اتسجلتش", "missed bank messages not recorded report رسائل لم تسجل بلاغ", "capture", "رسائل من بنوكك"));
-        all.add(new SettingEntry("اسم العرض على الرئيسية", "name profile display اسم", "appearance", "اسم العرض"));
-        all.add(new SettingEntry("الوضع الليلي والفاتح", "dark mode theme night light ليلي", "appearance", "المظهر:"));
-        all.add(new SettingEntry("الصورة الشخصية", "photo avatar profile صورة", "appearance", "الصورة الشخصية"));
-        all.add(new SettingEntry("افتتاحية التطبيق", "opening intro video splash", "appearance", "الافتتاحية"));
-        all.add(new SettingEntry("إشعار فوري بكل عملية", "notification captured transaction إشعار", "alerts", "إشعار فوري"));
+        all.add(new SettingEntry("الميزانية اليومية والراتب", "budget daily salary حد اليوم مرتب", "budget", "الميزانية اليومية"));
+        all.add(new SettingEntry("عملة الملخص", "widget currency summary عملة", "budget", "عملة الملخص"));
+        all.add(new SettingEntry("أضف ويدجت الشاشة الرئيسية", "widget home size حجم ويدجيت", "budget", "أضف ويدجت"));
+        all.add(new SettingEntry("إخفاء أرقام الويدجت", "widget hide amounts privacy إخفاء", "budget", "إخفاء أرقام الويدجت"));
+        all.add(new SettingEntry("إشعار بكل عملية", "notification captured transaction إشعار", "alerts", "إشعار بكل عملية"));
         all.add(new SettingEntry("تذكير يومي بالمصاريف", "daily reminder تذكير", "alerts", "تذكير يومي"));
-        all.add(new SettingEntry("تنبيه ملخص الشهر", "monthly summary notification شهر", "alerts", "تنبيه ملخص الشهر"));
-        all.add(new SettingEntry("إعدادات إشعارات الجهاز", "system notification settings", "alerts", "إعدادات إشعارات الجهاز"));
-        all.add(new SettingEntry("قفل التطبيق", "app lock biometric fingerprint pin بصمة", "data", "قفل التطبيق"));
-        all.add(new SettingEntry("مدة القفل", "lock timeout minute فورًا", "data", "القفل بعد"));
-        all.add(new SettingEntry("منع لقطات الشاشة", "screenshot secure preview privacy", "data", "منع لقطات الشاشة"));
-        all.add(new SettingEntry("سياسة الخصوصية", "privacy policy", "data", "سياسة الخصوصية"));
-        all.add(new SettingEntry("استيراد معاملات CSV", "csv import", "data", "استيراد معاملات CSV"));
-        all.add(new SettingEntry("تصدير معاملات CSV", "csv export excel", "data", "تصدير معاملات"));
+        all.add(new SettingEntry("ملخص أول الشهر", "monthly summary notification شهر", "alerts", "ملخص أول الشهر"));
+        all.add(new SettingEntry("المظهر: فاتح أو داكن", "dark mode theme night light ليلي", "appearance", "المظهر"));
+        all.add(new SettingEntry("قفل التطبيق", "app lock biometric fingerprint pin بصمة", "appearance", "قفل التطبيق"));
+        if (appLock.enabled()) all.add(new SettingEntry("مدة القفل", "lock timeout minute فورًا", "appearance", "القفل بعد"));
         all.add(new SettingEntry("نسخة احتياطية", "backup encrypted", "data", "نسخة احتياطية"));
         all.add(new SettingEntry("استعادة نسخة", "restore backup", "data", "استعادة نسخة"));
-        all.add(new SettingEntry("فحص البيانات وإصلاحها", "repair check duplicates ads transfers receipts تصحيح تكرار إعلانات تحويلات", "data", "فحص البيانات وإصلاحها"));
-        if (!db.assets().isEmpty()) all.add(new SettingEntry("الأصول المسجلة", "assets", "data", "الأصول المسجلة"));
-        if (!db.debts().isEmpty()) all.add(new SettingEntry("الديون المسجلة", "debts", "data", "الديون المسجلة"));
-        all.add(new SettingEntry("حذف كل البيانات المحلية", "delete clear reset data مسح", "data", "حذف كل البيانات"));
-        all.add(new SettingEntry("ما الجديد", "whats new changelog version", "help", "ما الجديد"));
+        all.add(new SettingEntry("قواعد التجار والتصنيف", "merchant rules category تصنيف تاجر", "advanced", "قواعد التجار"));
+        if (!db.assets().isEmpty()) all.add(new SettingEntry("الأصول المسجلة", "assets", "advanced", "الأصول المسجلة"));
+        if (!db.debts().isEmpty()) all.add(new SettingEntry("الديون المسجلة", "debts", "advanced", "الديون المسجلة"));
+        all.add(new SettingEntry("فحص البيانات وإصلاحها", "repair check duplicates ads transfers receipts تصحيح تكرار إعلانات تحويلات", "advanced", "فحص البيانات وإصلاحها"));
+        all.add(new SettingEntry("استيراد رسائل SMS القديمة", "sms import messages bank رسائل البنك", "advanced", "استيراد رسائل SMS"));
+        all.add(new SettingEntry("رسائل من بنوكك ما اتسجلتش", "missed bank messages not recorded report رسائل لم تسجل بلاغ", "advanced", "رسائل من بنوكك"));
+        all.add(new SettingEntry("استيراد معاملات CSV", "csv import", "advanced", "استيراد معاملات CSV"));
+        all.add(new SettingEntry("تصدير معاملات CSV", "csv export excel", "advanced", "تصدير معاملات"));
+        all.add(new SettingEntry("تحديث منتصف الليل", "midnight refresh alarm exact منبه", "advanced", "تحديث منتصف الليل"));
+        all.add(new SettingEntry("افتتاحية التطبيق", "opening intro video splash", "advanced", "الافتتاحية"));
+        all.add(new SettingEntry("إعدادات إشعارات الجهاز", "system notification settings", "advanced", "إعدادات إشعارات الجهاز"));
+        all.add(new SettingEntry("نسخ بيانات التشخيص", "diagnostics copy support", "advanced", "نسخ بيانات التشخيص"));
         all.add(new SettingEntry("الإبلاغ عن مشكلة", "report bug problem support email", "help", "الإبلاغ عن مشكلة"));
         all.add(new SettingEntry("اقتراح تحسين", "suggestion feature idea", "help", "اقتراح تحسين"));
-        all.add(new SettingEntry("نسخ بيانات التشخيص", "diagnostics copy support", "help", "نسخ بيانات التشخيص"));
-        all.add(new SettingEntry("متابعة على GitHub", "github issues developers", "help", "للمطورين"));
+        all.add(new SettingEntry("ما الجديد", "whats new changelog version", "help", "ما الجديد"));
+        all.add(new SettingEntry("سياسة الخصوصية", "privacy policy", "help", "سياسة الخصوصية"));
+        all.add(new SettingEntry("حذف كل البيانات المحلية", "delete clear reset data مسح", "data", "حذف كل البيانات"));
         return all;
     }
 
     private static String settingsSectionTitle(String section) {
-        return "budget".equals(section) ? "الميزانية والويدجت" : "capture".equals(section) ? "التقاط العمليات" :
-                "appearance".equals(section) ? "المظهر والملف الشخصي" : "alerts".equals(section) ? "الإشعارات والتذكير" :
-                "data".equals(section) ? "البيانات والخصوصية" : "المساعدة وعن التطبيق";
+        switch (section) {
+            case "profile": return "الملف الشخصي";
+            case "capture": return "التسجيل";
+            case "budget": return "الميزانية والويدجت";
+            case "alerts": return "الإشعارات";
+            case "appearance": return "المظهر والأمان";
+            case "data": return "بياناتك";
+            case "advanced": return "أدوات متقدمة";
+            default: return "المساعدة";
+        }
     }
 
     /** Folds hamza/taa-marbuta/alef-maqsura and digits so «نسخه» and «اشعار» still match. */
@@ -942,7 +1015,7 @@ public final class MainActivity extends Activity {
                     row.addView(label(entry.title, 14, INK, true)); row.addView(label(settingsSectionTitle(entry.section), 12, MUTED, false));
                     row.setContentDescription(entry.title + "، في " + settingsSectionTitle(entry.section));
                     row.setTag("settings_result:" + entry.tag);
-                    row.setOnClickListener(v -> { settingsSection = entry.section; settingsFocus = entry.tag; render(); });
+                    row.setOnClickListener(v -> { settingsSection = ""; if ("advanced".equals(entry.section)) settingsAdvanced = true; settingsFocus = entry.tag; render(); });
                     settingsGroup.addView(row); found++;
                 }
                 settingsGroup = previous;
@@ -978,7 +1051,7 @@ public final class MainActivity extends Activity {
 
 
     private void backFromSettings() {
-        if(settingsSection.isEmpty())selectedTab=0;else settingsSection="missed".equals(settingsSection)?"capture":"";
+        if(settingsSection.isEmpty())selectedTab=0;else settingsSection="";
         render();
     }
 
@@ -3317,7 +3390,7 @@ public final class MainActivity extends Activity {
             if("points".equals(destination))pointsDialog(code);else dailyDetailsDialog();
         } else if (selectedTab == 6 && transactionsBackTab != 0) {
             selectedTab = transactionsBackTab; transactionsBackTab = 0; bulkMode = false; bulkSelected.clear(); render();
-        } else if(selectedTab==7){selectedTab=5;settingsSection="capture";render();
+        } else if(selectedTab==7){selectedTab=5;settingsSection="";settingsAdvanced=true;render();
         } else if (selectedTab != 0) {
             selectedTab = 0; render();
         } else super.onBackPressed();
@@ -3855,7 +3928,7 @@ public final class MainActivity extends Activity {
             for(TransactionTimelineRow entry:timeline){
                 ExpenseDb.Transaction tx=entry.transaction;
                 if(tx==null?!matchesCaptureFilters(entry.event,text):!matchesTransactionFilters(tx,text))continue;
-                if(tx!=null&&MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)&&ExpenseDb.effectiveAmount(tx,dayOffsets)==0)continue;
+                if(tx!=null&&(MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)||MoneyFlow.OUTFLOW_FILTER.equals(transactionBucketFilter))&&ExpenseDb.effectiveAmount(tx,dayOffsets)==0)continue;
                 matching.add(entry);
                 LocalDate day=Instant.ofEpochMilli(entry.when()).atZone(ZoneId.systemDefault()).toLocalDate();
                 MoneyTotals total=dayTotals.computeIfAbsent(day,key->new MoneyTotals());
@@ -4180,7 +4253,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1); copyParams.setMarginStart(dp(12));
         line.addView(copy, copyParams);
         // In the home «مصروفات» list a refunded purchase shows what it contributes (net), so the rows add up to the header.
-        long repaid = (statementRows || MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter)) && "expense".equals(item.kind) ? db.reimbursedOf(item.id) : 0;
+        long repaid = (statementRows || MoneyFlow.SPENDING_FILTER.equals(transactionBucketFilter) || MoneyFlow.OUTFLOW_FILTER.equals(transactionBucketFilter)) && "expense".equals(item.kind) ? db.reimbursedOf(item.id) : 0;
         String shownAmount = statementRows ? ("income".equals(item.kind) ? "+" : "expense".equals(item.kind) ? "−" : "")
                 + money(statementContribution(item), item.currency)
                 : repaid > 0 ? "−" + money(Math.max(0, item.amountMinor - repaid), item.currency) : signedMoney(item);
@@ -7337,64 +7410,6 @@ public final class MainActivity extends Activity {
         return "شغال";
     }
 
-    private void notificationSetting(String title, String detail, boolean enabled, String channel,
-                                     java.util.function.Consumer<Boolean> change) {
-        if (settingsGroup == null) settingsGroup = listCard(page); else divider(settingsGroup);
-        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); row.setPadding(0, dp(12), 0, dp(12));
-        ImageView icon = tintedIcon(R.drawable.ic_bell, ACCENT);
-        icon.setPadding(dp(7), dp(7), dp(7), dp(7)); icon.setBackground(rounded(ACCENT_PALE, 10));
-        row.addView(icon, new LinearLayout.LayoutParams(dp(34), dp(34)));
-        LinearLayout copy = new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL);
-        copy.addView(label(title, 14, INK, true));
-        String status = notificationStatus(enabled, channel);
-        copy.addView(label(status, 12, "شغال".equals(status) ? INCOME : MUTED, false));
-        copy.addView(label(detail, 12, MUTED, false));
-        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1);
-        copyParams.setMarginStart(dp(12)); copyParams.setMarginEnd(dp(10)); row.addView(copy, copyParams);
-        android.widget.Switch toggle = new android.widget.Switch(this);
-        toggle.setChecked(enabled); toggle.setShowText(false); toggle.setMinHeight(dp(48));
-        toggle.setContentDescription(title);
-        int[][] states = {new int[]{android.R.attr.state_checked}, new int[]{}};
-        toggle.setTrackTintList(new ColorStateList(states, new int[]{primaryFill(), BORDER}));
-        toggle.setThumbTintList(new ColorStateList(states, new int[]{onPrimary(), MUTED}));
-        toggle.setOnCheckedChangeListener((button, checked) -> change.accept(checked));
-        row.addView(toggle); row.setOnClickListener(view -> toggle.toggle());
-        row.setTag("setting:" + title); settingsGroup.addView(row);
-    }
-
-    private void setting(String name, Runnable action) {
-        if (settingsGroup == null) settingsGroup = listCard(page);
-        else divider(settingsGroup);
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        boolean destructive = name.startsWith("حذف كل");
-        int iconId = destructive ? R.drawable.ic_trash :
-                name.contains("SMS") || name.contains("رسائل") ? R.drawable.ic_message :
-                name.contains("تطبيقات") || name.contains("Notification") || name.contains("تذكير") || name.contains("إشعار") ? R.drawable.ic_bell :
-                name.contains("قواعد") || name.contains("عينات") || name.contains("تشخيص") ? R.drawable.ic_filter :
-                name.contains("إنستاباي") || name.contains("التحويلات") ? R.drawable.ic_cat_transfer :
-                name.contains("حسابات") ? R.drawable.ic_cat_atm :
-                name.contains("الالتزامات") || name.contains("أقساط") ? R.drawable.ic_calendar :
-                name.contains("الأصول") ? R.drawable.ic_nav_insights :
-                name.contains("الديون") ? R.drawable.ic_cat_transfer :
-                name.contains("اسم") ? R.drawable.ic_edit :
-                name.contains("الوضع") ? R.drawable.ic_settings :
-                name.contains("ويدجت") ? R.drawable.ic_nav_home :
-                name.contains("CSV") || name.contains("تصدير") ? R.drawable.ic_cat_income : R.drawable.ic_cat_other;
-        ImageView icon = tintedIcon(iconId, destructive ? CORAL : ACCENT);
-        icon.setPadding(dp(7), dp(7), dp(7), dp(7));
-        icon.setBackground(rounded(destructive ? (dark ? 0x40c23a3a : 0xfffde8e8) : ACCENT_PALE, 10));
-        row.addView(icon, new LinearLayout.LayoutParams(dp(34), dp(34)));
-        row.setMinimumHeight(dp(54)); row.setPadding(0,dp(8),0,dp(8));
-        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, -2, 1); textParams.setMarginStart(dp(12));
-        row.addView(label(name, 14, destructive ? CORAL : INK, false), textParams);
-        row.addView(tintedIcon(R.drawable.ic_chevron_forward, MUTED), new LinearLayout.LayoutParams(dp(18), dp(18)));
-        row.setTag("setting:" + name); settingsGroup.addView(row);
-        row.setOnClickListener(v -> action.run());
-    }
-
     /** Text that follows the system font only up to {@code cap}× its size; used where a fixed bar or shape holds it. */
     private void cappedTextSize(TextView view, float sp, float cap) {
         view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, sp * Math.min(getResources().getConfiguration().fontScale, cap));
@@ -7613,14 +7628,210 @@ public final class MainActivity extends Activity {
         row.setContentDescription(title+"، "+detail);row.setOnClickListener(v->open.run());box.addView(row);
     }
 
+    /** One row of «فلوسك راحت فين؟»: a spending category, the commitments, or the transfers waiting for a purpose. */
+    private static final class SpendRow {
+        final String name, style; final long amount; final Runnable open;
+        SpendRow(String name, String style, long amount, Runnable open) { this.name = name; this.style = style; this.amount = amount; this.open = open; }
+    }
+
+    private List<SpendRow> spendRows(MoneyFlow.Summary s) {
+        List<SpendRow> rows = new ArrayList<>();
+        for (Map.Entry<String, Long> entry : s.livingCategories()) {
+            String name = entry.getKey(); boolean open = MoneyFlow.UNCATEGORIZED.equals(name);
+            if (entry.getValue() > 0) rows.add(new SpendRow(name, name, entry.getValue(), () -> openBucket(MoneyFlow.Bucket.LIVING, name, open)));
+        }
+        long commitments = s.of(MoneyFlow.Bucket.COMMITMENT);
+        if (commitments > 0) rows.add(new SpendRow("أقساط والتزامات", "أقساط", commitments, () -> openBucket(MoneyFlow.Bucket.COMMITMENT, "", false)));
+        long transfers = s.of(MoneyFlow.Bucket.OPEN_TRANSFER);
+        if (transfers > 0) rows.add(new SpendRow("تحويلات لناس", "تحويلات", transfers, () -> openBucket(MoneyFlow.Bucket.OPEN_TRANSFER, "", false)));
+        rows.sort((a, b) -> Long.compare(b.amount, a.amount));
+        return rows;
+    }
+
+    /** What left each day (month) or each month (year, 12 months), for the total tile's line. */
+    private long[] spendLine(MoneyFlow.Summary s, LocalDate[] period) {
+        LocalDate end = period[1].isAfter(LocalDate.now().plusDays(1)) ? LocalDate.now().plusDays(1) : period[1];
+        if (insightsRange == MoneyFlow.Range.MONTH) {
+            int days = (int) Math.max(1, ChronoUnit.DAYS.between(period[0], end));
+            long[] values = new long[days];
+            for (int i = 0; i < days; i++) {
+                long[] parts = s.byDay.get(period[0].plusDays(i));
+                if (parts != null) for (MoneyFlow.Bucket b : OUT_BUCKETS) values[i] += parts[b.ordinal()];
+            }
+            return values;
+        }
+        List<java.time.YearMonth> months = MoneyFlow.months(new LocalDate[]{period[0], end});
+        long[] values = new long[months.size()];
+        for (Map.Entry<LocalDate, long[]> day : s.byDay.entrySet()) {
+            int i = months.indexOf(java.time.YearMonth.from(day.getKey()));
+            if (i >= 0) for (MoneyFlow.Bucket b : OUT_BUCKETS) values[i] += day.getValue()[b.ordinal()];
+        }
+        return values;
+    }
+
+    private LinearLayout bentoTile(int background) {
+        LinearLayout tile = new LinearLayout(this); tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setPadding(dp(16), dp(16), dp(16), dp(16)); tile.setBackground(rounded(background, 24));
+        return tile;
+    }
+
+    private View bigAmount(long minor, int color, int unitColor, int sp) {
+        LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.BOTTOM);
+        TextView amount = label(AnalyticsMath.whole(minor), sp, color, true); amount.setTextDirection(View.TEXT_DIRECTION_LTR);
+        line.addView(amount);
+        TextView unit = label("جنيه", 13, unitColor, false);
+        LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(-2, -2); up.setMarginStart(dp(6)); up.bottomMargin = dp(sp > 30 ? 6 : 3);
+        line.addView(unit, up);
+        return line;
+    }
+
+    /**
+     * Owner-approved analytics (31 Oct 2026): one number, how it compares, a daily line, the biggest category, the
+     * daily average, and where the money went. The deeper reports stay one tap away under «تقارير أكتر».
+     */
+    private void analyticsHome(Map<String, MoneyFlow.Summary> all, LocalDate[] period) {
+        MoneyFlow.Summary s = all.get("EGP");
+        if (s == null || s.totalOut() <= 0) {
+            empty("مفيش مصروف في " + insightsPeriodName(), "جرّب فترة تانية أو استورد رسائل البنك");
+            otherCurrencies(all);
+            analyticsMoreLink();
+            return;
+        }
+        LocalDate today = LocalDate.now();
+        long total = s.totalOut();
+        Integer delta = null; String versus = null;
+        LocalDate[] before = AnalyticsMath.previous(insightsRange, period, today);
+        if (before != null) {
+            MoneyFlow.Summary previous = MoneyFlow.summarize(flowItems(before), before, ZoneId.systemDefault()).get("EGP");
+            delta = AnalyticsMath.deltaPercent(total, previous == null ? 0 : previous.totalOut());
+            versus = insightsRange == MoneyFlow.Range.YEAR ? "السنة اللي فاتت" : MONTH_NAMES[before[0].getMonthValue() - 1];
+        }
+
+        LinearLayout totalTile = bentoTile(SURFACE);
+        LinearLayout head = new LinearLayout(this); head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(label("إجمالي المصروف", 14, MUTED, false), new LinearLayout.LayoutParams(0, -2, 1));
+        if (delta != null && delta != 0) {
+            TextView change = pill((delta < 0 ? "↓ أقل " : "↑ أكتر ") + Math.abs(delta) + "% من " + versus, LIME, BRAND);
+            change.setTypeface(BOLD); head.addView(change);
+        }
+        totalTile.addView(head);
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-2, -2); ap.topMargin = dp(6);
+        totalTile.addView(bigAmount(total, INK, MUTED, 40), ap);
+        long[] line = spendLine(s, period);
+        if (line.length > 1) {
+            UiKit.Sparkline spark = new UiKit.Sparkline(this);
+            spark.setData(line, dark ? LIME : EMERALD, (insightsRange == MoneyFlow.Range.MONTH ? "الصرف كل يوم في " : "الصرف كل شهر في ") + insightsPeriodName());
+            LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(64)); sp.topMargin = dp(10);
+            totalTile.addView(spark, sp);
+        }
+        totalTile.setContentDescription("إجمالي المصروف " + money(total, "EGP") + (delta == null ? "" : "، " + (delta < 0 ? "أقل " : "أكتر ") + Math.abs(delta) + "% من " + versus));
+        // Review of PR #53: the list behind the total holds exactly what the total adds up (no income, own moves or cash).
+        totalTile.setOnClickListener(v -> openTotalOut());
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2); tp.topMargin = dp(14);
+        page.addView(totalTile, tp);
+
+        List<SpendRow> rows = spendRows(s);
+        LinearLayout pair = new LinearLayout(this); pair.setBaselineAligned(false);
+        if (!rows.isEmpty()) {
+            SpendRow top = rows.get(0); int[] style = categoryStyle(top.style);
+            LinearLayout tile = bentoTile(SURFACE);
+            ImageView icon = tintedIcon(style[2], style[1]); icon.setPadding(dp(9), dp(9), dp(9), dp(9)); icon.setBackground(rounded(style[0], 12));
+            tile.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
+            LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2); gap.topMargin = dp(10);
+            tile.addView(label("أكتر حاجة صرفت عليها", 12, MUTED, false), gap);
+            tile.addView(label(top.name, 16, INK, true));
+            tile.addView(bigAmount(top.amount, INK, MUTED, 22));
+            tile.setContentDescription("أكتر حاجة صرفت عليها " + top.name + "، " + money(top.amount, "EGP"));
+            tile.setOnClickListener(v -> top.open.run());
+            pair.addView(tile, new LinearLayout.LayoutParams(0, -1, 1));
+        }
+        LinearLayout average = bentoTile(LIME);
+        ImageView cal = tintedIcon(R.drawable.ic_calendar, BRAND); cal.setPadding(dp(9), dp(9), dp(9), dp(9)); cal.setBackground(rounded(0x1a0b3d2e, 12));
+        average.addView(cal, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        LinearLayout.LayoutParams gap2 = new LinearLayout.LayoutParams(-2, -2); gap2.topMargin = dp(10);
+        average.addView(label("متوسط اليوم", 12, 0xff2d4a1a, false), gap2);
+        average.addView(label(insightsRange == MoneyFlow.Range.MONTH ? "في " + MONTH_NAMES[selectedMonth.getMonthValue() - 1] : insightsPeriodName(), 16, BRAND, true));
+        long perDay = AnalyticsMath.perDay(total, period, today);
+        average.addView(bigAmount(perDay, BRAND, 0xff2d4a1a, 22));
+        average.setContentDescription("متوسط اليوم " + money(perDay, "EGP"));
+        LinearLayout.LayoutParams avp = new LinearLayout.LayoutParams(0, -1, 1); if (!rows.isEmpty()) avp.setMarginStart(dp(10));
+        pair.addView(average, avp);
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, -2); pp.topMargin = dp(10);
+        page.addView(pair, pp);
+
+        section("فلوسك راحت فين؟", null, null);
+        long largest = rows.isEmpty() ? 1 : rows.get(0).amount;
+        for (SpendRow item : rows) spendRow(item, total, largest);
+        TextView everything = label("كل عمليات " + insightsPeriodName(), 15, ACCENT, true);
+        everything.setGravity(Gravity.CENTER); everything.setMinHeight(dp(52));
+        everything.setBackground(outlined(Color.TRANSPARENT, BORDER, 16));
+        everything.setOnClickListener(v -> openBucket(null, "", false));
+        LinearLayout.LayoutParams ep = new LinearLayout.LayoutParams(-1, -2); ep.topMargin = dp(12);
+        page.addView(everything, ep);
+        otherCurrencies(all);
+        analyticsMoreLink();
+    }
+
+    private void openTotalOut() {
+        openBucket(null, "", false);
+        transactionBucketFilter = MoneyFlow.OUTFLOW_FILTER;
+        render();
+    }
+
+    private void spendRow(SpendRow item, long total, long largest) {
+        int[] style = categoryStyle(item.style);
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10)); row.setMinimumHeight(dp(64)); row.setBackground(rounded(SURFACE, 18));
+        ImageView icon = tintedIcon(style[2], style[1]); icon.setPadding(dp(10), dp(10), dp(10), dp(10)); icon.setBackground(rounded(style[0], 14));
+        row.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout middle = new LinearLayout(this); middle.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout top = new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(label(item.name, 15, INK, true), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView amount = label(AnalyticsMath.whole(item.amount) + " جنيه", 14, INK, false);
+        top.addView(amount);
+        middle.addView(top);
+        View track = new View(this);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1, dp(6)); bp.topMargin = dp(8);
+        middle.addView(track, bp);
+        fillBar(track, item.amount, largest, categoryColor(item.style), BORDER);
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(0, -2, 1); mp.setMarginStart(dp(12)); mp.setMarginEnd(dp(10));
+        row.addView(middle, mp);
+        int share = AnalyticsMath.share(item.amount, total);
+        TextView pct = label(share + "%", 13, MUTED, true); pct.setTextDirection(View.TEXT_DIRECTION_LTR); pct.setMinWidth(dp(36)); pct.setGravity(Gravity.CENTER);
+        row.addView(pct);
+        row.addView(tintedIcon(R.drawable.ic_chevron_forward, MUTED), new LinearLayout.LayoutParams(dp(18), dp(18)));
+        row.setContentDescription(item.name + "، " + money(item.amount, "EGP") + "، " + share + "%");
+        row.setTag("spend_row:" + item.name);
+        row.setOnClickListener(v -> item.open.run());
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2); rp.topMargin = dp(8);
+        page.addView(row, rp);
+    }
+
+    /** Spending in other currencies is never added to the pound; one quiet line says it exists. */
+    private void otherCurrencies(Map<String, MoneyFlow.Summary> all) {
+        StringBuilder others = new StringBuilder();
+        for (Map.Entry<String, MoneyFlow.Summary> entry : all.entrySet()) {
+            if ("EGP".equals(entry.getKey()) || entry.getValue().totalOut() <= 0) continue;
+            others.append(others.length() == 0 ? "" : " · ").append(money(entry.getValue().totalOut(), entry.getKey()));
+        }
+        if (others.length() == 0) return;
+        TextView line = label("وكمان صرفت بعملات تانية: " + others, 12, MUTED, false);
+        line.setPadding(dp(4), dp(12), dp(4), 0); page.addView(line);
+    }
+
+    private void analyticsMoreLink() {
+        TextView more = label("تقارير أكتر  ←", 14, ACCENT, true);
+        more.setGravity(Gravity.CENTER); more.setPadding(0, dp(16), 0, dp(16)); more.setTag("analytics_more");
+        more.setOnClickListener(v -> { insightsSection = "reports"; render(); });
+        page.addView(more, new LinearLayout.LayoutParams(-1, -2));
+    }
+
     private void analyticsHub() {
-        note("كل تقرير يعرض الفترة المختارة. العملات منفصلة والتحويل بين حساباتك مش مصروف.");
         LinearLayout box=listCard(page);
         analyticsLink(box,"ملخصك الشهري","الشهر اللي خلص، سلوك الصرف والمقارنة",R.drawable.ic_nav_budget,()->openMonthly(java.time.YearMonth.now().minusMonths(1)));
         analyticsLink(box,"تحليل الإنفاق","اتجاه الصرف اليومي وأكبر المدفوعات",R.drawable.ic_nav_insights,()->{insightsSection="spending";render();});
         analyticsLink(box,"تحليل التصنيفات","نسب التصنيفات والعمليات وراء كل رقم",R.drawable.ic_cat_shop,()->{insightsSection="categories";render();});
         analyticsLink(box,"الفلوس دخلت وخرجت","الإنفاق والالتزامات والتحويلات كل واحد واضح",R.drawable.ic_cat_transfer,()->{insightsSection="flow";render();});
-        analyticsLink(box,"تكلفة المعيشة","الصرف اليومي والالتزامات المسجلة للفترة",R.drawable.ic_cat_bills,()->{insightsSection="living";render();});
         analyticsLink(box,"صافي الثروة","الحسابات والأصول والديون المسجلة · الحالة الحالية",R.drawable.ic_cat_income,()->{selectedTab=8;render();});
         analyticsLink(box,"الاشتراكات والفواتير","مواعيد الدفعات والخطط المؤكدة · الحالة الحالية",R.drawable.ic_cat_subscription,()->{selectedTab=2;render();});
         TextView overview=label("عرض الملخص الكامل  ←",13,ACCENT,true);overview.setPadding(0,dp(18),0,dp(14));box.addView(overview);
@@ -7630,12 +7841,13 @@ public final class MainActivity extends Activity {
     private void insightsScreen() {
         String title="spending".equals(insightsSection)?"تحليل الإنفاق":"categories".equals(insightsSection)?"تحليل التصنيفات":
                 "flow".equals(insightsSection)?"الفلوس دخلت وخرجت":"living".equals(insightsSection)?"تكلفة المعيشة":
-                "overview".equals(insightsSection)?"فلوسك راحت فين":"تقاريرك المالية";
+                "overview".equals(insightsSection)?"فلوسك راحت فين":"reports".equals(insightsSection)?"تقارير أكتر":"مصاريفك";
         // CSV export lives in Settings → Data; a top-left arrow here read as "back" in RTL.
         header("التحليلات", title, "", null);
         if(!insightsSection.isEmpty()) {
-            TextView back=label("← كل التقارير",13,ACCENT,true);back.setPadding(0,dp(10),0,dp(10));page.addView(back);
-            back.setOnClickListener(v->{insightsSection="";render();});
+            boolean hub="reports".equals(insightsSection);
+            TextView back=label(hub?"← مصاريفك":"← كل التقارير",13,ACCENT,true);back.setPadding(0,dp(10),0,dp(10));page.addView(back);
+            back.setOnClickListener(v->{insightsSection=hub?"":"reports";render();});
         }
         boolean overview="overview".equals(insightsSection),spending=overview||"spending".equals(insightsSection);
         boolean categoryReport=overview||"categories".equals(insightsSection),flow=overview||"flow".equals(insightsSection);
@@ -7662,7 +7874,8 @@ public final class MainActivity extends Activity {
         LocalDate[] period = insightsPeriod();
         Map<String, MoneyFlow.Summary> all = MoneyFlow.summarize(flowItems(period), period, ZoneId.systemDefault());
         MoneyFlow.Summary s = all.get("EGP");
-        if(insightsSection.isEmpty()) { analyticsHub();return; }
+        if("reports".equals(insightsSection)) { analyticsHub();return; }
+        if(insightsSection.isEmpty()) { analyticsHome(all, period);return; }
         if (s == null || s.isEmpty()) {
             empty("مفيش حركة في " + insightsPeriodName(), "جرّب فترة تانية أو استورد رسائل البنك");
             budgetsSection();
@@ -8190,6 +8403,8 @@ public final class MainActivity extends Activity {
         transactionBucketFilter = bucket == null ? "" : bucket.name();
         transactionCategoryFilter = category;
         transactionKindFilter = "";
+        // Review of PR #53: a list opened from the home statement left its row ids behind; analytics lists never use them.
+        transactionStatementList = false; transactionStatementIds = null;
         transactionSourceFilter = null;
         transactionPeriod = insightsPeriod(); transactionCurrencyFilter = "EGP";
         transactionExcludeTransfers = false;

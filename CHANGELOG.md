@@ -16,6 +16,14 @@ Owner-approved redesign, applied through the parts every screen is built from, s
 - Option pickers (`UiComponents.choices`) are a segmented control: one rounded track, the chosen option a raised pill.
 - Form pages: the header only goes back (the duplicate ✓ save icon is gone); the save button stays at the bottom while the form scrolls.
 - Cards: 22dp corners and a soft lift in light mode; section titles 17sp. Inline links lose the underline (bold brand color marks them).
+## Unreleased — 31 October 2026 · analytics and settings redesign
+
+From user feedback (too much text, analytics hard to read, settings look dated, switches unclear), owner-approved designs.
+
+- Analytics opens on one summary page («مصاريفك»): total spending with the change from the same days of the previous month (or year), a daily (or monthly) spending line, the biggest category, the daily average, and «فلوسك راحت فين؟» rows (category icon, amount, bar, share) that open their transactions. Commitments and transfers waiting for a purpose are rows too. Other currencies get one quiet line, never added to the pound. The older reports moved behind «تقارير أكتر»; the duplicate «تكلفة المعيشة» report and the definition notes are gone. `AnalyticsMath` holds the comparison period, change and per-day numbers (JVM checks).
+- Settings are one page in groups (التسجيل، الميزانية والويدجت، الإشعارات، المظهر والأمان، بياناتك، المساعدة) with a fixed icon per row, real switches for every on/off setting (widget amounts, notifications, app lock), a three-way appearance control, and «أدوات متقدمة» folded away (merchant rules, assets, debts, data check, old SMS, missed messages, CSV, midnight refresh, opening, device notification settings, diagnostics). Search stays and opens the fold for an advanced hit. Old sub-page links land on the page scrolled to their group.
+- «منع لقطات الشاشة» is removed: it only worked with the app lock on. The window flag is still cleared for windows that had it.
+- The GitHub developer link and the long support/e-mail notes left settings.
 
 ## Unreleased — 29 October 2026
 

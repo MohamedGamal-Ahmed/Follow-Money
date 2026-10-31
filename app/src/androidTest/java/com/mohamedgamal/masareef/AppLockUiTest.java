@@ -142,7 +142,7 @@ public final class AppLockUiTest {
             if("app_lock_no_secure".equals(mode)) {
                 ok(!gate().enabled(),"Lock must disable itself when the device credential was removed");
                 ok(!gate().locked(),"Missing device credential trapped the user");
-                showSettings();ok(has("قفل التطبيق: متوقف"),"Settings did not explain disabled app lock");
+                showSettings();ok(has("فعّل قفل الشاشة في الموبايل الأول"),"Settings did not explain disabled app lock");
                 screenshot(target,"03-no-device-lock");
             } else {
                 ok(gate().locked(),"Protected activity did not start locked");
@@ -159,7 +159,7 @@ public final class AppLockUiTest {
                 waitForUnlock();
                 idle();
                 ok(!gate().locked(),"Correct device PIN did not unlock the activity; before="+credentialUi+" after="+activeTexts());
-                showSettings();ok(has("قفل التطبيق: مفعل"),"Settings do not show enabled app lock");
+                showSettings();ok(has("القفل بعد"),"Settings do not show enabled app lock");
                 screenshot(target,"02-settings");
                 ownResultRoundTrip(target);
                 importActivity=(SmsImportActivity)runner.startActivitySync(new Intent(target,SmsImportActivity.class)

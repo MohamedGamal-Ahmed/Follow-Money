@@ -103,20 +103,20 @@ final class ReviewAlertsUiTest {
             main(() -> { invoke("render", new Class<?>[0]); ok(text(root(), "QA REVIEW 1") == null, "A classified expense leaves the review list"); for (int i = 2; i <= 5; i++) ok(text(root(), "QA REVIEW " + i) != null, "Remaining expenses stay in the list"); });
             main(() -> { set("selectedTab", 5); set("settingsSection", "alerts"); invoke("render", new Class<?>[0]); });
             main(() -> {
-                ok(!control("إشعار فوري بكل عملية").isChecked(), "Capture setting initially off");
+                ok(!control("إشعار بكل عملية").isChecked(), "Capture setting initially off");
                 ok(!control("تذكير يومي بالمصاريف").isChecked(), "Daily setting initially off");
-                ok(!control("تنبيه ملخص الشهر").isChecked(), "Monthly setting initially off");
-                control("إشعار فوري بكل عملية").performClick();
+                ok(!control("ملخص أول الشهر").isChecked(), "Monthly setting initially off");
+                control("إشعار بكل عملية").performClick();
             });
-            main(() -> { ok(CaptureNotifier.enabled(target) && control("إشعار فوري بكل عملية").isChecked(), "Capture switch persists on"); ok(text(root(), "شغال") != null, "Enabled delivery status is visible"); control("تذكير يومي بالمصاريف").performClick(); });
+            main(() -> { ok(CaptureNotifier.enabled(target) && control("إشعار بكل عملية").isChecked(), "Capture switch persists on"); ok(text(root(), "مفعّل بالتطبيق · موقوف من إعدادات الجهاز") == null, "A delivered switch shows no blocked status"); control("تذكير يومي بالمصاريف").performClick(); });
             main(() -> { ok(target.getSharedPreferences("reminder_settings", 0).getBoolean("daily_enabled", false), "Daily switch persists on"); control("تذكير يومي بالمصاريف").performClick(); });
             main(() -> ok(!target.getSharedPreferences("reminder_settings", 0).getBoolean("daily_enabled", true), "Daily switch persists off"));
             NotificationManager manager = target.getSystemService(NotificationManager.class);
             manager.createNotificationChannel(new NotificationChannel(MonthlySummaryReceiver.CHANNEL, "QA MONTHLY", NotificationManager.IMPORTANCE_NONE));
-            main(() -> control("تنبيه ملخص الشهر").performClick());
+            main(() -> control("ملخص أول الشهر").performClick());
             main(() -> { ok(MonthlySummaryReceiver.settings(target).getBoolean("enabled", false), "Monthly preference persists on"); ok(text(root(), "مفعّل بالتطبيق · موقوف من إعدادات نوع الإشعار") != null, "Blocked channel is not reported as active delivery"); });
             screen("02-alert-switches");
-            main(() -> { invoke("render", new Class<?>[0]); ok(control("إشعار فوري بكل عملية").isChecked() && !control("تذكير يومي بالمصاريف").isChecked() && control("تنبيه ملخص الشهر").isChecked(), "Control state survives redraw"); set("selectedTab", 2); set("commitmentMonth", LocalDate.now().withDayOfMonth(1)); invoke("render", new Class<?>[0]); View day = described(root(), date + " · 2 التزامات"); ok(day != null && day.performClick(), "Actual calendar day opens commitments"); });
+            main(() -> { invoke("render", new Class<?>[0]); ok(control("إشعار بكل عملية").isChecked() && !control("تذكير يومي بالمصاريف").isChecked() && control("ملخص أول الشهر").isChecked(), "Control state survives redraw"); set("selectedTab", 2); set("commitmentMonth", LocalDate.now().withDayOfMonth(1)); invoke("render", new Class<?>[0]); View day = described(root(), date + " · 2 التزامات"); ok(day != null && day.performClick(), "Actual calendar day opens commitments"); });
             ok(accessibleText("عرض التفاصيل"), "Calendar lists show a clear details action"); screen("03-calendar-day");
             ok(clickDescription(runner.getUiAutomation().getRootInActiveWindow(), "عرض تفاصيل QA CALENDAR A"), "Details action can be clicked"); idle();
             main(() -> { ok((int) get("selectedTab") == 11, "Calendar row opens commitment details"); ok(activity.hasWindowFocus(), "Day dialog is dismissed before details"); });

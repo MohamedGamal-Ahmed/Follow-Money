@@ -23,7 +23,7 @@ import android.widget.Toast;
 final class AppLock {
     static final String SETTINGS = "security_settings";
     private static final String ENABLED = "enabled", TIMEOUT = "timeout_seconds";
-    private static final String SECURE_PREVIEW = "secure_preview", STOPPED_AT = "stopped_at_elapsed";
+    private static final String STOPPED_AT = "stopped_at_elapsed";
     private static final int CREDENTIAL_REQUEST = 8103;
     private static volatile boolean sessionAuthorized;
     private static int startedActivities;
@@ -63,15 +63,10 @@ final class AppLock {
         return manager != null && manager.isDeviceSecure();
     }
     int timeoutSeconds() { return settings.getInt(TIMEOUT, 0); }
-    boolean securePreview() { return settings.getBoolean(SECURE_PREVIEW, true); }
 
     void setTimeoutSeconds(int seconds) {
         if (seconds != 0 && seconds != 60 && seconds != 300) throw new IllegalArgumentException("timeout");
         settings.edit().putInt(TIMEOUT, seconds).apply();
-    }
-    void setSecurePreview(boolean secure) {
-        settings.edit().putBoolean(SECURE_PREVIEW, secure).apply();
-        applySecurePreview();
     }
 
     void enable(Runnable onEnabled) {
@@ -256,10 +251,12 @@ final class AppLock {
         Toast.makeText(activity, "قفل الجهاز غير متاح؛ اتعطّل قفل التطبيق عشان تقدر تفتح بياناتك", Toast.LENGTH_LONG).show();
     }
 
+    /**
+     * Owner, 30 Oct 2026: the screenshot block worked only with the app lock on and confused people, so it is gone.
+     * The flag is still cleared, so a window that had it from an older version releases it.
+     */
     private void applySecurePreview() {
-        if (enabled() && securePreview() && !qaMode())
-            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        else activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
     }
 
     private boolean qaMode() {
