@@ -21,6 +21,12 @@ public final class AuditStructureTest {
         int homeEnd = main.indexOf("private void openInsights(", homeStart);
         check(!main.substring(homeStart, homeEnd).contains("setAutoSize"), "Home statement must never shrink system fonts");
         check(main.contains("in_app_update_card"), "Update strip keeps its stable tag");
+        // Review of PR #53: a cancelled app-lock prompt must not leave the switch shown on.
+        check(main.contains("else{appLock.enable(this::render);render();}"), "the app-lock switch redraws from the real state before the prompt answers");
+        check(main.contains("transactionBucketFilter = MoneyFlow.OUTFLOW_FILTER;"), "the analytics total opens only the rows it adds");
+        int bucketStart = main.indexOf("private void openBucket(MoneyFlow.Bucket bucket");
+        check(bucketStart > 0 && main.substring(bucketStart, main.indexOf("render();", bucketStart)).contains("transactionStatementList = false; transactionStatementIds = null;"),
+                "analytics lists clear the home statement's row ids before opening");
         check(!main.contains("attachBaseContext") && !main.contains(".fontScale="), "App must follow system font scale");
         try (java.util.stream.Stream<Path> paths = Files.walk(Path.of("app/src/main"))) {
             for (Path path : (Iterable<Path>) paths.filter(Files::isRegularFile)

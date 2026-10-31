@@ -17,6 +17,7 @@ final class MoneyTotals {
             if (MoneyFlow.SPENDING_FILTER.equals(filter)) return living + commitment;
             // The statement's «خرج»: spending, open transfers and cash withdrawals (MoneyFlow.isStatementOut).
             if (MoneyFlow.OUT_FILTER.equals(filter)) return expense + cash;
+            if (MoneyFlow.OUTFLOW_FILTER.equals(filter)) return living + commitment + openTransfer;
             switch (MoneyFlow.Bucket.valueOf(filter)) {
                 case LIVING: return living;
                 case COMMITMENT: return commitment;
