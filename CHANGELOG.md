@@ -9,7 +9,7 @@
 - First run: three full-color slides (one title, one line, one example, «التالي»), then the optional profile step.
 - Monthly summary: a page of التحليلات with a month switcher, a hero total and the same report; two long notes are gone.
 - Tests: instrumentation tests open «محتاجة رأيك» and the calendar first; `AuditStructureTest` follows the detected items to their page.
-- Review of PR #57: the commitment hero's «فاضل» adds each remaining installment from its stored cycle (partial payments deducted) or the plan price, per currency (`CommitmentEdit.left`, 4 new checks), instead of the due amount times the count. Accounts show every currency's balance (row, total and a «الأرصدة» list on the account page); «سجل الأرصدة» asks which currency when there is more than one.
+- Review of PR #57: the commitment hero's «فاضل» adds each remaining installment from its stored cycle (partial payments deducted) or the plan price, per currency (`CommitmentEdit.left`, 6 new checks): it walks the schedule, skips cycles already settled early or out of order, and never multiplies the due amount by the count. Accounts show every currency's balance (row, total and a «الأرصدة» list on the account page); «سجل الأرصدة» asks which currency when there is more than one.
 
 ## Unreleased — 31 October 2026 · home, transactions, details, add (redesign step 2 of 3)
 

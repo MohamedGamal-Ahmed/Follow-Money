@@ -33,21 +33,30 @@ public final class CommitmentEditTest {
         check(CommitmentEdit.action(false, true, 0, null, 420000, "EGP") == CommitmentEdit.PLAIN, "a new commitment saves as typed");
         check(CommitmentEdit.action(true, false, 443900, "EGP", 420000, "EGP") == CommitmentEdit.PLAIN, "a closed commitment saves as typed");
         // Review of PR #57: 3 left, the due one 100 and the others 200 → 500, not 3 × 100.
-        java.time.LocalDate d1 = java.time.LocalDate.of(2026, 11, 5), d2 = d1.plusMonths(1), d3 = d2.plusMonths(1);
-        java.util.List<java.time.LocalDate> dues = java.util.Arrays.asList(d1, d2, d3);
+        java.time.LocalDate d1 = java.time.LocalDate.of(2026, 11, 5), d2 = d1.plusMonths(1), d3 = d2.plusMonths(1), d4 = d3.plusMonths(1);
+        java.util.List<java.time.LocalDate> schedule = java.util.Arrays.asList(d1, d2, d3, d4);
+        CommitmentEdit.Price two = new CommitmentEdit.Price(20000, "EGP");
         java.util.Map<java.time.LocalDate, CommitmentEdit.Price> stored = new java.util.HashMap<>();
         stored.put(d1, new CommitmentEdit.Price(10000, "EGP"));
-        java.util.Map<String, Long> left = CommitmentEdit.left(dues, stored, new CommitmentEdit.Price(20000, "EGP"));
+        java.util.Map<String, Long> left = CommitmentEdit.left(schedule, 3, stored, two);
         check(left.size() == 1 && left.get("EGP") == 50000, "100 + 200 + 200 = 500");
         // A partial payment: the due cycle's remaining (60 of 100) is what counts.
         stored.put(d1, new CommitmentEdit.Price(6000, "EGP"));
-        check(CommitmentEdit.left(dues, stored, new CommitmentEdit.Price(20000, "EGP")).get("EGP") == 46000, "partial payment deducted");
-        // A settled cycle adds nothing; currencies stay apart.
-        stored.put(d1, new CommitmentEdit.Price(0, "EGP"));
+        check(CommitmentEdit.left(schedule, 3, stored, two).get("EGP") == 46000, "partial payment deducted");
+        // Paid out of order: 100, 200, 200 with the second paid first → 2 open: 100 + 200 = 300, never 100.
+        stored.put(d1, new CommitmentEdit.Price(10000, "EGP"));
+        stored.put(d2, new CommitmentEdit.Price(0, "EGP"));
+        check(CommitmentEdit.left(schedule, 2, stored, two).get("EGP") == 30000, "a settled later cycle is skipped, the third still counts");
+        // Third paid first instead: 100 + 200 (the second) = 300.
+        stored.put(d2, new CommitmentEdit.Price(20000, "EGP"));
+        stored.put(d3, new CommitmentEdit.Price(0, "EGP"));
+        check(CommitmentEdit.left(schedule, 2, stored, two).get("EGP") == 30000, "the third paid early leaves the first two");
+        // Currencies stay apart.
+        stored.clear();
         stored.put(d2, new CommitmentEdit.Price(5000, "USD"));
-        java.util.Map<String, Long> mixedLeft = CommitmentEdit.left(dues, stored, new CommitmentEdit.Price(20000, "EGP"));
-        check(mixedLeft.get("EGP") == 20000 && mixedLeft.get("USD") == 5000 && mixedLeft.size() == 2, "currencies are never added together");
-        check(CommitmentEdit.left(java.util.Collections.emptyList(), stored, null).isEmpty(), "nothing left, nothing shown");
+        java.util.Map<String, Long> mixedLeft = CommitmentEdit.left(schedule, 3, stored, two);
+        check(mixedLeft.get("EGP") == 40000 && mixedLeft.get("USD") == 5000 && mixedLeft.size() == 2, "currencies are never added together");
+        check(CommitmentEdit.left(schedule, 0, stored, two).isEmpty(), "nothing left, nothing shown");
         System.out.println("Commitment edit checks: " + checks + " passed");
     }
 }

@@ -5783,12 +5783,13 @@ public final class MainActivity extends Activity {
             int left = Math.max(0, item.totalCount - item.paidCount);
             if (left > 0 && !item.isDone()) {
                 // Review of PR #57: from the stored cycles (partial payments deducted) and the plan, per currency.
-                List<LocalDate> dues = new ArrayList<>(); LocalDate due = item.nextDue;
-                for (int k = 0; k < left; k++) { dues.add(due); due = item.nextAfter(due); }
                 Map<LocalDate, CommitmentEdit.Price> stored = new java.util.HashMap<>();
                 for (CommitmentPayments.Cycle cycle : db.commitmentCycles(item.id)) stored.put(cycle.due, new CommitmentEdit.Price(cycle.remaining(), cycle.currency));
+                // Long enough to step over every cycle settled early or out of order.
+                List<LocalDate> schedule = new ArrayList<>(); LocalDate due = item.nextDue;
+                for (int k = 0; k < left + stored.size(); k++) { schedule.add(due); due = item.nextAfter(due); }
                 ExpenseDb.Recurring plan = db.storedRecurringById(item.id);
-                Map<String, Long> owed = CommitmentEdit.left(dues, stored,
+                Map<String, Long> owed = CommitmentEdit.left(schedule, left, stored,
                         plan == null ? new CommitmentEdit.Price(item.amountMinor, item.currency) : new CommitmentEdit.Price(plan.amountMinor, plan.currency));
                 StringBuilder owedText = new StringBuilder();
                 for (Map.Entry<String, Long> entry : owed.entrySet()) owedText.append(owedText.length() == 0 ? "" : " + ").append(money(entry.getValue(), entry.getKey()));
