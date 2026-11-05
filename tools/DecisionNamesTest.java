@@ -49,7 +49,7 @@ public final class DecisionNamesTest {
         same(row("HSBC", "Purchase EGP100 at SHOP ONE"), "AUTO|SHOP ONE|غير مصنف", "HSBC purchase alert");
         // Transfers keep the transfer category; the person is the name even when masked (ReconciliationTest).
         same(row("Banque Misr", "تم تنفيذ تحويل لحظي من حسابكم رقم xxx7392 بمبلغ 150 جم إلى شخص ا******* م*** رقم مرجعي 123456789012 يوم 2026-10-11 الساعه 15:27 للمزيد اتصل ب 19888"),
-                "AUTO|شخص ا******* م***|تحويلات", "A masked recipient is still the name");
+                "AUTO|تحويل لشخص ا******* م***|تحويلات", "A masked recipient is still the name, as a transfer to that person");
         // Paying the user's own credit card is a transfer (FeatureAuditTest, CardCancellationTest).
         check(row("QA Bank", "Transfer of EGP 4,000.00 from your account ****5678 to credit card ****1234 on 10/10/2026").endsWith("|تحويلات"),
                 "Credit card repayment recorded as a transfer: " + row("QA Bank", "Transfer of EGP 4,000.00 from your account ****5678 to credit card ****1234 on 10/10/2026"));
@@ -57,7 +57,7 @@ public final class DecisionNamesTest {
                 "Arabic credit card repayment is a transfer: " + row("BANK", "تم تحويل مبلغ 227 جنيه من حساب رقم 1111 إلى بطاقة البنك الائتمانية رقم 2222"));
         // A transfer stays a transfer whatever the user taught for a merchant of the same name (FeatureAuditTest).
         ParserShadow.learning().setMerchantRules(List.of(new LocalLearning.MerchantRule("Butlers", "مقاهي", false)));
-        same(row("BANK", "You sent EGP 42.00 to Butlers"), "AUTO|Butlers|تحويلات", "Sending money is a transfer");
+        same(row("BANK", "You sent EGP 42.00 to Butlers"), "AUTO|تحويل إلى Butlers|تحويلات", "Sending money is a transfer; a transfer never goes through the merchant catalog");
         same(row("BANK", "Card purchase EGP 91.25 at KASHIER*BUTLERS & CO MALL"), "AUTO|Butlers|مقاهي", "The user's rule names the purchase category");
         ParserShadow.learning().setMerchantRules(List.of());
         // The owner's day (spec task B): every message is a movement the pipeline records, and the device test that imports

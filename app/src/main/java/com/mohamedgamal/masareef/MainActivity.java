@@ -3945,8 +3945,28 @@ public final class MainActivity extends Activity {
             attention.addView(banner, new LinearLayout.LayoutParams(-2, -2));
         }
 
-        // A transfer to a person is recorded as a transfer to that person; the app no longer asks what it was for.
-        // Choosing a purpose stays optional, from the transaction's own page.
+        int openTransfers = 0; long openAmount = 0;
+        for (ExpenseDb.Transaction item : month)
+            if (isSentTransfer(item) && "EGP".equals(item.currency)) { openTransfers++; openAmount += item.amountMinor; }
+        if (openTransfers > 0 && transactionBucketFilter.isEmpty() && !bulkMode) {
+            LinearLayout banner = new LinearLayout(this); banner.setGravity(Gravity.CENTER_VERTICAL);
+            banner.setPadding(dp(12), dp(8), dp(12), dp(8)); banner.setMinimumHeight(dp(UiTheme.TOUCH));
+            banner.setBackground(rounded(dark ? 0x40c25e0b : 0xfffff1e3, 99));
+            banner.addView(tintedIcon(R.drawable.ic_cat_transfer, ORANGE), new LinearLayout.LayoutParams(dp(20), dp(20)));
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(-2, -2); textParams.setMarginStart(dp(10));
+            banner.addView(label(StatementRows.transfers(openTransfers) + " لناس من غير غرض", 13, ORANGE, false), textParams);
+            // The chip's action word, so it reads as a tap target.
+            LinearLayout.LayoutParams actParams = new LinearLayout.LayoutParams(-2, -2); actParams.setMarginStart(dp(8));
+            banner.addView(label("حدد", 13, ORANGE, true), actParams);
+            banner.setContentDescription(StatementRows.transfers(openTransfers) + " لناس غرضها مش محدد · " + money(openAmount, "EGP") + "، حدد");
+            banner.setOnClickListener(v -> {
+                transactionCategoryFilter="";transactionKindFilter="";transactionCurrencyFilter="EGP";transactionSourceFilter=null;
+                transactionStatementList=false;transactionStatementIds=null;transactionExcludeTransfers=false;transactionSearch="";searchOpen=false;
+                transactionBucketFilter = MoneyFlow.Bucket.OPEN_TRANSFER.name(); bulkMode = true; bulkSelected.clear(); render();
+            });
+            LinearLayout.LayoutParams bannerParams = new LinearLayout.LayoutParams(-2, -2); if (attention.getChildCount() > 0) bannerParams.setMarginStart(dp(8));
+            attention.addView(banner, bannerParams);
+        }
         if (attention.getChildCount() > 0) {
             android.widget.HorizontalScrollView attentionScroll = new android.widget.HorizontalScrollView(this);
             attentionScroll.setHorizontalScrollBarEnabled(false); attention.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
@@ -8394,9 +8414,14 @@ public final class MainActivity extends Activity {
 
     private void reviewSection(MoneyFlow.Summary s) {
         List<RepairRules.RepeatingTransfer> repeating = db.repeatingTransferSuggestions();
-        if (s.uncategorized == 0 && repeating.isEmpty()) return;
+        int open = s.countOf(MoneyFlow.Bucket.OPEN_TRANSFER);
+        if (s.uncategorized == 0 && open == 0 && repeating.isEmpty()) return;
         section("محتاج مراجعة", null, null);
         for (int i = 0; i < Math.min(3, repeating.size()); i++) repeatingCard(repeating.get(i));
+        if (open > 0)
+            tipCard("⇄", StatementRows.transfers(open) + " لناس غرضها مش محدد", "إجمالي " + money(s.of(MoneyFlow.Bucket.OPEN_TRANSFER), "EGP") +
+                    ". حدد غرضها (أكل، إيجار، عائلة...) علشان تتحسب في مكانها الصح.", "حدد الغرض",
+                    () -> openBucket(MoneyFlow.Bucket.OPEN_TRANSFER, "", true));
         if (s.uncategorized > 0)
             tipCard("✦", s.uncategorized + " عملية صرف غير مصنفة", "إجمالي " + money(s.uncategorizedAmount, "EGP") +
                     ". صنّفها مرة واحدة بالتحديد الجماعي.", "صنّفها", () -> openBucket(MoneyFlow.Bucket.LIVING, MoneyFlow.UNCATEGORIZED, true));

@@ -5,7 +5,7 @@
 - A statement-line purchase («<date> KASHIER*BUTLERS Purchase from <mask> EGP 15.00-») names its merchant; the bank's «Total POS Purchase» wording stays merchant-less.
 - A service line paid by its number («تم سداد … الخط رقم …») is a bill; WE / Telecom Egypt are catalog merchants.
 - No merchant found: «مشتريات بالكارت», marked for review; the sender's name is never the merchant.
-- A transfer to a person reads «تحويل لأحمد علي» in «تحويلات»; the orange «تحويلات لناس من غير غرض» strip and its review tip are gone, choosing a purpose stays optional.
+- A transfer to a person reads «تحويل لأحمد علي» in «تحويلات»; a transfer never goes through the merchant catalog, so a person named like a shop stays a person.
 - Merchant catalog of 156 merchants (whole-field-only for short aliases) and owner keyword rules, generated from `tools/fixtures/merchant-*-2026-11-05.csv` by `tools/build-merchant-catalog.py`.
 - New categories ترفيه, رياضة, تعليم; «رعاية صحية» merged into «صحة» (schema 29 updates rows, rules, budgets and plans).
 

@@ -19,7 +19,7 @@ public final class IntelligenceRulesTest {
         ParserShadow.Observation o = ParserShadow.observe(MessageNormalizer.Raw.sms(sender, text), "TEST", null, 1762380000000L, 1762380000000L);
         Map<String, String> v = o.values;
         String direction = v.get("direction");
-        boolean review = "REVIEW".equals(o.decision) || DecisionNames.merchantUnknown(v, o.movementKind, direction);
+        boolean review = "REVIEW".equals(o.decision) || DecisionNames.merchantUnknown(v, o.movementKind, direction, sender);
         return new String[]{DecisionNames.merchant(v, o.movementKind, sender), DecisionNames.category(v, o.movementKind, direction, sender), String.valueOf(review)};
     }
 

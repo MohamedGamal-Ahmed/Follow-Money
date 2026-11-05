@@ -33,6 +33,7 @@ final class DecisionNames {
             default: break;
         }
         if (transfer(kind)) return "تحويل"; // a transfer whose receiver the message does not name
+        if (knownSender(label)) return label; // a provider (TRU, WE …) is the party; a bank is not
         return "in".equals(v.get("direction")) ? label : UNKNOWN_CARD_PURCHASE;
     }
 
@@ -41,6 +42,13 @@ final class DecisionNames {
         name = name.trim().replaceAll("\\s+", " ");
         if (!isPerson(name)) return name;
         return name.codePointAt(0) >= 0x600 && name.codePointAt(0) <= 0x6FF ? "تحويل ل" + name : "تحويل إلى " + name;
+    }
+
+    /** A sender that is itself the party paid: a catalog merchant or an installment provider; never a bank. */
+    private static boolean knownSender(String label) {
+        if (label == null) return false;
+        String lower = label.trim().toLowerCase(java.util.Locale.ROOT);
+        return MerchantClassifier.category(label) != null || ExpenseParser.installmentProvider(lower) || lower.equals("tru") || lower.equals("ترو");
     }
 
     /** "Total POS Purchase": the bank's name for the kind of movement, not who was paid. */
@@ -57,8 +65,8 @@ final class DecisionNames {
      * True when the app has to ask: a card purchase whose merchant could not be read. A transfer to a person, a fee, a cash
      * withdrawal or a known kind of movement is never asked about.
      */
-    static boolean merchantUnknown(java.util.Map<String, String> v, String kind, String direction) {
-        return "out".equals(direction) && kind == null && v.get("merchant") == null && v.get("counterparty") == null &&
+    static boolean merchantUnknown(java.util.Map<String, String> v, String kind, String direction, String label) {
+        return "out".equals(direction) && kind == null && !knownSender(label) && v.get("merchant") == null && v.get("counterparty") == null &&
                 (v.get("description") == null || purchaseWording(v.get("description"))) && v.get("self_kind") == null;
     }
 

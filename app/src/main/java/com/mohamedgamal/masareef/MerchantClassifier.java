@@ -25,7 +25,9 @@ final class MerchantClassifier {
      */
     private static final java.util.Set<String> WHOLE_ONLY = new java.util.HashSet<>();
     static {
-        for (String alias : new String[]{"WE", "GAD", "SIP", "BIM", "2B", "NOON", "TOTAL", "SEIF", "AUC", "GUC", "BUE", "MSA", "ASU", "PAUL"}) WHOLE_ONLY.add(textKey(alias));
+        for (String alias : new String[]{"WE", "GAD", "SIP", "BIM", "2B", "NOON", "TOTAL", "SEIF", "AUC", "GUC", "BUE", "MSA", "ASU", "PAUL",
+                // Brand names shared with unrelated shops: "Cleopatra Boutique" is not a hospital (MerchantClassificationTest).
+                "CLEOPATRA", "كليوباترا"}) WHOLE_ONLY.add(textKey(alias));
     }
     // Specific services precede broader brands. Short aliases never accept branch suffixes.
     private static final Entry[] HAND = {
@@ -115,11 +117,15 @@ final class MerchantClassifier {
         return null;
     }
     private static Entry findKey(String value) {
+        // An exact alias anywhere beats a branch prefix ("Talabat Mart" is its own entry, not Talabat + "Mart"); among
+        // prefixes the longest alias owns the suffix ("uber eats maadi" is Uber Eats, not Uber).
+        for(Entry entry:ENTRIES) for(String key:entry.aliases) if(value.equals(key)) return entry;
+        Entry best=null; int length=0;
         for(Entry entry:ENTRIES) for(int i=0;i<entry.aliases.length;i++) {
             String key=entry.aliases[i];
-            if(value.equals(key) || !entry.whole[i] && key.length()>=4 && value.startsWith(key+" ")) return entry;
+            if(!entry.whole[i] && key.length()>=4 && key.length()>length && value.startsWith(key+" ")) { best=entry; length=key.length(); }
         }
-        return null;
+        return best;
     }
     static String displayName(String raw) {
         Entry entry=find(raw);

@@ -89,7 +89,7 @@ final class PipelineDecider {
                 offsetOf = observationId < 0 ? null : ShadowStore.transactionOf(sql, observationId);
                 if (offsetOf != null) offset = true;
             }
-            boolean review = "REVIEW".equals(o.decision) || DecisionNames.merchantUnknown(v, o.movementKind, direction);
+            boolean review = "REVIEW".equals(o.decision) || DecisionNames.merchantUnknown(v, o.movementKind, direction, request.label);
             Long balance;
             try { balance = v.get("balance_minor") == null ? null : Long.valueOf(v.get("balance_minor")); } catch (NumberFormatException unreadable) { balance = null; }
             return new Decided(PipelineDecision.record(review, amount, v.get("currency"), direction, DecisionNames.merchant(v, o.movementKind, request.label),

@@ -249,7 +249,7 @@ public final class PhaseOneTest {
             fixture.addManual(when+1000,6450,"EGP","Uber","مواصلات",debit);
             fixture.addManual(when+1100,8825,"EGP","Butlers","أكل وشرب",debit);
             fixture.addManual(when+1200,4525,"EGP","Espresso Lab","مقاهي",debit);
-            fixture.addManual(when+1300,16000,"EGP","Cleopatra Hospital","رعاية صحية",debit);
+            fixture.addManual(when+1300,16000,"EGP","Cleopatra Hospital","صحة",debit);
             fixture.addManual(when+1400,3000,"EGP","QA SHOP","غير مصنف",separate);
             fixture.addManualEntry(when+1500,7000,"EGP","QA friend","تحويلات",bank,"expense",null,null);
             fixture.addManualEntry(when+1600,30000,"EGP","QA own transfer","تحويلات",other,"transfer",debit,null);
