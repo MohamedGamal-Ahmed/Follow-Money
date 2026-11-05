@@ -21,7 +21,7 @@ final class MerchantClassifier {
         new Entry("Butlers", "أكل وشرب", true, "Butlers & Co", "Butlers and Co", "Butlers"),
         new Entry("Seoudi", "بقالة", true, "Seoudi", "Saudi Market", "سعودي", "سعودى"),
         new Entry("Espresso Lab", "مقاهي", true, "Espresso Lab", "Espressolab", "إسبريسو لاب", "اسبرسو لاب"),
-        new Entry("Cleopatra Hospital", "رعاية صحية", true, "Cleopatra Hospital", "Cleopatra Hospitals Group", "مستشفى كليوباترا", "مستشفيات كليوباترا"),
+        new Entry("Cleopatra Hospital", "صحة", true, "Cleopatra Hospital", "Cleopatra Hospitals Group", "مستشفى كليوباترا", "مستشفيات كليوباترا"),
         new Entry("Carrefour", "بقالة", true, "Carrefour", "كارفور"),
         new Entry("Spinneys", "بقالة", true, "Spinneys", "سبينس"),
         new Entry("STARBUCKS", "مقاهي", true, "Starbucks", "ستاربكس"),
@@ -36,7 +36,7 @@ final class MerchantClassifier {
         new Entry("Etoile", "أكل وشرب", true, "Etoile", "Etoile Patisserie", "إتوال"),
         new Entry("Ted's", "أكل وشرب", true, "Ted's", "Teds"),
         new Entry("Zaher", "بقالة", true, "Zaher", "زاهر"),
-        new Entry("El Ezaby", "رعاية صحية", true, "El Ezaby", "Ezaby Pharmacy", "العزبي", "صيدلية العزبي"),
+        new Entry("El Ezaby", "صحة", true, "El Ezaby", "Ezaby Pharmacy", "العزبي", "صيدلية العزبي"),
         new Entry("McDonald's", "أكل وشرب", true, "McDonald's", "McDonalds", "MCDONALD", "ماكدونالدز", "ماكدونالد"),
         new Entry("KFC", "أكل وشرب", false, "KFC", "كنتاكي"),
         new Entry("Talabat", "أكل وشرب", true, "Talabat", "طلبات"),
@@ -51,7 +51,12 @@ final class MerchantClassifier {
         new Entry("Claude", "اشتراكات", true, "Claude", "Anthropic"),
         new Entry("Truecaller", "اشتراكات", true, "Truecaller"),
         new Entry("OneDrive", "اشتراكات", true, "OneDrive"),
-        new Entry("Google One", "اشتراكات", true, "Google One")
+        new Entry("Google One", "اشتراكات", true, "Google One"),
+        // Short or common-word names match the whole merchant field only (branches=false), never free text. A sender label
+        // such as "we-Landline" reaches this through DecisionNames, not through message text.
+        new Entry("WE", "فواتير", false, "WE", "we landline", "we internet", "Telecom Egypt", "المصرية للاتصالات"),
+        // Only the full name: "Galaxy" alone is a phone brand.
+        new Entry("Galaxy Cinema", "ترفيه", true, "Galaxy Cinema", "جالاكسي سينما")
     };
 
     static String textKey(String raw) {

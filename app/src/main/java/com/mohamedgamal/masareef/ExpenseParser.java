@@ -693,7 +693,7 @@ public final class ExpenseParser {
         if (value.matches(".*(market|grocery|carrefour|سبينس|سوبر|ماركت).*")) return "بقالة";
         if (value.matches(".*(\\bcafe\\b|\\bcoffee\\b|\\bstarbucks\\b|مقاهي|كافيه).*")) return "مقاهي";
         if (value.matches(".*(restaurant|مطعم).*")) return "أكل وشرب";
-        if (value.matches(".*(\\bhospital\\b|\\bclinic\\b|\\bpharmacy\\b|مستشفى|صيدلية|عيادة).*")) return "رعاية صحية";
+        if (value.matches(".*(\\bhospital\\b|\\bclinic\\b|\\bpharmacy\\b|مستشفى|صيدلية|عيادة).*")) return "صحة";
         if (value.matches(".*(electric|water|gas|كهرباء|مياه|غاز).*")) return "فواتير";
         return "غير مصنف";
     }

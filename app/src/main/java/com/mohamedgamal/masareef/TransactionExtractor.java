@@ -146,6 +146,8 @@ final class TransactionExtractor {
     private static final Pattern HEADER = Pattern.compile("^\\s*from\\s+[^:\\n]{1,30}:", FLAGS);
     private static final Pattern INSTAPAY = Pattern.compile("[a-z0-9._-]+@instapay", FLAGS);
     private static final Pattern STATEMENT_LINE = Pattern.compile(ParsingPolicy.STATEMENT_LINE, FLAGS);
+    private static final Pattern GENERIC_PURCHASE_NAME = Pattern.compile(ParsingPolicy.GENERIC_PURCHASE_NAME, FLAGS);
+    private static final Pattern PURCHASE_STATEMENT_LINE = Pattern.compile(ParsingPolicy.PURCHASE_STATEMENT_LINE, FLAGS);
     private static final Pattern PURCHASED_PRODUCT = Pattern.compile(ParsingPolicy.PURCHASED_PRODUCT, FLAGS);
     private static final Pattern COUNTERPARTY_MASKED = Pattern.compile(ParsingPolicy.COUNTERPARTY_MASKED_NAME, FLAGS);
     /** A whole mask token ("****4321", "1234XXXX5678"); last four digits only when the token ends in four digits. */
@@ -364,6 +366,19 @@ final class TransactionExtractor {
     private static void merchant(Folded f, Extraction x) {
         String t = f.text;
         int searchFrom = 0;
+        // A statement-line purchase ("<date> KASHIER*BUTLERS Purchase from 036-137***-001 EGP 15.00-") names its merchant
+        // before "Purchase"; a statement-line transfer describes itself and names none.
+        Matcher purchase = PURCHASE_STATEMENT_LINE.matcher(t);
+        if (purchase.find()) {
+            if (purchase.group(2) != null) x.accountPartial = purchase.group(2);
+            // "Total POS Purchase …" is the bank's wording for a terminal purchase; no merchant is named.
+            if (GENERIC_PURCHASE_NAME.matcher(purchase.group(1).trim().replaceAll("[^\\p{L}\\p{N}]+", " ").trim()).matches()) {
+                x.description = f.display(purchase.start(1), purchase.end(1)).trim() + " Purchase";
+                return;
+            }
+            setMerchant(f, x, purchase.start(1), purchase.end(1));
+            return;
+        }
         // An HSBC statement line describes itself between the date token and to/from; it names no merchant.
         Matcher line = STATEMENT_LINE.matcher(t);
         if (line.find()) { x.description = f.display(line.start(1), line.end(1)).trim(); x.accountPartial = line.group(2); return; }

@@ -138,12 +138,12 @@ public final class MainActivity extends Activity {
     /** The password typed for a backup, held only between the dialog and the document picker's answer, then wiped. */
     private char[] pendingBackupPassword;
     private static final String[] CATEGORIES = {
-            "غير مصنف", "أكل وشرب", "مقاهي", "بقالة", "مواصلات", "فواتير", "اشتراكات", "أقساط", "تسوق", "رعاية صحية", "صحة", "عائلة ومساعدات", "سكن وإيجار",
+            "غير مصنف", "أكل وشرب", "مقاهي", "بقالة", "مواصلات", "فواتير", "اشتراكات", "أقساط", "تسوق", "صحة", "ترفيه", "رياضة", "تعليم", "عائلة ومساعدات", "سكن وإيجار",
             "تحويلات", "رسوم تحويل", "رسوم بنكية", "سحب نقدي", "أخرى"
     };
     /** What a transfer to another person was for; picking one moves it out of «تحويلات غرضها مش محدد». */
     private static final String[] PURPOSES = {
-            "عائلة ومساعدات", "سكن وإيجار", "أقساط", "فواتير", "أكل وشرب", "مقاهي", "بقالة", "تسوق", "رعاية صحية", "صحة", "مواصلات", "أخرى"
+            "عائلة ومساعدات", "سكن وإيجار", "أقساط", "فواتير", "أكل وشرب", "مقاهي", "بقالة", "تسوق", "صحة", "ترفيه", "رياضة", "تعليم", "مواصلات", "أخرى"
     };
     /**
      * Owner acceptance (0.4.0): «تحويلات» is the open bucket itself (a transfer to a person, purpose unknown); a transfer to
@@ -7190,6 +7190,9 @@ public final class MainActivity extends Activity {
             case "أقساط": background = 0xffe3ebfb; ink = 0xff1f3a93; icon = R.drawable.ic_cat_installment; break;
             case "رعاية صحية":
             case "صحة": background = 0xfffde8e8; ink = 0xffa82c2c; icon = R.drawable.ic_cat_health; break;
+            case "ترفيه": background = 0xffe9f1fb; ink = 0xff2b5a9a; icon = R.drawable.ic_cat_other; break;
+            case "رياضة": background = 0xffe6f5f1; ink = 0xff17705a; icon = R.drawable.ic_cat_other; break;
+            case "تعليم": background = 0xffeeeafb; ink = 0xff4a3a9a; icon = R.drawable.ic_cat_other; break;
             case "رسوم تحويل":
             case "تحويلات": background = 0xffeef0ed; ink = 0xff4a5551; icon = R.drawable.ic_cat_transfer; break;
             case "رسوم بنكية": background = 0xfffff7d6; ink = 0xff7a5c00; icon = R.drawable.ic_cat_bills; break;
