@@ -7,7 +7,7 @@ public final class ParserSmokeTest {
         ExpenseParser.Parsed parsed = ExpenseParser.parse(sender, message);
         if (parsed == null || parsed.amountMinor != amount || !currency.equals(parsed.currency))
             throw new AssertionError("Unexpected parse: " + message);
-        if (message.contains("AMAZON") && !"AMAZON".equals(parsed.merchant))
+        if (message.contains("AMAZON") && !"Amazon".equals(parsed.merchant))
             throw new AssertionError("Unexpected merchant: " + parsed.merchant);
         checked++;
     }
@@ -306,7 +306,7 @@ public final class ParserSmokeTest {
         // A completed payment survives future fees/installments; the future amount never becomes the payment.
         expect("BANK", "تم خصم ١٠٠٠ جنيه لدى كارفور، وسيتم خصم رسوم ٥ جنيه", 100000, "EGP");
         expect("BANK", "Your card was debited EGP 500 at AMAZON. Installment will be debited monthly", 50000, "EGP");
-        expectCategory("Your card was debited EGP 500 at AMAZON. Installment will be debited monthly", "غير مصنف");
+        expectCategory("Your card was debited EGP 500 at AMAZON. Installment will be debited monthly", "تسوق");
         expect("BANK", "Card purchase at UBER EGP 100 pending", 10000, "EGP");
         expect("BANK", "EGP 500 was debited from your account. EGP 5 will be charged tomorrow", 50000, "EGP");
         expect("BANK", "تم سحب ٥٠٠ جنيه من حسابك، وسيتم خصم رسوم ٥ جنيه", 50000, "EGP");

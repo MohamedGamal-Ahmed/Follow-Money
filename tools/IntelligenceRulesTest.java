@@ -30,7 +30,7 @@ public final class IntelligenceRulesTest {
         same(got[2], String.valueOf(review), "review of " + text);
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         // 1. A statement-line purchase names its merchant before "Purchase"; the processor prefix goes.
         ledger("HSBC", "From HSBC: 05NOV26 KASHIER*BUTLERS Purchase from 036-137***-001 EGP 15.00- Your available balance is EGP 955.42",
                 "Butlers", "أكل وشرب", false);
@@ -78,6 +78,38 @@ public final class IntelligenceRulesTest {
         // 7. «رعاية صحية» is «صحة» now.
         same(MerchantClassifier.category("El Ezaby"), "صحة", "pharmacy category");
         same(ExpenseParser.category("City Pharmacy"), "صحة", "keyword health category");
+
+        // 6. The reviewed catalog: every CSV row is loaded, nothing else.
+        java.util.List<String> lines = java.nio.file.Files.readAllLines(java.nio.file.Path.of("tools/fixtures/merchant-catalog-2026-11-05.csv"));
+        same(MerchantCatalogData.CATALOG.length, lines.size() - 1, "catalog rows loaded");
+        same(MerchantCatalogData.CATALOG.length, 156, "catalog size");
+        for (String[] row : MerchantCatalogData.CATALOG) {
+            same(MerchantClassifier.category(row[3]) != null, true, "first alias of " + row[0] + " is known");
+        }
+        same(MerchantClassifier.category("Hyper One"), "بقالة", "catalog merchant");
+        same(MerchantClassifier.displayName("AMAZON"), "Amazon", "catalog display name");
+        same(MerchantClassifier.category("سيف"), "صحة", "catalog health category");
+        // Short and common-word aliases: the whole merchant field only, never a prefix and never free text.
+        for (String alias : new String[]{"NOON", "SEIF", "GAD", "BIM", "SIP", "AUC", "GUC", "BUE", "MSA", "ASU", "PAUL", "TOTAL"}) {
+            same(MerchantClassifier.category(alias + " BRANCH 7 CAIRO") , null, alias + " followed by other words");
+        }
+        same(MerchantClassifier.category("NOON"), "تسوق", "NOON as the whole field");
+        same(MerchantClassifier.category("SEIF"), "صحة", "SEIF as the whole field");
+        same(MerchantClassifier.category("حساب"), "صحة", "«حساب» as the whole merchant field is Hassab Labs (owner rule)");
+        same(MerchantClassifier.category("حساب رقم 1234"), null, "«حساب» inside a bank phrase");
+        // A longer alias still takes a branch suffix: "UBER" is short, "HYPER ONE" is not.
+        same(MerchantClassifier.category("HYPER ONE MAADI"), "بقالة", "branch suffix on a long alias");
+
+        // Keyword rules: whole words in the name, only when no catalog entry matched, longest keyword first.
+        same(MerchantClassifier.keywordCategory("Al Amal Pharmacy"), "صحة", "pharmacy keyword");
+        same(MerchantClassifier.keywordCategory("صيدلية الامل"), "صحة", "Arabic pharmacy keyword");
+        same(MerchantClassifier.keywordCategory("Downtown Cinema"), "ترفيه", "cinema keyword");
+        same(MerchantClassifier.keywordCategory("Iron Gym"), "رياضة", "gym keyword");
+        same(MerchantClassifier.keywordCategory("Future Academy"), "تعليم", "academy keyword");
+        same(MerchantClassifier.keywordCategory("Pharmacyland"), null, "a keyword inside a longer word");
+        same(MerchantClassifier.keywordCategory("AMAZON"), null, "a catalog entry decides, not keywords");
+        same(ExpenseParser.category("Al Amal Pharmacy"), "صحة", "keyword category reaches the ledger");
+        same(ExpenseParser.category("Downtown Cinema"), "ترفيه", "new category reaches the ledger");
 
         System.out.println("IntelligenceRulesTest passed: " + checks + " checks");
     }

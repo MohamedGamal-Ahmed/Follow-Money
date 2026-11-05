@@ -9,14 +9,26 @@ final class MerchantClassifier {
         final String name, category;
         final boolean branches;
         final String[] aliases;
+        /** Aliases that must equal the whole merchant field: never a prefix of a longer name, never free text. */
+        final boolean[] whole;
         Entry(String name, String category, boolean branches, String... aliases) {
             this.name=name; this.category=category; this.branches=branches;
             this.aliases=new String[aliases.length];
-            for(int i=0;i<aliases.length;i++) this.aliases[i]=textKey(aliases[i]);
+            this.whole=new boolean[aliases.length];
+            for(int i=0;i<aliases.length;i++) { this.aliases[i]=textKey(aliases[i]); this.whole[i]=!branches || WHOLE_ONLY.contains(this.aliases[i]); }
         }
     }
+    /**
+     * Short or common-word aliases (owner decision, 5 Nov 2026): matched against the whole merchant field only. «حساب» is in
+     * every bank SMS; «WE», «NOON», «TOTAL» and the university acronyms are ordinary words and letters.
+     */
+    private static final java.util.Set<String> WHOLE_ONLY = new java.util.HashSet<>();
+    static {
+        for (String alias : new String[]{"حساب", "رعاية", "التعاون", "المختبر", "WE", "GAD", "SIP", "BIM", "2B", "NOON", "TOTAL", "SEIF",
+                "AUC", "GUC", "BUE", "MSA", "ASU", "PAUL"}) WHOLE_ONLY.add(textKey(alias));
+    }
     // Specific services precede broader brands. Short aliases never accept branch suffixes.
-    private static final Entry[] ENTRIES = {
+    private static final Entry[] HAND = {
         new Entry("Uber Eats", "أكل وشرب", true, "Uber Eats"),
         new Entry("Butlers", "أكل وشرب", true, "Butlers & Co", "Butlers and Co", "Butlers"),
         new Entry("Seoudi", "بقالة", true, "Seoudi", "Saudi Market", "سعودي", "سعودى"),
@@ -51,13 +63,40 @@ final class MerchantClassifier {
         new Entry("Claude", "اشتراكات", true, "Claude", "Anthropic"),
         new Entry("Truecaller", "اشتراكات", true, "Truecaller"),
         new Entry("OneDrive", "اشتراكات", true, "OneDrive"),
-        new Entry("Google One", "اشتراكات", true, "Google One"),
-        // Short or common-word names match the whole merchant field only (branches=false), never free text. A sender label
-        // such as "we-Landline" reaches this through DecisionNames, not through message text.
-        new Entry("WE", "فواتير", false, "WE", "we landline", "we internet", "Telecom Egypt", "المصرية للاتصالات"),
-        // Only the full name: "Galaxy" alone is a phone brand.
-        new Entry("Galaxy Cinema", "ترفيه", true, "Galaxy Cinema", "جالاكسي سينما")
+        new Entry("Google One", "اشتراكات", true, "Google One")
     };
+
+    /** The hand-written entries first (they carry reviewed branch rules), then the generated catalog; the first match wins. */
+    private static final Entry[] ENTRIES = withCatalog();
+
+    private static Entry[] withCatalog() {
+        java.util.List<Entry> all = new java.util.ArrayList<>(java.util.Arrays.asList(HAND));
+        for (String[] row : MerchantCatalogData.CATALOG)
+            all.add(new Entry(row[0], row[2], true, java.util.Arrays.copyOfRange(row, 3, row.length)));
+        return all.toArray(new Entry[0]);
+    }
+
+    /** Keyword rules from the owner's file, applied only when no catalog entry matched. */
+    private static final String[][] KEYWORD_RULES = MerchantCatalogData.KEYWORDS;
+
+    /** Folded for keyword comparison only: letters, no punctuation, ة as ه. */
+    private static String keywordKey(String raw) { return textKey(raw).replace('ة','ه'); }
+
+    /**
+     * The category a merchant NAME implies by whole words or phrases it contains («صيدلية الأمل», "City Pharmacy"); null when
+     * a catalog entry matched (that entry decides) or no keyword is present. The longest matching keyword wins
+     * ("GAS STATION" over "GAS"), then the earlier row.
+     */
+    static String keywordCategory(String raw) {
+        if (raw == null || find(raw) != null) return null;
+        String name = " " + keywordKey(raw) + " ", best = null;
+        int length = 0;
+        for (String[] rule : KEYWORD_RULES) for (int i = 1; i < rule.length; i++) {
+            String word = keywordKey(rule[i]);
+            if (word.length() > length && name.contains(" " + word + " ")) { best = rule[0]; length = word.length(); }
+        }
+        return best;
+    }
 
     static String textKey(String raw) {
         if(raw==null) return "";
@@ -76,8 +115,9 @@ final class MerchantClassifier {
         return null;
     }
     private static Entry findKey(String value) {
-        for(Entry entry:ENTRIES) for(String key:entry.aliases) {
-            if(value.equals(key) || entry.branches && key.length()>=4 && value.startsWith(key+" ")) return entry;
+        for(Entry entry:ENTRIES) for(int i=0;i<entry.aliases.length;i++) {
+            String key=entry.aliases[i];
+            if(value.equals(key) || !entry.whole[i] && key.length()>=4 && value.startsWith(key+" ")) return entry;
         }
         return null;
     }
@@ -94,11 +134,10 @@ final class MerchantClassifier {
     /** Read-only catalog view for the shadow MerchantCatalogIndex: {name, "branches"|"whole", textKey aliases...}. */
     static java.util.List<String[]> catalog() {
         java.util.List<String[]> rows=new java.util.ArrayList<>();
-        for(Entry entry:ENTRIES){
-            String[] row=new String[entry.aliases.length+2];
-            row[0]=entry.name; row[1]=entry.branches?"branches":"whole";
-            System.arraycopy(entry.aliases,0,row,2,entry.aliases.length);
-            rows.add(row);
+        for(Entry entry:ENTRIES) for(boolean whole:new boolean[]{false,true}){
+            java.util.List<String> keys=new java.util.ArrayList<>(java.util.Arrays.asList(entry.name,whole?"whole":"branches"));
+            for(int i=0;i<entry.aliases.length;i++) if(entry.whole[i]==whole) keys.add(entry.aliases[i]);
+            if(keys.size()>2) rows.add(keys.toArray(new String[0]));
         }
         return rows;
     }

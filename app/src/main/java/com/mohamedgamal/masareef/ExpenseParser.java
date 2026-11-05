@@ -688,6 +688,9 @@ public final class ExpenseParser {
         if (value.contains("atm") || value.contains("سحب نقدي")) return "سحب نقدي";
         if (value.contains("claude") || value.contains("anthropic") || value.contains("truecaller") || value.contains("onedrive") ||
                 value.contains("chatgpt") || value.contains("openai")) return "اشتراكات";
+        // Owner keyword rules (5 Nov 2026): whole words in the name, only because no catalog entry matched.
+        String byKeyword = MerchantClassifier.keywordCategory(merchant);
+        if (byKeyword != null) return byKeyword;
         if (value.matches(".*(uber|careem|كريم|اوبر|fuel|petrol|بنزين).*")) return "مواصلات";
         if (value.matches(".*(netflix|spotify|youtube|google|apple|شاهد|انترنت|internet).*")) return "اشتراكات";
         if (value.matches(".*(market|grocery|carrefour|سبينس|سوبر|ماركت).*")) return "بقالة";

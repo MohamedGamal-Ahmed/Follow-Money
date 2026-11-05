@@ -1,5 +1,14 @@
 # Change log
 
+## Unreleased — 5 November 2026 · intelligence PR 1 (parser shapes, catalog, categories)
+
+- A statement-line purchase («<date> KASHIER*BUTLERS Purchase from <mask> EGP 15.00-») names its merchant; the bank's «Total POS Purchase» wording stays merchant-less.
+- A service line paid by its number («تم سداد … الخط رقم …») is a bill; WE / Telecom Egypt are catalog merchants.
+- No merchant found: «مشتريات بالكارت», marked for review; the sender's name is never the merchant.
+- A transfer to a person reads «تحويل لأحمد علي» in «تحويلات»; the orange «تحويلات لناس من غير غرض» strip and its review tip are gone, choosing a purpose stays optional.
+- Merchant catalog of 156 merchants (whole-field-only for short aliases) and owner keyword rules, generated from `tools/fixtures/merchant-*-2026-11-05.csv` by `tools/build-merchant-catalog.py`.
+- New categories ترفيه, رياضة, تعليم; «رعاية صحية» merged into «صحة» (schema 29 updates rows, rules, budgets and plans).
+
 ## Unreleased — 31 October 2026 · commitments, accounts, intro, monthly summary (redesign step 3 of 3)
 
 - Commitments: one card with what is left this month and a progress bar; everything detected (plans from messages, repeating payments, confirmations) behind one «محتاجة رأيك» strip that opens its own page; the kind filter is a segmented control; the calendar opens from «التقويم»; rows show the progress count and a due chip (lime when it is today or tomorrow).
