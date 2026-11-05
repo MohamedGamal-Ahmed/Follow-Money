@@ -274,7 +274,7 @@ public final class ReconciliationTest extends Instrumentation {
         ExpenseDb.Transaction row=db.latestInserted();
         assertEquals(15000,row.amountMinor);assertEquals("EGP",row.currency);
         assertEquals("expense",row.kind);assertEquals("تحويلات",row.category);
-        assertEquals("شخص ا******* م***",row.merchant);assertEquals(Long.valueOf(account),row.paymentSourceId);
+        assertEquals("تحويل لشخص ا******* م***",row.merchant);assertEquals(Long.valueOf(account),row.paymentSourceId);
         assertEquals(received-31000,row.when);assertEquals(1,db.sourceEvidence(row.id).size());
         assertFalse(db.addSms("Banque Misr",body,received));
         assertEquals(1,db.transactions().size());assertEquals(1,db.sourceEvidence(row.id).size());
