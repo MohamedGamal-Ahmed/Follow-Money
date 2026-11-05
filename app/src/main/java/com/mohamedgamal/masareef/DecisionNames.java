@@ -6,20 +6,68 @@ package com.mohamedgamal.masareef;
  * ExpenseParser.merchantName for the spelling and ExpenseParser.category for the category.
  */
 final class DecisionNames {
-    /** The name shown in the ledger: the merchant as written, else the other party, else what kind of movement it is. */
+    /** What a card movement with no readable merchant is called; never the bank that sent the message. */
+    static final String UNKNOWN_CARD_PURCHASE = "مشتريات بالكارت";
+    /** A bill paid by its number whose sender is no known service. */
+    static final String UNKNOWN_BILL = "فاتورة";
+
+    /**
+     * The name shown in the ledger: the merchant as written, else the other party (a transfer to a person reads
+     * «تحويل لأحمد علي»), else what kind of movement it is. The sender's label is never a name: a bank is not the merchant.
+     */
     static String merchant(java.util.Map<String, String> v, String kind, String label) {
-        if (v.get("merchant") != null) return ExpenseParser.merchantName(v.get("merchant"));
-        if (v.get("counterparty") != null) return v.get("counterparty");
-        if (v.get("description") != null) return v.get("description"); // an HSBC statement line describes itself
+        if (v.get("merchant") != null) {
+            // Money sent to someone is a transfer to that name as written: «كريم محمد» is not Careem, «سيف» is no pharmacy.
+            if (transfer(kind)) return transferTo(v.get("merchant"));
+            return ExpenseParser.merchantName(v.get("merchant"));
+        }
+        if (v.get("counterparty") != null) return transfer(kind) ? transferTo(v.get("counterparty")) : v.get("counterparty");
+        if (v.get("description") != null && !purchaseWording(v.get("description"))) return v.get("description"); // an HSBC statement line describes itself
         if (kind != null) switch (kind) {
             case "cash_withdrawal": return "سحب نقدي";
             case "instant_transfer_in": case "instant_transfer_out": return "تحويل لحظي";
             case "salary": return "راتب";
             case "service_topup": return "شحن رصيد";
             case "installment_payment": return "قسط";
+            case "bill_payment": return MerchantClassifier.category(label) != null ? MerchantClassifier.displayName(label) : UNKNOWN_BILL;
             default: break;
         }
-        return label;
+        if (transfer(kind)) return "تحويل"; // a transfer whose receiver the message does not name
+        if (knownSender(label)) return label; // a provider (TRU, WE …) is the party; a bank is not
+        return "in".equals(v.get("direction")) ? label : UNKNOWN_CARD_PURCHASE;
+    }
+
+    /** «تحويل لأحمد علي»: money sent to a person is recorded as a transfer to that person; a transfer never goes through the merchant catalog. */
+    static String transferTo(String name) {
+        name = name.trim().replaceAll("\\s+", " ");
+        if (!isPerson(name)) return name;
+        return name.codePointAt(0) >= 0x600 && name.codePointAt(0) <= 0x6FF ? "تحويل ل" + name : "تحويل إلى " + name;
+    }
+
+    /** A sender that is itself the party paid: a catalog merchant or an installment provider; never a bank. */
+    private static boolean knownSender(String label) {
+        if (label == null) return false;
+        String lower = label.trim().toLowerCase(java.util.Locale.ROOT);
+        return MerchantClassifier.category(label) != null || ExpenseParser.installmentProvider(lower) || lower.equals("tru") || lower.equals("ترو");
+    }
+
+    /** "Total POS Purchase": the bank's name for the kind of movement, not who was paid. */
+    private static boolean purchaseWording(String description) {
+        return description.toLowerCase(java.util.Locale.ROOT).matches(".*\\bpurchase\\b.*");
+    }
+
+    /** A name, not an InstaPay address, a phone number or an account tail. */
+    private static boolean isPerson(String counterparty) {
+        return counterparty.matches("(?s)\\p{L}[\\p{L} .'*-]*") && !counterparty.contains("@");
+    }
+
+    /**
+     * True when the app has to ask: a card purchase whose merchant could not be read. A transfer to a person, a fee, a cash
+     * withdrawal or a known kind of movement is never asked about.
+     */
+    static boolean merchantUnknown(java.util.Map<String, String> v, String kind, String direction, String label) {
+        return "out".equals(direction) && kind == null && !knownSender(label) && v.get("merchant") == null && v.get("counterparty") == null &&
+                (v.get("description") == null || purchaseWording(v.get("description"))) && v.get("self_kind") == null;
     }
 
     /**

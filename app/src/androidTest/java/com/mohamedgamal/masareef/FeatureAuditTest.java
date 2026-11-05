@@ -1385,7 +1385,7 @@ final class FeatureAuditTest {
         eq("أكل وشرب",db.transactionById(telda).category);eq("Kashier Butlers",db.transactionById(telda).merchant);
         ExpenseDb.Transaction row=db.transactionById(coffee);eq("مقاهي",row.category);eq("ESPRESSO LAB-CENTER ALMA",row.merchant);
         eq(8250L,row.amountMinor);eq("EGP",row.currency);eq(t,row.when);eq("expense",row.kind);
-        eq("رعاية صحية",db.transactionById(hospital).category);eq("تسوق",db.transactionById(edited).category);
+        eq("صحة",db.transactionById(hospital).category);eq("تسوق",db.transactionById(edited).category);
         eq("تحويلات",db.transactionById(transfer).category);eq("أقساط",db.transactionById(installment).category);
         eq("أكل وشرب",db.transactionById(manual).category);eq(count,db.transactions().size());
         db.addManual(t+6000,1500,"EGP","CLEOPATRA HOSPITAL","غير مصنف");long unknownManual=db.latestInserted().id;

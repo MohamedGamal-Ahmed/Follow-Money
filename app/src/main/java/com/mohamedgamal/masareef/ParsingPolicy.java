@@ -7,7 +7,7 @@ package com.mohamedgamal.masareef;
  * shared text helpers.
  */
 final class ParsingPolicy {
-    static final String POLICY_VERSION = "2026-10-29.3";
+    static final String POLICY_VERSION = "2026-11-05.1";
     static final String NORMALIZER_VERSION = "normalization-2";
     static final String CLASSIFIER_VERSION = "classification-4";
     /** Approved corpus v2 contract (tools/fixtures/parser-corpus-v2-draft.tsv, UTF-8/LF SHA-256 prefix). */
@@ -176,7 +176,7 @@ final class ParsingPolicy {
      * "Card purchase at X EGP 250.00"), or "Purchase EGP100 at X" / "14OCT26 X Purchase EGP 100" (HSBC). It opens the
      * message (after an HSBC date token at most), so an offer ("New offer: purchase GBP 50 at …") is not one.
      */
-    static final String PURCHASE_ALERT = "^\\s*(?:card purchase\\b|(?:\\d{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\d{2}\\s+[^\\n]{1,40}?\\s+)?purchase " +
+    static final String PURCHASE_ALERT = "^\\s*(?:card purchase\\b|(?:\\d{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\d{2}\\s+[^\\n]{1,40}?\\s+)?purchase (?:from [\\d-]*[*x]+-?\\d{3,4} )?" +
             CURRENCY_CODE + " ?\\d)";
     /** First-person completed verbs, as payment apps write them ("لقد استلمت", "لقد أرسلت", "استلمت", "دفعت"). Owner test, 22 Oct 2026. */
     static final String FIRST_PERSON_IN = "(?<!\\p{L})(?:لقد\\s+)?استلمت(?!\\p{L})";
@@ -221,7 +221,7 @@ final class ParsingPolicy {
     static final String CLAUSE_EQUIVALENCE = "\\brate\\b|\\bexchange\\b|\\bequivalent\\b|المعادل|المقيد|سعر (?:ال)?صرف";
 
     // Extraction vocabulary, matched against length-preserving folded text (lower case; أإآٱ->ا, ؤ->و, ئ->ي, ى->ي, ة->ه).
-    static final String EXTRACTOR_VERSION = "extraction-5";
+    static final String EXTRACTOR_VERSION = "extraction-6";
     /** How far before an amount a role word (balance, fee, limit, equivalent) may sit inside the same clause. */
     static final int ROLE_WINDOW_CHARS = 60;
     /** "شحن رصيدك" / "recharge balance" names what was topped up, not a stated balance. */
@@ -304,7 +304,9 @@ final class ParsingPolicy {
     static final String MOVEMENT_SERVICE_TOPUP = "(?<!\\p{L})شحن (?:ال)?(?:رصيد|انترنت|باق)|\\brecharge\\b|\\btop.?up\\b";
     static final String PAYER_NAMED = "(?<!\\p{L})(?:من|عن طريق|بواسطه|باستخدام|عبر)\\s+(?:ال)?(?:حساب|بطاق|محفظ|كارت|بنك)|" +
             "\\b(?:from|via|using|with) (?:your )?(?:account|card|wallet|bank)\\b|(?<!\\p{L})فوري(?!\\p{L})|\\bfawry\\b|محفظ|\\bwallet\\b|انستا ?باي|instapay";
-    static final String MOVEMENT_BILL = "فاتوره|\\bbill\\b|شحن رصيد|\\brecharge\\b";
+    /** A payment of a service line or bill by its number ("تم سداد 5 ج.م. … على الخط رقم 0212345678"): a bill, whoever sent it. */
+    static final String BILL_NUMBER_PAYMENT = "(?<!\\p{L})سداد(?!\\p{L}).{0,80}?(?<!\\p{L})(?:ال)?(?:خط|فاتوره|اشتراك)\\s+رقم\\s*\\d{5,}";
+    static final String MOVEMENT_BILL = "فاتوره|\\bbill\\b|شحن رصيد|\\brecharge\\b|" + BILL_NUMBER_PAYMENT;
     /** A fee charged for a withdrawal: with a fee principal, a bank fee rather than cash. */
     static final String WITHDRAWAL_FEE = "\\bwithdrawal fees?\\b|(?<!\\p{L})(?:رسوم|عموله) (?:ال)?سحب";
     /**
@@ -372,6 +374,15 @@ final class ParsingPolicy {
      */
     static final String STATEMENT_LINE = "^(?:from\\s+[^:\\n]{1,30}:\\s*)?\\d{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\d{2}\\s+" +
             "(\\p{L}[\\p{L} ]{1,40}?)\\s+(?:to|from)\\s+[\\d-]*[*x]+-?(\\d{3,4})(?!\\d)";
+    /**
+     * An HSBC statement-line purchase: "<date token> <name> Purchase [from <masked account>] <currency> <amount>". Unlike a
+     * transfer line, the text before "Purchase" is the merchant, processor prefix and all ("KASHIER*BUTLERS"); the
+     * masked account after "from" is the user's own. By shape, not by bank: any alert in this layout reads the same.
+     */
+    static final String PURCHASE_STATEMENT_LINE = "^(?:from\\s+[^:\\n]{1,30}:\\s*)?\\d{1,2}(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\d{2}\\s+" +
+            "(\\p{L}[\\p{L}\\p{N} *&.'-]{1,59}?)\\s+purchase\\b(?:\\s+from\\s+[\\d-]*[*x]+-?(\\d{3,4})(?!\\d))?\\s+" + CURRENCY_CODE + "\\s?\\d";
+    /** A purchase line's text before "Purchase" that is the bank's own terminal wording ("Total POS"), not a merchant. */
+    static final String GENERIC_PURCHASE_NAME = "^(?:total\\s+)?(?:pos|atm|card|online|ecommerce|e commerce)(?:\\s+(?:pos|card|online))?$";
     /** The product bought, named in parentheses after the purchase verb ("تم شراء … (Google One) بنجاح من خلال Google Play"). */
     static final String PURCHASED_PRODUCT = "(?:(?<!\\p{L})تم\\s+شراء|\\bpurchased\\b)[^()\\n]{0,60}\\(([^()\\n]{2,40})\\)";
     static final String COUNTERPARTY_NAME ="(?:حساب|account)\\s+[0-9x*#]{4,}\\s*[-–]\\s*(\\p{L}[\\p{L} .]{0,40}?)\\s*(?:[-–]|$)";

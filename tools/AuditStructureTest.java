@@ -189,6 +189,12 @@ public final class AuditStructureTest {
                     java.util.regex.Matcher values=java.util.regex.Pattern.compile("\\.update\\(\\s*\"transactions\"\\s*,\\s*(\\w+)").matcher(write);
                     if(values.find()) classification=java.util.regex.Pattern.compile("\\b"+values.group(1)+"\\.put\\(\\s*\"(?:category|needs_review)\"").matcher(method).find();
                     if(!classification)continue;
+                    // Schema 29 renames a category for every row, edited or not; it may not choose any other category.
+                    if("ExpenseDb.mergeHealthCategories".equals(file+"."+name)) {
+                        check(write.contains("SET category=? WHERE category=?") && method.contains("final String from = \"رعاية صحية\", to = \"صحة\""),
+                                "ExpenseDb.mergeHealthCategories may only rename رعاية صحية to صحة: "+write);
+                        continue;
+                    }
                     // REPAIR_VERSION 5 gives back a review the user already made: it may only clear needs_review on edited rows.
                     if("ExpenseDb.clearReviewedFlags".equals(file+"."+name)) {
                         check(!java.util.regex.Pattern.compile("\\.put\\(\\s*\"(?:category|kind|amount_minor)\"").matcher(method).find()

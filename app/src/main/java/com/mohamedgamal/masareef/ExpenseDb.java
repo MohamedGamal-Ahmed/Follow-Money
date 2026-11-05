@@ -30,7 +30,7 @@ public final class ExpenseDb extends SQLiteOpenHelper {
     private final ReimbursementUseCase reimbursementFlow = new ReimbursementUseCase(this);
     static final String DATABASE_NAME = "masareef.db";
     /** The schema a backup file records; a backup from a newer schema is refused on restore. */
-    static final int SCHEMA_VERSION = 28;
+    static final int SCHEMA_VERSION = 29;
     private long readRevision=-1;
     private final java.util.Map<String,Object> readCache=new java.util.HashMap<>();
 
@@ -322,6 +322,20 @@ public final class ExpenseDb extends SQLiteOpenHelper {
         if(oldVersion<26)ShadowStore.create(db);
         if(oldVersion<27)ShadowStore.ensureMissedColumns(db);
         if(oldVersion<28)CommitmentPayments.allowSplitPayments(db);
+        if(oldVersion<29)mergeHealthCategories(db);
+    }
+
+    /** «رعاية صحية» became «صحة» (29): rows, merchant rules, budgets and budget plans move; a budget in both adds up. */
+    static void mergeHealthCategories(SQLiteDatabase db) {
+        final String from = "رعاية صحية", to = "صحة";
+        db.execSQL("UPDATE transactions SET category=? WHERE category=?", new Object[]{to, from});
+        db.execSQL("UPDATE merchant_rules SET category=? WHERE category=?", new Object[]{to, from});
+        db.execSQL("UPDATE budgets SET amount_minor=amount_minor+COALESCE((SELECT o.amount_minor FROM budgets o WHERE o.month=budgets.month AND o.currency=budgets.currency AND o.category=?),0) WHERE category=? AND EXISTS (SELECT 1 FROM budgets o WHERE o.month=budgets.month AND o.currency=budgets.currency AND o.category=?)",
+                new Object[]{from, to, from});
+        db.execSQL("DELETE FROM budgets WHERE category=? AND EXISTS (SELECT 1 FROM budgets o WHERE o.month=budgets.month AND o.currency=budgets.currency AND o.category=?)", new Object[]{from, to});
+        db.execSQL("UPDATE budgets SET category=? WHERE category=?", new Object[]{to, from});
+        db.execSQL("UPDATE OR IGNORE budget_plan_categories SET category=? WHERE category=?", new Object[]{to, from});
+        db.execSQL("DELETE FROM budget_plan_categories WHERE category=?", new Object[]{from});
     }
 
     @Override public void onOpen(SQLiteDatabase db) {
