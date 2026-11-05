@@ -19,13 +19,13 @@ final class MerchantClassifier {
         }
     }
     /**
-     * Short or common-word aliases (owner decision, 5 Nov 2026): matched against the whole merchant field only. «حساب» is in
-     * every bank SMS; «WE», «NOON», «TOTAL» and the university acronyms are ordinary words and letters.
+     * Short or common-word aliases (owner decision, 5 Nov 2026): matched against the whole merchant field only. «WE», «NOON»,
+     * «TOTAL» and the university acronyms are ordinary words and letters. Arabic first names (كريم، مؤمن، جاد، سيف، حساب …)
+     * are never aliases, only full shop names («صيدليات سيف»): they are people's names.
      */
     private static final java.util.Set<String> WHOLE_ONLY = new java.util.HashSet<>();
     static {
-        for (String alias : new String[]{"حساب", "رعاية", "التعاون", "المختبر", "WE", "GAD", "SIP", "BIM", "2B", "NOON", "TOTAL", "SEIF",
-                "AUC", "GUC", "BUE", "MSA", "ASU", "PAUL"}) WHOLE_ONLY.add(textKey(alias));
+        for (String alias : new String[]{"WE", "GAD", "SIP", "BIM", "2B", "NOON", "TOTAL", "SEIF", "AUC", "GUC", "BUE", "MSA", "ASU", "PAUL"}) WHOLE_ONLY.add(textKey(alias));
     }
     // Specific services precede broader brands. Short aliases never accept branch suffixes.
     private static final Entry[] HAND = {
@@ -53,7 +53,7 @@ final class MerchantClassifier {
         new Entry("KFC", "أكل وشرب", false, "KFC", "كنتاكي"),
         new Entry("Talabat", "أكل وشرب", true, "Talabat", "طلبات"),
         new Entry("Uber", "مواصلات", true, "Uber", "أوبر", "اوبر"),
-        new Entry("Careem", "مواصلات", true, "Careem", "كريم"),
+        new Entry("Careem", "مواصلات", true, "Careem"),
         new Entry("IKEA", "تسوق", true, "IKEA", "إيكيا"),
         new Entry("Netflix", "اشتراكات", true, "Netflix", "نتفليكس"),
         new Entry("Spotify", "اشتراكات", true, "Spotify", "سبوتيفاي"),

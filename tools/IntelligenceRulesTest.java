@@ -57,6 +57,11 @@ public final class IntelligenceRulesTest {
         // 4. Money sent to a person is a transfer to that person, in «تحويلات», never asked about.
         ledger("Telda", "تم تحويل 200 ج.م. إلى أحمد علي", "تحويل لأحمد علي", "تحويلات", false);
         ledger("CIB", "Transfer of EGP 500.00 from your account ending 1234 to Ahmed Ali has been completed", "تحويل إلى Ahmed Ali", "تحويلات", false);
+        // A transfer never goes through the merchant catalog: a person named like a shop is still a person.
+        for (String person : new String[]{"كريم محمد", "مؤمن أحمد", "سيف", "جاد", "أم حسن", "رعاية", "كريم"})
+            ledger("Telda", "تم تحويل 200 ج.م. إلى " + person, "تحويل ل" + person, "تحويلات", false);
+        for (String person : new String[]{"Careem Ali", "Mo'men Ahmed", "Gad Hassan", "Seif Adel", "Noon Samir"})
+            ledger("CIB", "Transfer of EGP 500.00 from your account ending 1234 to " + person + " has been completed", "تحويل إلى " + person, "تحويلات", false);
         // A transfer that names nobody is still a transfer, not a card purchase, and is not asked about.
         ledger("BM-Online", "تم تحويل مبلغ 500.00 جنيه من حسابك رقم ***1234 الى احمد علي ***** بتاريخ 05/11/2026", "تحويل", "تحويلات", false);
         // A statement-line transfer keeps its own description.
@@ -88,15 +93,22 @@ public final class IntelligenceRulesTest {
         }
         same(MerchantClassifier.category("Hyper One"), "بقالة", "catalog merchant");
         same(MerchantClassifier.displayName("AMAZON"), "Amazon", "catalog display name");
-        same(MerchantClassifier.category("سيف"), "صحة", "catalog health category");
+        same(MerchantClassifier.category("صيدليات سيف"), "صحة", "catalog health category by its full Arabic name");
         // Short and common-word aliases: the whole merchant field only, never a prefix and never free text.
         for (String alias : new String[]{"NOON", "SEIF", "GAD", "BIM", "SIP", "AUC", "GUC", "BUE", "MSA", "ASU", "PAUL", "TOTAL"}) {
             same(MerchantClassifier.category(alias + " BRANCH 7 CAIRO") , null, alias + " followed by other words");
         }
         same(MerchantClassifier.category("NOON"), "تسوق", "NOON as the whole field");
         same(MerchantClassifier.category("SEIF"), "صحة", "SEIF as the whole field");
-        same(MerchantClassifier.category("حساب"), "صحة", "«حساب» as the whole merchant field is Hassab Labs (owner rule)");
+        same(MerchantClassifier.category("حساب"), null, "«حساب» alone is not a merchant");
         same(MerchantClassifier.category("حساب رقم 1234"), null, "«حساب» inside a bank phrase");
+        // Arabic first names are never merchants; only English spellings and full shop names are.
+        for (String person : new String[]{"كريم", "مؤمن", "جاد", "سيف", "حساب", "رعاية", "التعاون", "المختبر", "أم حسن", "ام حسن",
+                "كريم محمد", "مؤمن أحمد", "سيف علي"})
+            same(MerchantClassifier.category(person), null, person + " is a person's name, not a merchant");
+        same(MerchantClassifier.category("CAREEM"), "مواصلات", "CAREEM in English");
+        same(MerchantClassifier.category("معامل حساب"), "صحة", "full Arabic shop name");
+        same(MerchantClassifier.category("صيدليات رعاية"), "صحة", "full Arabic pharmacy name");
         // A longer alias still takes a branch suffix: "UBER" is short, "HYPER ONE" is not.
         same(MerchantClassifier.category("HYPER ONE MAADI"), "بقالة", "branch suffix on a long alias");
 

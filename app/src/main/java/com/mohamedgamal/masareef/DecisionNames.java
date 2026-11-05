@@ -17,8 +17,9 @@ final class DecisionNames {
      */
     static String merchant(java.util.Map<String, String> v, String kind, String label) {
         if (v.get("merchant") != null) {
-            String name = ExpenseParser.merchantName(v.get("merchant"));
-            return transfer(kind) ? transferTo(name) : name;
+            // Money sent to someone is a transfer to that name as written: «كريم محمد» is not Careem, «سيف» is no pharmacy.
+            if (transfer(kind)) return transferTo(v.get("merchant"));
+            return ExpenseParser.merchantName(v.get("merchant"));
         }
         if (v.get("counterparty") != null) return transfer(kind) ? transferTo(v.get("counterparty")) : v.get("counterparty");
         if (v.get("description") != null && !purchaseWording(v.get("description"))) return v.get("description"); // an HSBC statement line describes itself
@@ -35,9 +36,10 @@ final class DecisionNames {
         return "in".equals(v.get("direction")) ? label : UNKNOWN_CARD_PURCHASE;
     }
 
-    /** «تحويل لأحمد علي»: money sent to a person is recorded as a transfer to that person; a business keeps its own name. */
+    /** «تحويل لأحمد علي»: money sent to a person is recorded as a transfer to that person; a transfer never goes through the merchant catalog. */
     static String transferTo(String name) {
-        if (!isPerson(name) || MerchantClassifier.category(name) != null) return name;
+        name = name.trim().replaceAll("\\s+", " ");
+        if (!isPerson(name)) return name;
         return name.codePointAt(0) >= 0x600 && name.codePointAt(0) <= 0x6FF ? "تحويل ل" + name : "تحويل إلى " + name;
     }
 
